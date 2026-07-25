@@ -61,3 +61,33 @@ def password_reset_email(
         f"Atenciosamente,\n{PRODUCT_NAME}"
     )
     return RenderedEmail(subject=subject, html=_layout("Redefinição de senha", inner), text=text)
+
+
+def email_verification_email(
+    user_name: str, verify_url: str, expires_minutes: int
+) -> RenderedEmail:
+    """Email address confirmation after signup."""
+    subject = f"Confirme seu e-mail - {PRODUCT_NAME}"
+    safe_name = escape(user_name, quote=True)
+    safe_url = escape(verify_url, quote=True)
+    inner = f"""
+      <p>Olá {safe_name},</p>
+      <p>Bem-vindo(a) ao {PRODUCT_NAME}! Para ativar sua conta, confirme seu
+      endereço de e-mail clicando no botão abaixo:</p>
+      <p style="margin: 28px 0;">
+        <a href="{safe_url}"
+           style="background: #0ea5a4; color: #ffffff; text-decoration: none; padding: 12px 20px; border-radius: 9999px;">
+          Confirmar e-mail
+        </a>
+      </p>
+      <p>Este link é válido por {expires_minutes} minutos e pode ser usado apenas uma vez.</p>
+      <p>Se você não criou esta conta, ignore este e-mail.</p>
+    """
+    text = (
+        f"Olá {user_name},\n\n"
+        f"Bem-vindo(a) ao {PRODUCT_NAME}! Confirme seu e-mail em: {verify_url}\n\n"
+        f"Este link é válido por {expires_minutes} minutos e pode ser usado apenas uma vez.\n"
+        "Se você não criou esta conta, ignore este e-mail.\n\n"
+        f"Atenciosamente,\n{PRODUCT_NAME}"
+    )
+    return RenderedEmail(subject=subject, html=_layout("Confirme seu e-mail", inner), text=text)
