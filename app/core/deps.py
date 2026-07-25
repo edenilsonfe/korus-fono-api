@@ -96,8 +96,19 @@ async def get_optional_professional(
     return professional
 
 
-async def require_staff(
+async def require_verified_professional(
     professional: Professional = Depends(get_current_professional),
+) -> Professional:
+    if professional.email_verified_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="E-mail não verificado",
+        )
+    return professional
+
+
+async def require_staff(
+    professional: Professional = Depends(require_verified_professional),
 ) -> Professional:
     """Gate for platform-staff endpoints (announcements admin)."""
     if not professional.is_staff:
@@ -110,7 +121,7 @@ async def require_staff(
 
 async def get_patient_for_professional(
     patient_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ) -> Patient:
     result = await db.execute(

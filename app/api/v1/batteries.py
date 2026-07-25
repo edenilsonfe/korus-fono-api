@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_professional
+from app.core.deps import require_verified_professional
 from app.db.session import get_db
 from app.models.professional import Professional
 from app.schemas.battery import (
@@ -28,7 +28,7 @@ router = APIRouter(prefix="/batteries", tags=["batteries"])
 @router.post("", response_model=BatteryResponse, status_code=status.HTTP_201_CREATED)
 async def create_battery(
     data: BatteryCreate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = BatteryService(db)
@@ -42,7 +42,7 @@ async def list_batteries(
     status_filter: str | None = Query(None, alias="status"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = BatteryService(db)
@@ -60,7 +60,7 @@ async def list_batteries(
 @router.get("/{battery_id}", response_model=BatteryResponse)
 async def get_battery(
     battery_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = BatteryService(db)
@@ -71,7 +71,7 @@ async def get_battery(
 async def get_battery_subform_form(
     battery_id: UUID,
     subform_slug: str,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = BatteryService(db)
@@ -86,7 +86,7 @@ async def update_battery_subform(
     subform_slug: str,
     data: BatterySubformAnswersUpdate,
     finalize: bool = Query(False),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = BatteryService(db)
@@ -103,7 +103,7 @@ async def update_battery_subform(
 async def finalize_battery(
     battery_id: UUID,
     body: BatteryFinalizeRequest | None = None,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = BatteryService(db)
@@ -118,7 +118,7 @@ async def finalize_battery(
 @router.post("/{battery_id}/cancel", response_model=BatteryResponse)
 async def cancel_battery(
     battery_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = BatteryService(db)
@@ -129,7 +129,7 @@ async def cancel_battery(
 async def download_battery_report(
     battery_id: UUID,
     format: str = Query("pdf", pattern="^(pdf)$"),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = BatteryService(db)
@@ -154,7 +154,7 @@ async def list_battery_evidences(
     battery_id: UUID,
     subform: str | None = Query(None),
     item_id: str | None = Query(None, alias="itemId"),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = BatteryEvidenceService(db)
@@ -170,7 +170,7 @@ async def list_battery_evidences(
 async def create_battery_evidence_note(
     battery_id: UUID,
     data: BatteryEvidenceCreate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = BatteryEvidenceService(db)
@@ -188,7 +188,7 @@ async def create_battery_evidence_note(
 @router.post("/{battery_id}/evidences/upload")
 async def upload_battery_evidence(
     battery_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
     file: UploadFile = File(...),
     kind: str = Form(...),
@@ -210,7 +210,7 @@ async def upload_battery_evidence(
 async def delete_battery_evidence(
     battery_id: UUID,
     evidence_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = BatteryEvidenceService(db)
@@ -221,7 +221,7 @@ async def delete_battery_evidence(
 async def get_battery_evidence_url(
     battery_id: UUID,
     evidence_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = BatteryEvidenceService(db)
@@ -232,7 +232,7 @@ async def get_battery_evidence_url(
 @router.get("/{battery_id}/events")
 async def list_battery_events(
     battery_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = BatteryEvidenceService(db)
@@ -243,7 +243,7 @@ async def list_battery_events(
 async def create_battery_event(
     battery_id: UUID,
     data: BatteryEventCreate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = BatteryEvidenceService(db)
@@ -263,7 +263,7 @@ async def update_battery_event(
     battery_id: UUID,
     event_id: UUID,
     data: BatteryEventUpdate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = BatteryEvidenceService(db)
@@ -282,7 +282,7 @@ async def update_battery_event(
 async def delete_battery_event(
     battery_id: UUID,
     event_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = BatteryEvidenceService(db)

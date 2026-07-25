@@ -1,6 +1,8 @@
-"""Service-level tests for email verification (no HTTP wiring)."""
+"""Service + HTTP tests for email verification."""
 
 from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
@@ -16,6 +18,11 @@ from app.services.email_verification import (
     verify_email_with_token,
 )
 from app.utils.token_hash import hash_token
+
+# JWT-shaped values must not appear in auth JSON.
+import re
+
+_JWT_RE = re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
 
 
 @compiles(JSONB, "sqlite")
@@ -39,6 +46,12 @@ class _FakeRedis:
         self._data[key] = value
 
 
+async def _unverify(db_session, professional):
+    professional.email_verified_at = None
+    await db_session.commit()
+    await db_session.refresh(professional)
+
+
 def test_email_verification_email_template_copy():
     rendered = email_verification_email(
         user_name="Ana",
@@ -55,6 +68,7 @@ def test_email_verification_email_template_copy():
 
 @pytest.mark.asyncio
 async def test_request_email_verification_creates_token(db_session, professional):
+    await _unverify(db_session, professional)
     assert professional.email_verified_at is None
 
     raw_token = await request_email_verification(db_session, professional)
@@ -74,6 +88,7 @@ async def test_request_email_verification_creates_token(db_session, professional
 
 @pytest.mark.asyncio
 async def test_request_email_verification_cooldown_blocks_second(db_session, professional):
+    await _unverify(db_session, professional)
     fake_redis = _FakeRedis()
 
     first = await request_email_verification(
@@ -89,6 +104,7 @@ async def test_request_email_verification_cooldown_blocks_second(db_session, pro
 
 @pytest.mark.asyncio
 async def test_request_email_verification_force_bypasses_cooldown(db_session, professional):
+    await _unverify(db_session, professional)
     fake_redis = _FakeRedis()
 
     first = await request_email_verification(
@@ -105,6 +121,7 @@ async def test_request_email_verification_force_bypasses_cooldown(db_session, pr
 
 @pytest.mark.asyncio
 async def test_verify_email_with_token_success(db_session, professional):
+    await _unverify(db_session, professional)
     raw_token = await request_email_verification(db_session, professional)
     assert raw_token
 
@@ -135,6 +152,7 @@ async def test_verify_email_with_invalid_token_raises_400(db_session):
 
 @pytest.mark.asyncio
 async def test_verify_email_idempotent_already_verified(db_session, professional):
+    await _unverify(db_session, professional)
     raw_token = await request_email_verification(db_session, professional)
     assert raw_token
 
@@ -153,6 +171,7 @@ async def test_verify_email_idempotent_already_verified(db_session, professional
 
 @pytest.mark.asyncio
 async def test_verify_email_expired_token_raises_400_when_unverified(db_session, professional):
+    await _unverify(db_session, professional)
     raw_token = await request_email_verification(db_session, professional)
     assert raw_token
 
@@ -187,3 +206,140 @@ def test_send_email_verification_email_sync_never_logs_token_when_disabled(caplo
     log_text = caplog.text
     assert raw_token not in log_text
     assert "token=" not in log_text
+
+
+# --- HTTP flow ---
+
+
+@pytest.mark.asyncio
+async def test_http_register_me_gate_verify_flow(api_client, monkeypatch):
+    monkeypatch.setattr("app.api.v1.auth.enforce_register_rate_limit", lambda *_a, **_k: None)
+    monkeypatch.setattr("app.api.v1.auth.enforce_login_rate_limit", lambda *_a, **_k: None)
+
+    send_mock = MagicMock()
+    monkeypatch.setattr("app.api.v1.auth.send_email_verification_email_task", send_mock)
+
+    email = f"verify-{uuid4().hex[:8]}@test.com"
+    password = "securepass123"
+    reg = await api_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": password,
+            "name": "Verify User",
+            "specialtyKey": "fono",
+        },
+    )
+    assert reg.status_code == 201
+    assert send_mock.called
+
+    me = await api_client.get("/api/v1/me")
+    assert me.status_code == 200
+    assert me.json()["emailVerified"] is False
+
+    protocols = await api_client.get("/api/v1/protocols")
+    assert protocols.status_code == 403
+    assert protocols.json()["detail"] == "E-mail não verificado"
+
+    patients = await api_client.get("/api/v1/patients")
+    assert patients.status_code == 403
+    assert patients.json()["detail"] == "E-mail não verificado"
+
+    raw_token = send_mock.call_args.args[2]
+
+    verify = await api_client.post("/api/v1/auth/verify-email", json={"token": raw_token})
+    assert verify.status_code == 200
+
+    me_ok = await api_client.get("/api/v1/me")
+    assert me_ok.status_code == 200
+    assert me_ok.json()["emailVerified"] is True
+
+    protocols_ok = await api_client.get("/api/v1/protocols")
+    assert protocols_ok.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_http_verify_invalid_token_400(api_client):
+    response = await api_client.post(
+        "/api/v1/auth/verify-email",
+        json={"token": "token-invalido"},
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Token inválido ou expirado"
+
+
+@pytest.mark.asyncio
+async def test_http_resend_verification(api_client, monkeypatch):
+    monkeypatch.setattr("app.api.v1.auth.enforce_register_rate_limit", lambda *_a, **_k: None)
+
+    send_mock = MagicMock()
+    monkeypatch.setattr("app.api.v1.auth.send_email_verification_email_task", send_mock)
+
+    email = f"resend-{uuid4().hex[:8]}@test.com"
+    reg = await api_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "securepass123",
+            "name": "Resend User",
+            "specialtyKey": "fono",
+        },
+    )
+    assert reg.status_code == 201
+    assert send_mock.call_count == 1
+
+    # Bypass Redis cooldown so resend creates a new token
+    async def _request_force(db, professional, *, redis_client=None, force=False):
+        from app.services import email_verification as ev
+
+        return await ev.request_email_verification(db, professional, redis_client=None, force=True)
+
+    monkeypatch.setattr("app.api.v1.auth.request_email_verification", _request_force)
+
+    resend = await api_client.post("/api/v1/auth/resend-verification")
+    assert resend.status_code == 200
+    assert send_mock.call_count == 2
+    assert "message" in resend.json()
+
+
+@pytest.mark.asyncio
+async def test_http_login_unverified_triggers_send(api_client, monkeypatch):
+    monkeypatch.setattr("app.api.v1.auth.enforce_register_rate_limit", lambda *_a, **_k: None)
+    monkeypatch.setattr("app.api.v1.auth.enforce_login_rate_limit", lambda *_a, **_k: None)
+
+    send_mock = MagicMock()
+    monkeypatch.setattr("app.api.v1.auth.send_email_verification_email_task", send_mock)
+
+    email = f"login-uv-{uuid4().hex[:8]}@test.com"
+    password = "securepass123"
+    reg = await api_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": password,
+            "name": "Login Unverified",
+            "specialtyKey": "fono",
+        },
+    )
+    assert reg.status_code == 201
+    assert send_mock.call_count == 1
+
+    # Clear cookies so login issues a fresh session; force bypass cooldown for send path
+    api_client.cookies.clear()
+
+    async def _request_force(db, professional, *, redis_client=None, force=False):
+        from app.services import email_verification as ev
+
+        return await ev.request_email_verification(db, professional, redis_client=None, force=True)
+
+    monkeypatch.setattr("app.api.v1.auth.request_email_verification", _request_force)
+
+    login = await api_client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password},
+    )
+    assert login.status_code == 200
+    assert send_mock.call_count == 2
+    data = login.json()
+    assert data.get("accessToken", "") == ""
+    assert _JWT_RE.search(str(data)) is None

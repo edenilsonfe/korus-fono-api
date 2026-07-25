@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_professional
+from app.core.deps import get_current_professional, require_verified_professional
 from app.core.specialty_catalog import specialty_label
 from app.db.session import get_db
 from app.models.professional import Professional
@@ -22,6 +22,7 @@ def _to_response(p: Professional) -> ProfessionalResponse:
         cpf=p.cpf or "",
         avatar_color=p.avatar_color,
         is_staff=p.is_staff,
+        email_verified=p.email_verified_at is not None,
     )
 
 
@@ -33,7 +34,7 @@ async def get_me(professional: Professional = Depends(get_current_professional))
 @router.patch("", response_model=ProfessionalResponse)
 async def update_me(
     body: ProfessionalUpdate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     data = body.model_dump(exclude_unset=True)

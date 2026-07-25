@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_professional
+from app.core.deps import require_verified_professional
 from app.db.session import get_db
 from app.models.professional import Professional
 from app.schemas.resource import (
@@ -40,7 +40,7 @@ async def list_resources(
     q: str | None = Query(None),
     category: str | None = Query(None),
     scope: ResourceScope = Query("all"),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = ResourceService(db)
@@ -53,7 +53,7 @@ async def list_resources(
 @router.get("/{resource_id}/download-url", response_model=ResourceDownloadUrl)
 async def get_resource_download_url(
     resource_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = ResourceService(db)
@@ -83,7 +83,7 @@ async def create_personal_resource(
     related_protocol: str | None = Form(None),
     difficulty: str | None = Form(None),
     shared_with_platform: bool = Form(False),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     body = ResourceCreateBody(
@@ -123,7 +123,7 @@ async def update_personal_resource(
     related_protocol: str | None = Form(None),
     difficulty: str | None = Form(None),
     shared_with_platform: bool | None = Form(None),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     payload_data: dict = {}
@@ -163,7 +163,7 @@ async def update_personal_resource(
 @router.delete("/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_personal_resource(
     resource_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = ResourceService(db)

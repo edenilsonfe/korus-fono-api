@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_professional, get_patient_for_professional
+from app.core.deps import get_patient_for_professional, require_verified_professional
 from app.core.utils import goal_status_from_progress, utcnow
 from app.db.session import get_db
 from app.models.assessment import Assessment, ASSESSMENT_STATUS_COMPLETED, ProtocolCatalog
@@ -67,7 +67,7 @@ router = APIRouter(tags=["clinical"])
 
 @router.get("/protocols", response_model=list[ProtocolResponse])
 async def list_protocols(
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -155,7 +155,7 @@ async def list_assessments_global(
     q: str | None = None,
     page: int = Query(1, ge=1),
     limit: int = Query(30, ge=1, le=100),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     if period and period.strip().lower() not in {"week", "month", "all"}:
@@ -259,7 +259,7 @@ async def list_assessments_global(
 )
 async def cancel_assessment(
     assessment_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -297,7 +297,7 @@ patient_router = APIRouter(prefix="/patients/{patient_id}", tags=["clinical"])
 @patient_router.get("/assessments", response_model=list[AssessmentResponse])
 async def list_patient_assessments(
     patient_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     await get_patient_for_professional(patient_id, professional, db)
@@ -317,7 +317,7 @@ async def list_patient_assessments(
 async def create_assessment(
     patient_id: UUID,
     body: AssessmentCreate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     await get_patient_for_professional(patient_id, professional, db)
@@ -392,7 +392,7 @@ async def create_assessment(
 @patient_router.get("/goals", response_model=list[GoalResponse])
 async def list_goals(
     patient_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     await get_patient_for_professional(patient_id, professional, db)
@@ -415,7 +415,7 @@ async def list_goals(
 async def create_goal(
     patient_id: UUID,
     body: GoalCreate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     await get_patient_for_professional(patient_id, professional, db)
@@ -448,7 +448,7 @@ async def update_goal(
     patient_id: UUID,
     goal_id: UUID,
     body: GoalUpdate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     await get_patient_for_professional(patient_id, professional, db)
@@ -486,7 +486,7 @@ async def update_goal(
 @patient_router.get("/clinical-domains")
 async def get_clinical_domains(
     patient_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     await get_patient_for_professional(patient_id, professional, db)
@@ -497,7 +497,7 @@ async def get_clinical_domains(
 async def analytics_development(
     patient_id: UUID | None = Query(None),
     period: str = Query("6m"),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     if period not in ANALYTICS_PERIODS:

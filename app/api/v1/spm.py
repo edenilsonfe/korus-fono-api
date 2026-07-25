@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_professional, get_patient_for_professional
+from app.core.deps import get_patient_for_professional, require_verified_professional
 from app.db.session import get_db
 from app.models.professional import Professional
 from app.schemas.common import PaginatedResponse
@@ -32,7 +32,7 @@ router = APIRouter(prefix="/spm", tags=["spm"])
 
 
 @router.get("/catalog/subforms", response_model=list[SpmCatalogSubform])
-async def list_spm_subforms(_professional: Professional = Depends(get_current_professional)):
+async def list_spm_subforms(_professional: Professional = Depends(require_verified_professional)):
     package = get_spm_content_package()
     return [SpmCatalogSubform(**entry) for entry in package.list_subforms()]
 
@@ -43,7 +43,7 @@ async def list_spm_subforms(_professional: Professional = Depends(get_current_pr
 )
 async def preview_spm_subform(
     subform_slug: str,
-    _professional: Professional = Depends(get_current_professional),
+    _professional: Professional = Depends(require_verified_professional),
 ):
     package = get_spm_content_package()
     try:
@@ -66,7 +66,7 @@ async def preview_spm_subform(
 @router.get("/subforms/{subform_slug}/form", response_model=SpmSubformFormResponse)
 async def get_spm_subform_form(
     subform_slug: str,
-    _professional: Professional = Depends(get_current_professional),
+    _professional: Professional = Depends(require_verified_professional),
 ):
     package = get_spm_content_package()
     try:
@@ -88,7 +88,7 @@ async def get_spm_subform_form(
 @router.get("/suggest-scope", response_model=SpmSuggestScopeResponse)
 async def suggest_spm_scope(
     patient_id: UUID = Query(...),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     await get_patient_for_professional(patient_id, professional, db)
@@ -103,7 +103,7 @@ async def list_spm_batteries(
     status: str | None = None,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     if patient_id:
@@ -122,7 +122,7 @@ async def list_spm_batteries(
 @router.post("/batteries", response_model=SpmBatteryResponse, status_code=status.HTTP_201_CREATED)
 async def create_spm_battery(
     data: SpmBatteryCreate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     await get_patient_for_professional(data.patient_id, professional, db)
@@ -133,7 +133,7 @@ async def create_spm_battery(
 @router.get("/batteries/{battery_id}", response_model=SpmBatteryResponse)
 async def get_spm_battery(
     battery_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = SpmBatteryService(db)
@@ -144,7 +144,7 @@ async def get_spm_battery(
 async def update_spm_battery_scope(
     battery_id: UUID,
     data: SpmBatteryScopeUpdate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = SpmBatteryService(db)
@@ -157,7 +157,7 @@ async def update_spm_battery_scope(
 async def update_spm_clinical_report(
     battery_id: UUID,
     data: SpmClinicalReportUpdate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = SpmBatteryService(db)
@@ -175,7 +175,7 @@ async def update_spm_clinical_subform(
     subform_slug: str,
     data: SpmSubformAnswersUpdate,
     finalize: bool = Query(False),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = SpmBatteryService(db)
@@ -196,7 +196,7 @@ async def create_spm_informant_link(
     battery_id: UUID,
     subform_slug: str,
     data: SpmInformantLinkCreate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = SpmBatteryService(db)
@@ -216,7 +216,7 @@ async def send_spm_informant_link_whatsapp(
     battery_id: UUID,
     subform_slug: str,
     data: SpmInformantLinkWhatsAppSend,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = SpmBatteryService(db)
@@ -235,7 +235,7 @@ async def send_spm_informant_link_whatsapp(
 async def revoke_spm_informant_link(
     battery_id: UUID,
     subform_slug: str,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = SpmBatteryService(db)
@@ -247,7 +247,7 @@ async def revoke_spm_informant_link(
 @router.post("/batteries/{battery_id}/finalize", response_model=SpmBatteryResponse)
 async def finalize_spm_battery(
     battery_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = SpmBatteryService(db)
@@ -257,7 +257,7 @@ async def finalize_spm_battery(
 @router.post("/batteries/{battery_id}/cancel", response_model=SpmBatteryResponse)
 async def cancel_spm_battery(
     battery_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = SpmBatteryService(db)
@@ -268,7 +268,7 @@ async def cancel_spm_battery(
 async def score_spm_subform(
     subform_slug: str,
     body: SpmSubformScoreRequest,
-    _professional: Professional = Depends(get_current_professional),
+    _professional: Professional = Depends(require_verified_professional),
 ):
     package = get_spm_content_package()
     try:
@@ -281,7 +281,7 @@ async def score_spm_subform(
 @router.post("/score-battery")
 async def score_spm_battery(
     body: SpmBatteryScoreRequest,
-    _professional: Professional = Depends(get_current_professional),
+    _professional: Professional = Depends(require_verified_professional),
 ):
     package = get_spm_content_package()
     subform_scores = []

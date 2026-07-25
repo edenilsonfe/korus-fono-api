@@ -1,6 +1,6 @@
 import os
 import uuid
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 os.environ.setdefault("JWT_SECRET", "test-secret-for-pytest-only-not-for-prod")
 os.environ.setdefault("AUTH_RATE_LIMIT_FAIL_CLOSED", "false")
@@ -76,6 +76,7 @@ async def professional(db_session: AsyncSession):
         specialty="Fonoaudiologia",
         council="CREFITO",
         phone="11999990000",
+        email_verified_at=datetime.now(UTC),
     )
     db_session.add(pro)
     await db_session.commit()

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_professional, get_patient_for_professional
+from app.core.deps import get_patient_for_professional, require_verified_professional
 from app.core.utils import utcnow
 from app.db.session import get_db
 from app.models.evolution import Evolution
@@ -23,7 +23,7 @@ async def list_sessions_global(
     q: str | None = None,
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     query = (
@@ -59,7 +59,7 @@ patient_router = APIRouter(prefix="/patients/{patient_id}/sessions", tags=["sess
 @patient_router.get("")
 async def list_patient_sessions(
     patient_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(patient_id, professional, db)
@@ -84,7 +84,7 @@ async def list_patient_sessions(
 async def create_session(
     patient_id: UUID,
     body: SessionCreate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(patient_id, professional, db)
@@ -116,7 +116,7 @@ async def update_session(
     patient_id: UUID,
     session_id: UUID,
     body: SessionUpdate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     await get_patient_for_professional(patient_id, professional, db)
@@ -134,7 +134,7 @@ async def update_session(
 async def list_session_evolutions(
     patient_id: UUID,
     session_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     await get_patient_for_professional(patient_id, professional, db)
