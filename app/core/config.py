@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     email_sending_enabled: bool = False
     password_token_expire_minutes: int = 60
     password_reset_cooldown_seconds: int = 60
+    email_verification_expire_minutes: int = 1440
+    email_verification_cooldown_seconds: int = 60
 
     # Vazio = AWS S3 real. Dev local (docker-compose / .env): http://localhost:9000 (MinIO).
     s3_endpoint: str = ""
