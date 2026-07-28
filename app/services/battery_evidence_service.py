@@ -18,6 +18,7 @@ from app.services.attachment_upload import (
     assert_declared_matches_sniff,
     normalize_content_type,
     sanitize_filename,
+    sniff_content_type,
 )
 from app.services.storage import storage_service
 
@@ -167,6 +168,10 @@ class BatteryEvidenceService:
 
         content_type = normalize_content_type(file.content_type)
         allowed = EVIDENCE_CONTENT_TYPES.get(kind, set())
+        if not content_type:
+            sniffed = sniff_content_type(body)
+            if sniffed and sniffed in allowed:
+                content_type = sniffed
         if allowed and content_type not in allowed:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

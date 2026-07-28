@@ -32,7 +32,6 @@ CLIENT_SCORED_PROTOCOLS: frozenset[str] = frozenset(
         "snap-iv",
         "rastreio-tdah",
         "rastreio-tea",
-        "asrs",
         "dislexia",
         "sdq",
         "vanderbilt",

@@ -373,17 +373,16 @@ class BatteryService:
             raise HTTPException(status_code=400, detail="Bateria já finalizada ou cancelada")
 
         package = self._get_package(instrument_slug_for_protocol(record.protocol_id))
-        pending_required = [
-            sf.subform_slug
+        completed_modules = [
+            sf
             for sf in record.battery_subforms
-            if sf.required
-            and sf.status != BATTERY_SUBFORM_STATUS_COMPLETED
+            if sf.status == BATTERY_SUBFORM_STATUS_COMPLETED
             and not package.is_legacy_module(sf.subform_slug)
         ]
-        if pending_required:
+        if not completed_modules:
             raise HTTPException(
                 status_code=400,
-                detail=f"Módulos pendentes: {', '.join(pending_required)}",
+                detail="Conclua ao menos um módulo antes de finalizar",
             )
 
         subform_scores = [sf.scores for sf in record.battery_subforms if sf.scores]

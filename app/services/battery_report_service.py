@@ -76,7 +76,11 @@ def export_battery_pdf(battery: BatteryResponse, package: InstrumentContentPacka
             if not isinstance(domain_score, dict):
                 continue
             title = domain_score.get("title", slug)
-            level = domain_score.get("level", "—")
+            level = (
+                domain_score.get("level_label")
+                or domain_score.get("levelLabel")
+                or domain_score.get("level", "—")
+            )
             delays = domain_score.get("delay_count") or domain_score.get("delays") or 0
             line = f"• {title}: {level} — {delays} atraso(s)"
             if domain_score.get("standard_score") is not None:
@@ -109,10 +113,15 @@ def export_battery_pdf(battery: BatteryResponse, package: InstrumentContentPacka
                         )
                     )
             if domain_score.get("module_kind") == "observational":
-                level = domain_score.get("level", "unknown")
+                level_label = (
+                    domain_score.get("level_label")
+                    or domain_score.get("levelLabel")
+                    or domain_score.get("label")
+                    or domain_score.get("level", "—")
+                )
                 story.append(
                     Paragraph(
-                        f"• Classificação: {level} — {domain_score.get('percentage', 0)}%",
+                        f"• Classificação: {level_label} — {domain_score.get('percentage', 0)}%",
                         styles["Normal"],
                     )
                 )

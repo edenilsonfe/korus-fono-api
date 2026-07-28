@@ -59,6 +59,9 @@ def test_amiofe_mobilidade_scale_6():
     result = score_observational_module(package, "mobilidade-lingua", answers)
     assert result["points"] == 36
     assert result["level"] == "expected"
+    assert result["level_label"]
+    assert result["level_label"] != "expected"
+    assert "(" not in result["summary"] or "expected" not in result["summary"]
 
 
 def test_amiofe_synthesize_etamiofe():

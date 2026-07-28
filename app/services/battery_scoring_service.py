@@ -284,19 +284,33 @@ def score_fluency_module(
     }
 
 
-def _observational_level(percentage: float, interpretations: list[dict[str, Any]]) -> str:
+def _observational_band(
+    percentage: float, interpretations: list[dict[str, Any]]
+) -> dict[str, str]:
     for band in interpretations:
         if "min_percentage" in band:
             min_pct = float(band.get("min_percentage", 0))
             max_pct = float(band.get("max_percentage", 100))
             if min_pct <= percentage <= max_pct:
-                return str(band.get("level", "unknown"))
+                level = str(band.get("level", "unknown"))
+                return {
+                    "level": level,
+                    "label": str(band.get("label") or level),
+                }
         elif "min" in band and "max" in band:
             min_val = float(band["min"])
             max_val = float(band["max"])
             if min_val <= percentage <= max_val:
-                return str(band.get("level", "unknown"))
-    return "unknown"
+                level = str(band.get("level", "unknown"))
+                return {
+                    "level": level,
+                    "label": str(band.get("label") or level),
+                }
+    return {"level": "unknown", "label": "—"}
+
+
+def _observational_level(percentage: float, interpretations: list[dict[str, Any]]) -> str:
+    return _observational_band(percentage, interpretations)["level"]
 
 
 def _lookup_norm_table(table: list[dict], value: float, key: str, val_key: str) -> int | None:
@@ -586,13 +600,20 @@ def score_adl2_module(
     return result
 
 
-def _developmental_level(delay_count: int, interpretations: list[dict[str, Any]]) -> str:
+def _developmental_band(
+    delay_count: int, interpretations: list[dict[str, Any]]
+) -> dict[str, str]:
     sorted_bands = sorted(interpretations, key=lambda b: int(b.get("max_delays", 999)))
     for band in sorted_bands:
         max_delays = int(band.get("max_delays", 999))
         if delay_count <= max_delays:
-            return str(band.get("level", "unknown"))
-    return "unknown"
+            level = str(band.get("level", "unknown"))
+            return {"level": level, "label": str(band.get("label") or level)}
+    return {"level": "unknown", "label": "—"}
+
+
+def _developmental_level(delay_count: int, interpretations: list[dict[str, Any]]) -> str:
+    return _developmental_band(delay_count, interpretations)["level"]
 
 
 def _resolve_scale_direction(
@@ -839,12 +860,14 @@ def score_observational_module(
     interpretations = package.scoring.get("interpretations", [])
     if interpretations and "min_percentage" not in interpretations[0] and "min" in interpretations[0]:
         max_band = max(float(b.get("max", 0)) for b in interpretations)
-        level = _observational_level(
+        band = _observational_band(
             percentage if max_band <= 100 else float(points),
             interpretations,
         )
     else:
-        level = _observational_level(percentage, interpretations)
+        band = _observational_band(percentage, interpretations)
+    level = band["level"]
+    level_label = band["label"]
 
     return {
         "module_kind": "observational",
@@ -853,6 +876,7 @@ def score_observational_module(
         "title": mod.get("title", module_slug),
         "percentage": percentage,
         "level": level,
+        "level_label": level_label,
         "points": points,
         "possible_points": possible_points,
         "sum": points,
@@ -863,7 +887,7 @@ def score_observational_module(
         "strengths": strengths,
         "attention_items": attention_items,
         "items": item_details,
-        "summary": f"{mod.get('title', module_slug)}: {percentage}% ({level})",
+        "summary": f"{mod.get('title', module_slug)}: {percentage}% ({level_label})",
     }
 
 
@@ -942,7 +966,9 @@ def score_developmental_module(
 
     delay_count = len(delays)
     interpretations = package.scoring.get("interpretations", [])
-    level = _developmental_level(delay_count, interpretations)
+    band = _developmental_band(delay_count, interpretations)
+    level = band["level"]
+    level_label = band["label"]
     total_scored = passes + fails
     pass_rate = round((passes / total_scored) * 100, 1) if total_scored else 0.0
 
@@ -964,13 +990,14 @@ def score_developmental_module(
         "delay_count": delay_count,
         "delays": delays,
         "level": level,
+        "level_label": level_label,
         "percentage": pass_rate,
         "unanswered": unanswered,
         "items": item_details,
         "session": session_meta,
         "summary": (
             f"{mod.get('title', module_slug)}: {passes}/{total_scored} passou, "
-            f"{delay_count} atraso(s) ({level})"
+            f"{delay_count} atraso(s) ({level_label})"
         ),
     }
 

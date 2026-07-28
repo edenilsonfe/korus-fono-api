@@ -109,6 +109,29 @@ async def test_upload_over_limit_returns_413_and_skips_storage(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_upload_infers_content_type_when_empty(monkeypatch):
+    monkeypatch.setitem(EVIDENCE_SIZE_LIMITS, "photo", 64)
+    service, _db, _battery = _make_service()
+    file = _ChunkedUploadFile(_JPEG, content_type="", filename="photo.jpg")
+
+    with patch("app.services.battery_evidence_service.storage_service") as storage:
+        storage.make_key.return_value = "patients/key/photo.jpg"
+        storage.upload = AsyncMock()
+        storage.presigned_url = AsyncMock(return_value="https://example.com/photo.jpg")
+
+        result = await service.upload_evidence(
+            uuid4(),
+            professional_id=uuid4(),
+            file=file,
+            kind="photo",
+        )
+
+        assert result["kind"] == "photo"
+        storage.upload.assert_awaited_once()
+        assert storage.upload.await_args.args[2] == "image/jpeg"
+
+
+@pytest.mark.asyncio
 async def test_upload_rejects_svg_content_type():
     service, _db, _battery = _make_service()
     file = _ChunkedUploadFile(

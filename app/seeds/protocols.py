@@ -347,19 +347,6 @@ PROTOCOLS = [
         ],
     },
     {
-        "id": "asrs",
-        "name": "ASRS-5",
-        "full_name": "Adult ADHD Self-Report Scale — versão reduzida",
-        "description": "Escala de autoavaliação de sintomas de TDAH para adultos.",
-        "age_range": "Adultos",
-        "field_templates": [
-            {"key": "itens_positivos", "label": "Itens positivos (≥2)"},
-            {"key": "score_total", "label": "Score total"},
-            {"key": "resultado", "label": "Resultado"},
-            {"key": "conduta", "label": "Conduta"},
-        ],
-    },
-    {
         "id": "dislexia",
         "name": "Rastreio Dislexia",
         "full_name": "Rastreio de Dislexia",
