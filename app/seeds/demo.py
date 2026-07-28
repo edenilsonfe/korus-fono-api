@@ -1,7 +1,7 @@
 """Development seed — creates demo professional and sample patients."""
 
 import asyncio
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import select
 
@@ -46,7 +46,12 @@ async def seed_demo(session) -> None:
     result = await session.execute(
         select(Professional).where(Professional.email == "admin@admin.com")
     )
-    if result.scalar_one_or_none():
+    existing = result.scalar_one_or_none()
+    if existing is not None:
+        # ponytail: demo local must stay usable when email verification is on
+        if existing.email_verified_at is None:
+            existing.email_verified_at = datetime.now(UTC)
+            await session.flush()
         return
 
     professional = Professional(
@@ -60,6 +65,7 @@ async def seed_demo(session) -> None:
         avatar_color="oklch(0.58 0.12 205)",
         is_staff=True,
         subscription_status="active",
+        email_verified_at=datetime.now(UTC),
     )
     session.add(professional)
     await session.flush()

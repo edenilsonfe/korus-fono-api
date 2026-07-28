@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import set_committed_value
 
-from app.core.deps import get_current_professional, get_patient_for_professional
+from app.core.deps import get_patient_for_professional, require_verified_professional
 from app.core.utils import utcnow
 from app.db.session import get_db
 from app.models.ai import AIJob, AIReport, ChatMessage, Conversation
@@ -81,7 +81,7 @@ async def _get_owned_conversation(
 @router.get("/jobs/{job_id}", response_model=AIJobResponse)
 async def poll_job(
     job_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     job = await get_job(db, job_id, professional.id)
@@ -100,7 +100,7 @@ async def poll_job(
 async def list_reports(
     patient_id: UUID | None = Query(None, alias="patientId"),
     report_type: str | None = Query(None, alias="type"),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     from app.models.patient import Patient
@@ -135,7 +135,7 @@ async def list_reports(
 async def update_report(
     report_id: UUID,
     body: AIReportUpdate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     from app.models.patient import Patient
@@ -172,7 +172,7 @@ async def update_report(
 async def export_report_file(
     report_id: UUID,
     format: str = Query(..., pattern="^(pdf|docx|txt|md)$"),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     from app.models.patient import Patient
@@ -203,7 +203,7 @@ async def export_report_file(
 @router.post("/reports", response_model=AIReportResponse, status_code=status.HTTP_201_CREATED)
 async def create_report(
     body: AIReportCreate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     enforce_assistant_rate_limit(str(professional.id))
@@ -262,7 +262,7 @@ async def create_report(
 
 @router.get("/conversations", response_model=list[ConversationResponse])
 async def list_conversations(
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -277,7 +277,7 @@ async def list_conversations(
 @router.get("/conversations/{conversation_id}", response_model=ConversationResponse)
 async def get_conversation(
     conversation_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     conv = await _get_owned_conversation(db, conversation_id, professional)
@@ -287,7 +287,7 @@ async def get_conversation(
 @router.post("/conversations", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED)
 async def create_conversation(
     body: ConversationCreate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     patient_id = UUID(body.patient_id) if body.patient_id else None
@@ -309,7 +309,7 @@ async def create_conversation(
 async def update_conversation(
     conversation_id: UUID,
     body: ConversationUpdate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     conv = await _get_owned_conversation(db, conversation_id, professional)
@@ -324,7 +324,7 @@ async def update_conversation(
 @router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_conversation(
     conversation_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     conv = await _get_owned_conversation(db, conversation_id, professional)
@@ -337,7 +337,7 @@ async def delete_conversation(
 async def send_message(
     conversation_id: UUID,
     body: MessageCreate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     """Unified AI assistant (clínico + gestão) with tool-calling.
@@ -410,7 +410,7 @@ async def _run_tool_job(
 
 
 @router.post("/transcribe", status_code=status.HTTP_202_ACCEPTED)
-async def transcribe(body: AIToolRequest, professional: Professional = Depends(get_current_professional), db: AsyncSession = Depends(get_db)):
+async def transcribe(body: AIToolRequest, professional: Professional = Depends(require_verified_professional), db: AsyncSession = Depends(get_db)):
     return await _run_tool_job(
         db,
         professional,
@@ -420,7 +420,7 @@ async def transcribe(body: AIToolRequest, professional: Professional = Depends(g
     )
 
 @router.post("/speech-analysis", status_code=status.HTTP_202_ACCEPTED)
-async def speech_analysis(body: AIToolRequest, professional: Professional = Depends(get_current_professional), db: AsyncSession = Depends(get_db)):
+async def speech_analysis(body: AIToolRequest, professional: Professional = Depends(require_verified_professional), db: AsyncSession = Depends(get_db)):
     return await _run_tool_job(
         db,
         professional,
@@ -430,21 +430,21 @@ async def speech_analysis(body: AIToolRequest, professional: Professional = Depe
     )
 
 @router.post("/clinical-trends", status_code=status.HTTP_202_ACCEPTED)
-async def clinical_trends(body: AIToolRequest, professional: Professional = Depends(get_current_professional), db: AsyncSession = Depends(get_db)):
+async def clinical_trends(body: AIToolRequest, professional: Professional = Depends(require_verified_professional), db: AsyncSession = Depends(get_db)):
     return await _run_tool_job(db, professional, "clinical-trends", body, spec_key="clinical-trends")
 
 @router.post("/suggest-goals", status_code=status.HTTP_202_ACCEPTED)
-async def suggest_goals(body: AIToolRequest, professional: Professional = Depends(get_current_professional), db: AsyncSession = Depends(get_db)):
+async def suggest_goals(body: AIToolRequest, professional: Professional = Depends(require_verified_professional), db: AsyncSession = Depends(get_db)):
     return await _run_tool_job(db, professional, "suggest-goals", body, spec_key="suggest-goals")
 
 @router.post("/therapy-plan", status_code=status.HTTP_202_ACCEPTED)
-async def therapy_plan(body: AIToolRequest, professional: Professional = Depends(get_current_professional), db: AsyncSession = Depends(get_db)):
+async def therapy_plan(body: AIToolRequest, professional: Professional = Depends(require_verified_professional), db: AsyncSession = Depends(get_db)):
     return await _run_tool_job(db, professional, "therapy-plan", body, spec_key="therapy-plan")
 
 @router.post("/session-summary", status_code=status.HTTP_202_ACCEPTED)
-async def session_summary(body: AIToolRequest, professional: Professional = Depends(get_current_professional), db: AsyncSession = Depends(get_db)):
+async def session_summary(body: AIToolRequest, professional: Professional = Depends(require_verified_professional), db: AsyncSession = Depends(get_db)):
     return await _run_tool_job(db, professional, "session-summary", body, spec_key="session-summary")
 
 @router.post("/proofread", status_code=status.HTTP_202_ACCEPTED)
-async def proofread(body: AIToolRequest, professional: Professional = Depends(get_current_professional), db: AsyncSession = Depends(get_db)):
+async def proofread(body: AIToolRequest, professional: Professional = Depends(require_verified_professional), db: AsyncSession = Depends(get_db)):
     return await _run_tool_job(db, professional, "proofread", body, spec_key="proofread")

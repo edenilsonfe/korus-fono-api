@@ -58,6 +58,13 @@ async def test_register_and_login(client):
 async def test_register_without_cpf_creates_demo_patient(api_client, monkeypatch):
     # Avoid shared in-memory rate-limit state from other auth tests in the same run.
     monkeypatch.setattr("app.api.v1.auth.enforce_register_rate_limit", lambda *_a, **_k: None)
+    captured: list[str] = []
+
+    def _capture_send(to_email, user_name, raw_token):
+        captured.append(raw_token)
+
+    monkeypatch.setattr("app.api.v1.auth.send_email_verification_email_task", _capture_send)
+
     email = f"nocpf-{uuid4().hex[:8]}@test.com"
     reg = await api_client.post(
         "/api/v1/auth/register",
@@ -71,6 +78,18 @@ async def test_register_without_cpf_creates_demo_patient(api_client, monkeypatch
     assert reg.status_code == 201
     _assert_auth_json_has_no_usable_jwt(reg.json())
     assert "korus_access" in reg.cookies
+    # Unverified session can read /me but not product routes until verify.
+    me = await api_client.get("/api/v1/me")
+    assert me.status_code == 200
+    assert me.json()["emailVerified"] is False
+    patients_blocked = await api_client.get("/api/v1/patients")
+    assert patients_blocked.status_code == 403
+    assert patients_blocked.json()["detail"] == "E-mail não verificado"
+
+    assert captured
+    verify = await api_client.post("/api/v1/auth/verify-email", json={"token": captured[0]})
+    assert verify.status_code == 200
+
     # Session via HttpOnly cookie — not Authorization Bearer from JSON.
     patients = await api_client.get("/api/v1/patients")
     assert patients.status_code == 200

@@ -27,6 +27,7 @@ class Professional(Base, TimestampMixin):
     subscription_status: Mapped[str] = mapped_column(String(32), nullable=False, default="trialing")
     trial_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     patients: Mapped[list["Patient"]] = relationship(back_populates="professional")  # noqa: F821
     subscriptions: Mapped[list["Subscription"]] = relationship(back_populates="professional")  # noqa: F821

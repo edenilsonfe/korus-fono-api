@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_professional, get_patient_for_professional
+from app.core.deps import get_patient_for_professional, require_verified_professional
 from app.db.session import get_db
 from app.models.patient import Patient
 from app.models.professional import Professional
@@ -32,7 +32,7 @@ def _event_response(event: TimelineEvent, patient_name: str | None = None) -> Ti
 async def global_timeline(
     cursor: str | None = None,
     limit: int = Query(20, ge=1, le=100),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     query = (
@@ -57,7 +57,7 @@ async def patient_timeline(
     patient_id: UUID,
     cursor: str | None = None,
     limit: int = Query(50, ge=1, le=100),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(patient_id, professional, db)

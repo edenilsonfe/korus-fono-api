@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants.whatsapp_events import DEFAULT_EVENT_MESSAGE_TEMPLATES
 from app.core.config import get_settings
-from app.core.deps import get_current_professional
+from app.core.deps import require_verified_professional
 from app.db.session import get_db
 from app.models.professional import Professional
 from app.models.whatsapp_connection import CONNECTION_STATUS_NOT_CONNECTED, WhatsAppConnection
@@ -78,7 +78,7 @@ def _settings_response(settings) -> WhatsAppSettingsResponse:
 
 @router.get("/status", response_model=WhatsAppStatusResponse)
 async def get_whatsapp_status(
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     if get_settings().whatsapp_provider == "evolution":
@@ -93,7 +93,7 @@ async def get_whatsapp_status(
 
 @router.post("/connect", response_model=WhatsAppConnectResponse)
 async def connect_evolution_whatsapp(
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     if get_settings().whatsapp_provider != "evolution":
@@ -118,7 +118,7 @@ async def connect_evolution_whatsapp(
 
 @router.post("/refresh-connection", response_model=WhatsAppStatusResponse)
 async def refresh_evolution_connection(
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     if get_settings().whatsapp_provider != "evolution":
@@ -133,7 +133,7 @@ async def refresh_evolution_connection(
 
 @router.post("/disconnect", response_model=WhatsAppStatusResponse)
 async def disconnect_whatsapp(
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     provider = get_active_whatsapp_provider(db)
@@ -149,7 +149,7 @@ async def disconnect_whatsapp(
 
 @router.get("/usage", response_model=WhatsAppUsageResponse)
 async def get_whatsapp_usage(
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     usage = await get_active_whatsapp_provider(db).get_usage(professional.id)
@@ -158,7 +158,7 @@ async def get_whatsapp_usage(
 
 @router.get("/settings", response_model=WhatsAppSettingsResponse)
 async def get_whatsapp_settings(
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     settings = await NotificationSettingsService(db).get_or_create(professional.id)
@@ -169,7 +169,7 @@ async def get_whatsapp_settings(
 @router.put("/settings", response_model=WhatsAppSettingsResponse)
 async def update_whatsapp_settings(
     body: WhatsAppSettingsUpdate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = NotificationSettingsService(db)
@@ -190,7 +190,7 @@ async def update_whatsapp_settings(
 @router.get("/message-logs/stats", response_model=WhatsAppMessageLogsStatsResponse)
 async def get_whatsapp_message_logs_stats(
     days: int = 30,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = WhatsAppMessageLogService(db)
@@ -206,7 +206,7 @@ async def list_whatsapp_message_logs(
     event_type: str | None = None,
     status: str | None = None,
     days: int = 30,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = WhatsAppMessageLogService(db)

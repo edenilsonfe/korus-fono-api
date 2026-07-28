@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base, new_uuid
 
 PURPOSE_PASSWORD_RESET = "password_reset"
+PURPOSE_EMAIL_VERIFICATION = "email_verification"
 
 
 class PasswordResetToken(Base):

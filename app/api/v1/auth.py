@@ -37,12 +37,18 @@ from app.schemas.auth import (
     RegisterRequest,
     ResetPasswordRequest,
     TokenResponse,
+    VerifyEmailRequest,
 )
 from app.services.auth_rate_limit import (
     enforce_forgot_rate_limit,
     enforce_login_rate_limit,
     enforce_register_rate_limit,
     enforce_reset_rate_limit,
+)
+from app.services.email_verification import (
+    request_email_verification,
+    send_email_verification_email_sync,
+    verify_email_with_token,
 )
 from app.services.password_reset import (
     GENERIC_FORGOT_MESSAGE,
@@ -67,6 +73,10 @@ def _request_ip(request: Request) -> str:
 
 def send_password_reset_email_task(to_email: str, user_name: str, raw_token: str) -> None:
     send_password_reset_email_sync(to_email=to_email, user_name=user_name, raw_token=raw_token)
+
+
+def send_email_verification_email_task(to_email: str, user_name: str, raw_token: str) -> None:
+    send_email_verification_email_sync(to_email=to_email, user_name=user_name, raw_token=raw_token)
 
 
 async def _issue_tokens(
@@ -106,6 +116,7 @@ async def register(
     body: RegisterRequest,
     request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     enforce_register_rate_limit(_request_ip(request))
@@ -142,6 +153,14 @@ async def register(
         )
     )
     access_token, refresh_token = await _issue_tokens(db, professional)
+    raw_token = await request_email_verification(db, professional, force=True)
+    if raw_token is not None:
+        background_tasks.add_task(
+            send_email_verification_email_task,
+            professional.email,
+            professional.name,
+            raw_token,
+        )
     return _apply_auth_cookies(response, access_token, refresh_token)
 
 
@@ -150,6 +169,7 @@ async def login(
     body: LoginRequest,
     request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     enforce_login_rate_limit(_request_ip(request), body.email)
@@ -160,6 +180,15 @@ async def login(
     if professional.is_disabled:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Conta desativada")
     access_token, refresh_token = await _issue_tokens(db, professional)
+    if professional.email_verified_at is None:
+        raw_token = await request_email_verification(db, professional, force=False)
+        if raw_token is not None:
+            background_tasks.add_task(
+                send_email_verification_email_task,
+                professional.email,
+                professional.name,
+                raw_token,
+            )
     return _apply_auth_cookies(response, access_token, refresh_token)
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -247,3 +276,29 @@ async def change_current_password(
         new_password=body.new_password,
     )
     return MessageResponse(message="Senha alterada com sucesso")
+
+
+@router.post("/verify-email", response_model=MessageResponse)
+async def verify_email(
+    body: VerifyEmailRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    await verify_email_with_token(db, body.token)
+    return MessageResponse(message="E-mail verificado com sucesso")
+
+
+@router.post("/resend-verification", response_model=MessageResponse)
+async def resend_verification(
+    background_tasks: BackgroundTasks,
+    professional: Professional = Depends(get_current_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    raw_token = await request_email_verification(db, professional, force=False)
+    if raw_token is not None:
+        background_tasks.add_task(
+            send_email_verification_email_task,
+            professional.email,
+            professional.name,
+            raw_token,
+        )
+    return MessageResponse(message="Se necessário, enviamos um novo link de verificação")

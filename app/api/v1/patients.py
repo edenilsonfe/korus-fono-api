@@ -6,7 +6,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import AVATAR_COLORS
-from app.core.deps import get_current_professional, get_patient_for_professional
+from app.core.deps import get_patient_for_professional, require_verified_professional
 from app.core.diagnosis_catalog import diagnosis_labels, validate_diagnosis_keys
 from app.core.utils import calculate_age, goal_status_from_progress, guardian_label, utcnow
 from app.db.session import get_db
@@ -132,7 +132,7 @@ async def list_patients(
     q: str | None = None,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Patient).where(Patient.professional_id == professional.id)
@@ -164,7 +164,7 @@ async def list_patients(
 @router.post("", response_model=PatientSummary, status_code=status.HTTP_201_CREATED)
 async def create_patient(
     body: PatientCreate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -215,7 +215,7 @@ async def create_patient(
 async def create_caregiver(
     patient_id: UUID,
     body: CaregiverCreate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     await get_patient_for_professional(patient_id, professional, db)
@@ -250,7 +250,7 @@ async def update_caregiver(
     patient_id: UUID,
     caregiver_id: UUID,
     body: CaregiverUpdate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     caregiver = await _get_caregiver_for_patient(patient_id, caregiver_id, professional, db)
@@ -289,7 +289,7 @@ async def update_caregiver(
 async def delete_caregiver(
     patient_id: UUID,
     caregiver_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     caregiver = await _get_caregiver_for_patient(patient_id, caregiver_id, professional, db)
@@ -309,7 +309,7 @@ async def delete_caregiver(
 async def get_patient(
     patient_id: UUID,
     include: str | None = Query(None),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(patient_id, professional, db)
@@ -321,7 +321,7 @@ async def get_patient(
 async def update_patient(
     patient_id: UUID,
     body: PatientUpdate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(patient_id, professional, db)
@@ -341,7 +341,7 @@ async def update_patient(
 async def update_therapy_plan(
     patient_id: UUID,
     body: TherapyPlanUpdate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(patient_id, professional, db)
@@ -362,7 +362,7 @@ async def update_therapy_plan(
 @router.delete("/{patient_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_patient(
     patient_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(patient_id, professional, db)

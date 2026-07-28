@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.core.deps import get_current_professional
+from app.core.deps import require_verified_professional
 from app.core.instrument_aliases import (
     CLIENT_SCORED_PROTOCOLS,
     SPM_PROTOCOL,
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/instruments", tags=["instruments"])
 @router.get("/{protocol_id}/capabilities", response_model=ProtocolCapabilitiesResponse)
 async def get_protocol_capabilities(
     protocol_id: str,
-    _professional: Professional = Depends(get_current_professional),
+    _professional: Professional = Depends(require_verified_professional),
 ):
     pid = protocol_id.lower()
     mode = get_protocol_scoring_mode(pid)
@@ -50,7 +50,7 @@ async def get_protocol_capabilities(
 @router.get("/{protocol_id}/manifest", response_model=InstrumentManifestResponse)
 async def get_instrument_manifest(
     protocol_id: str,
-    _professional: Professional = Depends(get_current_professional),
+    _professional: Professional = Depends(require_verified_professional),
 ):
     slug = resolve_instrument_slug(protocol_id)
     if not slug:
@@ -69,7 +69,7 @@ async def get_instrument_content(
     page_size: int = Query(50, ge=1, le=200),
     section: str | None = None,
     module: str | None = None,
-    _professional: Professional = Depends(get_current_professional),
+    _professional: Professional = Depends(require_verified_professional),
 ):
     slug = resolve_instrument_slug(protocol_id)
     if not slug:
@@ -96,7 +96,7 @@ async def get_instrument_content(
 async def score_instrument(
     protocol_id: str,
     data: InstrumentScoreRequest,
-    _professional: Professional = Depends(get_current_professional),
+    _professional: Professional = Depends(require_verified_professional),
 ):
     if not has_manifest_package(protocol_id):
         raise HTTPException(status_code=400, detail="Este protocolo não usa scoring no servidor")

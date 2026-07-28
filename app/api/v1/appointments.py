@@ -5,7 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_professional, get_patient_for_professional
+from app.core.deps import get_patient_for_professional, require_verified_professional
 from app.db.session import get_db
 from app.models.appointment import Appointment
 from app.models.patient import Patient
@@ -153,7 +153,7 @@ async def _check_conflict(
 async def list_appointments(
     from_date: date = Query(..., alias="from"),
     to_date: date = Query(..., alias="to"),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -173,7 +173,7 @@ async def list_appointments(
 async def create_appointment(
     body: AppointmentCreate,
     background_tasks: BackgroundTasks,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(UUID(body.patient_id), professional, db)
@@ -273,7 +273,7 @@ async def update_appointment(
     appointment_id: UUID,
     body: AppointmentUpdate,
     background_tasks: BackgroundTasks,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -314,7 +314,7 @@ async def update_appointment(
 @router.delete("/{appointment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_appointment(
     appointment_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(

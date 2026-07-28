@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.mappers import format_size_bytes
 from app.core.config import get_settings
-from app.core.deps import get_current_professional, get_patient_for_professional
+from app.core.deps import get_patient_for_professional, require_verified_professional
 from app.core.utils import utcnow
 from app.db.session import get_db
 from app.models.attachment import Attachment
@@ -37,7 +37,7 @@ router = APIRouter(prefix="/patients/{patient_id}", tags=["prontuario"])
 @router.get("/evolutions", response_model=list[EvolutionResponse])
 async def list_evolutions(
     patient_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     await get_patient_for_professional(patient_id, professional, db)
@@ -62,7 +62,7 @@ async def list_evolutions(
 async def create_evolution(
     patient_id: UUID,
     body: EvolutionCreate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     await get_patient_for_professional(patient_id, professional, db)
@@ -91,7 +91,7 @@ async def create_evolution(
 @router.get("/anamnese", response_model=AnamneseDocumentResponse)
 async def list_anamnese(
     patient_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(patient_id, professional, db)
@@ -103,7 +103,7 @@ async def list_anamnese(
 async def bulk_upsert_anamnese(
     patient_id: UUID,
     body: AnamneseBulkUpsert,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(patient_id, professional, db)
@@ -116,7 +116,7 @@ async def bulk_upsert_anamnese(
 async def complete_anamnese(
     patient_id: UUID,
     body: AnamneseComplete,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(patient_id, professional, db)
@@ -127,7 +127,7 @@ async def complete_anamnese(
 async def upsert_anamnese(
     patient_id: UUID,
     body: AnamneseCreate,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(patient_id, professional, db)
@@ -160,7 +160,7 @@ CATEGORY_TIMELINE_MAP = {
 @router.get("/attachments")
 async def list_attachments(
     patient_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     await get_patient_for_professional(patient_id, professional, db)
@@ -185,7 +185,7 @@ async def upload_attachment(
     patient_id: UUID,
     file: UploadFile = File(...),
     category: str = "relatorio",
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     await get_patient_for_professional(patient_id, professional, db)
@@ -249,7 +249,7 @@ async def upload_attachment(
 async def get_attachment_url(
     patient_id: UUID,
     attachment_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     await get_patient_for_professional(patient_id, professional, db)

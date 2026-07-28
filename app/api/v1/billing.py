@@ -16,7 +16,7 @@ from app.billing.checkout_urls import build_checkout_return_urls
 from app.billing.errors import PaymentGatewayError
 from app.billing.webhook_normalizer import get_normalizer
 from app.core.config import get_settings
-from app.core.deps import get_current_professional
+from app.core.deps import require_verified_professional
 from app.db.session import get_db
 from app.models.billing import Plan, Subscription
 from app.models.professional import Professional
@@ -143,7 +143,7 @@ async def _attach_checkout_to_subscription(
 @router.get("/plans", response_model=list[PlanPublicResponse])
 async def list_billing_plans(
     db: AsyncSession = Depends(get_db),
-    _professional: Professional = Depends(get_current_professional),
+    _professional: Professional = Depends(require_verified_professional),
 ):
     result = await db.execute(
         select(Plan)
@@ -156,7 +156,7 @@ async def list_billing_plans(
 @router.get("/me", response_model=BillingMeResponse)
 async def get_billing_me(
     db: AsyncSession = Depends(get_db),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
 ):
     try:
         gateway = get_payment_gateway()
@@ -209,7 +209,7 @@ async def get_billing_me(
 async def preview_plan_change(
     plan_slug: str,
     db: AsyncSession = Depends(get_db),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
 ):
     result = await db.execute(
         select(Plan).where(Plan.slug == plan_slug.strip(), Plan.is_active.is_(True))
@@ -227,7 +227,7 @@ async def preview_plan_change(
 async def create_billing_checkout(
     payload: CheckoutRequest,
     db: AsyncSession = Depends(get_db),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
 ):
     plan_slug = payload.plan_slug.strip()
     result = await db.execute(
@@ -370,7 +370,7 @@ async def create_billing_checkout(
 async def get_checkout_session(
     session_id: str,
     db: AsyncSession = Depends(get_db),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
 ):
     service = BillingCheckoutService(db)
     return await service.get_session(session_id=session_id, professional=professional)
@@ -380,7 +380,7 @@ async def get_checkout_session(
 async def generate_pix_checkout(
     session_id: str,
     db: AsyncSession = Depends(get_db),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
 ):
     service = BillingCheckoutService(db)
     return await service.generate_pix(session_id=session_id, professional=professional)
@@ -390,7 +390,7 @@ async def generate_pix_checkout(
 async def prepare_card_invoice(
     session_id: str,
     db: AsyncSession = Depends(get_db),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
 ):
     """Garante billingType=CREDIT_CARD e devolve invoiceUrl (form de cartão/parcelas no Asaas)."""
     service = BillingCheckoutService(db)
@@ -402,7 +402,7 @@ async def prepare_card_invoice(
 @router.post("/reconcile", response_model=ReconcileResponse)
 async def reconcile_billing(
     db: AsyncSession = Depends(get_db),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
 ):
     service = BillingReconciliationService(db)
     try:
@@ -415,7 +415,7 @@ async def reconcile_billing(
 @router.post("/reconcile/simulate", response_model=ReconcileResponse)
 async def simulate_stub_billing(
     db: AsyncSession = Depends(get_db),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
 ):
     settings = get_settings()
     if not settings.debug:

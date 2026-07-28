@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_professional
+from app.core.deps import require_verified_professional
 from app.db.session import get_db
 from app.models.professional import Professional
 from app.schemas.app_notification import (
@@ -28,7 +28,7 @@ async def list_notifications(
     filter: NotificationFilter = Query("all"),
     cursor: str | None = Query(None),
     limit: int = Query(20, ge=1, le=50),
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = NotificationService(db)
@@ -39,7 +39,7 @@ async def list_notifications(
 
 @router.get("/unread-count", response_model=UnreadCount)
 async def unread_count(
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     service = NotificationService(db)
@@ -48,7 +48,7 @@ async def unread_count(
 
 @router.post("/seen", response_model=UnreadCount)
 async def mark_seen(
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     """Mark currently-visible notifications as seen (badge -> 0)."""
@@ -59,7 +59,7 @@ async def mark_seen(
 @router.post("/{notification_id}/read", response_model=NotificationItem)
 async def mark_read(
     notification_id: UUID,
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     """Mark a single visible notification as read (404 if not visible)."""
@@ -75,7 +75,7 @@ async def mark_read(
 
 @router.post("/read-all", response_model=UnreadCount)
 async def mark_all_read(
-    professional: Professional = Depends(get_current_professional),
+    professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     """Mark every currently-visible notification as read."""
