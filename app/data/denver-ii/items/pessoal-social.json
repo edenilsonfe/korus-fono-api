@@ -2,43 +2,226 @@
   {
     "id": "ps_01",
     "domain": "PS",
-    "text": "Observa rosto do examinador",
-    "age_start_months": 2,
-    "age_end_months": 4
+    "text": "Observa um rosto",
+    "age_start_months": 0,
+    "age_end_months": 2,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: aproxime o rosto do bebê dentro do campo visual, sem falar. Critério (Passa): o bebê fixa o olhar no rosto do examinador por alguns segundos."
   },
   {
     "id": "ps_02",
     "domain": "PS",
-    "text": "Sorri espontaneamente",
-    "age_start_months": 4,
-    "age_end_months": 6
+    "text": "Sorri em resposta",
+    "age_start_months": 1,
+    "age_end_months": 3,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: sorria e fale suavemente com o bebê, sem tocá-lo. Critério (Passa): o bebê sorri em resposta ao rosto/voz do examinador."
   },
   {
     "id": "ps_03",
     "domain": "PS",
-    "text": "Brinca de esconde-esconde (achou!)",
-    "age_start_months": 6,
-    "age_end_months": 9
+    "text": "Sorri espontaneamente (An)",
+    "age_start_months": 2,
+    "age_end_months": 4,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se o bebê sorri espontaneamente, sem estímulo direto (ex.: ao acordar, ao ver algo familiar). Critério (Passa): cuidador relata sorrisos espontâneos frequentes."
   },
   {
     "id": "ps_04",
     "domain": "PS",
-    "text": "Acena tchau",
-    "age_start_months": 9,
-    "age_end_months": 12
+    "text": "Observa sua própria mão (An)",
+    "age_start_months": 2,
+    "age_end_months": 5,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se o bebê observa e brinca com as próprias mãos por alguns momentos. Critério (Passa): cuidador confirma esse comportamento."
   },
   {
     "id": "ps_05",
     "domain": "PS",
-    "text": "Imita tarefas domésticas",
-    "age_start_months": 12,
-    "age_end_months": 15
+    "text": "Tenta alcançar um brinquedo",
+    "age_start_months": 3,
+    "age_end_months": 6,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: ofereça um brinquedo pequeno ao alcance do bebê, sem colocá-lo na mão dele. Critério (Passa): o bebê estende o braço/mão em direção ao brinquedo."
   },
   {
     "id": "ps_06",
     "domain": "PS",
-    "text": "Usa colher com derramamento mínimo",
+    "text": "Come sozinho (An)",
+    "age_start_months": 5,
+    "age_end_months": 8,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança leva alimentos (biscoito, pedaços macios) à boca sozinha. Critério (Passa): cuidador confirma que a criança se alimenta sozinha com as mãos."
+  },
+  {
+    "id": "ps_07",
+    "domain": "PS",
+    "text": "Bate palmas (An)",
+    "age_start_months": 7,
+    "age_end_months": 11,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança bate palmas, sozinha ou imitando o adulto. Critério (Passa): cuidador relata que a criança bate palmas."
+  },
+  {
+    "id": "ps_08",
+    "domain": "PS",
+    "text": "Mostra o que quer (não com choro) (An)",
+    "age_start_months": 8,
+    "age_end_months": 13,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança indica o que deseja apontando, gesticulando ou vocalizando, sem recorrer apenas ao choro. Critério (Passa): cuidador confirma comunicação não verbal de desejos."
+  },
+  {
+    "id": "ps_09",
+    "domain": "PS",
+    "text": "Dá tchau (An)",
+    "age_start_months": 8,
+    "age_end_months": 13,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança acena tchau espontaneamente ou quando solicitada. Critério (Passa): cuidador confirma o gesto de despedida."
+  },
+  {
+    "id": "ps_10",
+    "domain": "PS",
+    "text": "Joga bola com o examinador",
+    "age_start_months": 9,
+    "age_end_months": 14,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: role uma bola em direção à criança e peça que ela a devolva. Critério (Passa): a criança devolve a bola rolando-a de volta ao examinador."
+  },
+  {
+    "id": "ps_11",
+    "domain": "PS",
+    "text": "Imita a ação de uma pessoa (An)",
+    "age_start_months": 9,
+    "age_end_months": 14,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança imita ações simples de adultos (ex.: varrer, falar ao telefone). Critério (Passa): cuidador relata imitação de pelo menos uma ação."
+  },
+  {
+    "id": "ps_12",
+    "domain": "PS",
+    "text": "Bebe em uma xícara ou copo (An)",
+    "age_start_months": 10,
+    "age_end_months": 16,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança bebe sozinha em copo ou xícara, com pouco derramamento. Critério (Passa): cuidador confirma essa habilidade."
+  },
+  {
+    "id": "ps_13",
+    "domain": "PS",
+    "text": "Ajuda em casa (tarefas simples) (An)",
+    "age_start_months": 12,
+    "age_end_months": 21,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança ajuda em pequenas tarefas domésticas quando solicitada (ex.: guardar objeto, buscar item). Critério (Passa): cuidador confirma colaboração em ao menos uma tarefa simples."
+  },
+  {
+    "id": "ps_14",
+    "domain": "PS",
+    "text": "Usa colher/garfo (An)",
+    "age_start_months": 13,
+    "age_end_months": 20,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança usa colher ou garfo para se alimentar, com derramamento mínimo. Critério (Passa): cuidador confirma o uso funcional do talher."
+  },
+  {
+    "id": "ps_15",
+    "domain": "PS",
+    "text": "Retira uma vestimenta (An)",
+    "age_start_months": 13,
+    "age_end_months": 20,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança consegue tirar uma peça de roupa simples (meia, sapato) sozinha. Critério (Passa): cuidador confirma a habilidade."
+  },
+  {
+    "id": "ps_16",
+    "domain": "PS",
+    "text": "Alimenta uma boneca",
     "age_start_months": 15,
-    "age_end_months": 18
+    "age_end_months": 23,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: ofereça uma boneca e uma mamadeira/colher de brinquedo e peça que a criança a alimente. Critério (Passa): a criança simula alimentar a boneca de forma dirigida."
+  },
+  {
+    "id": "ps_17",
+    "domain": "PS",
+    "text": "Veste-se (com supervisão) (An)",
+    "age_start_months": 15,
+    "age_end_months": 24,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança participa ativamente de vestir-se, mesmo precisando de ajuda/supervisão. Critério (Passa): cuidador confirma participação ativa no processo."
+  },
+  {
+    "id": "ps_18",
+    "domain": "PS",
+    "text": "Escova os dentes com ajuda (An)",
+    "age_start_months": 17,
+    "age_end_months": 27,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança escova os dentes com auxílio de um adulto. Critério (Passa): cuidador confirma a colaboração na escovação assistida."
+  },
+  {
+    "id": "ps_19",
+    "domain": "PS",
+    "text": "Lava e seca as mãos (An)",
+    "age_start_months": 20,
+    "age_end_months": 30,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança lava e seca as mãos sozinha, sem necessidade de ajuda direta. Critério (Passa): cuidador confirma a autonomia nessa tarefa."
+  },
+  {
+    "id": "ps_20",
+    "domain": "PS",
+    "text": "Fala o nome de amigos",
+    "age_start_months": 21,
+    "age_end_months": 31,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: pergunte à criança o nome de um amigo ou colega. Critério (Passa): a criança fornece pelo menos um nome próprio de um amigo/colega."
+  },
+  {
+    "id": "ps_21",
+    "domain": "PS",
+    "text": "Veste uma camiseta (An)",
+    "age_start_months": 24,
+    "age_end_months": 33,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança consegue vestir uma camiseta sozinha (mesmo com pequenos ajustes do adulto). Critério (Passa): cuidador confirma a habilidade."
+  },
+  {
+    "id": "ps_22",
+    "domain": "PS",
+    "text": "Veste-se sem ajuda (An)",
+    "age_start_months": 30,
+    "age_end_months": 42,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança se veste completamente sozinha, sem necessidade de ajuda. Critério (Passa): cuidador confirma autonomia total ao vestir-se."
+  },
+  {
+    "id": "ps_23",
+    "domain": "PS",
+    "text": "Joga jogos de mesa (An)",
+    "age_start_months": 33,
+    "age_end_months": 48,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança participa de jogos de mesa simples respeitando regras básicas (ex.: turnos). Critério (Passa): cuidador confirma participação com compreensão mínima das regras."
+  },
+  {
+    "id": "ps_24",
+    "domain": "PS",
+    "text": "Escova os dentes sem ajuda (An)",
+    "age_start_months": 36,
+    "age_end_months": 52,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança escova os dentes sozinha, sem necessidade de ajuda física do adulto. Critério (Passa): cuidador confirma a autonomia na escovação."
+  },
+  {
+    "id": "ps_25",
+    "domain": "PS",
+    "text": "Prepara uma refeição (An)",
+    "age_start_months": 43,
+    "age_end_months": 60,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança prepara uma refeição simples sozinha (ex.: cereal com leite, sanduíche). Critério (Passa): cuidador confirma que a criança realiza essa tarefa com autonomia."
   }
 ]

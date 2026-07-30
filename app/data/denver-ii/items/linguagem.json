@@ -2,43 +2,352 @@
   {
     "id": "la_01",
     "domain": "LA",
-    "text": "Vocaliza (arrulha, balbucia)",
-    "age_start_months": 2,
-    "age_end_months": 4
+    "text": "Reage ao sino",
+    "age_start_months": 0,
+    "age_end_months": 2,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: toque um sino fora do campo visual do bebê. Critério (Passa): o bebê reage ao som (sobressalto, mudança de atividade, piscar)."
   },
   {
     "id": "la_02",
     "domain": "LA",
-    "text": "Ri alto",
-    "age_start_months": 4,
-    "age_end_months": 6
+    "text": "Vocaliza (An)",
+    "age_start_months": 0,
+    "age_end_months": 2,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se o bebê emite sons vocais além do choro. Critério (Passa): cuidador confirma vocalizações espontâneas."
   },
   {
     "id": "la_03",
     "domain": "LA",
-    "text": "Duplica sílabas (mamá, papá)",
-    "age_start_months": 6,
-    "age_end_months": 9
+    "text": "Fala Ooo/Aah (An)",
+    "age_start_months": 1,
+    "age_end_months": 3,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se o bebê produz sons vocálicos como 'ooh' ou 'aah'. Critério (Passa): cuidador confirma esses sons."
   },
   {
     "id": "la_04",
     "domain": "LA",
-    "text": "Diz mamã ou equivalente",
-    "age_start_months": 9,
-    "age_end_months": 12
+    "text": "Riso / gargalhada (An)",
+    "age_start_months": 1,
+    "age_end_months": 3,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se o bebê ri alto (gargalha), não apenas sorri. Critério (Passa): cuidador confirma episódios de riso."
   },
   {
     "id": "la_05",
     "domain": "LA",
-    "text": "Diz mais de 3 palavras além de mamã/papá",
-    "age_start_months": 12,
-    "age_end_months": 15
+    "text": "Grita (An)",
+    "age_start_months": 2,
+    "age_end_months": 4,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se o bebê grita/guincha de forma vocal (não de choro). Critério (Passa): cuidador confirma esse comportamento vocal."
   },
   {
     "id": "la_06",
     "domain": "LA",
-    "text": "Combina 2 palavras",
+    "text": "Volta-se para o som",
+    "age_start_months": 3,
+    "age_end_months": 5,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: produza um som suave (chocalho) fora do campo visual, lateralmente. Critério (Passa): o bebê vira a cabeça em direção ao som."
+  },
+  {
+    "id": "la_07",
+    "domain": "LA",
+    "text": "Volta-se para a voz",
+    "age_start_months": 3,
+    "age_end_months": 5,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: fale suavemente com o bebê fora do seu campo visual. Critério (Passa): o bebê vira a cabeça em direção à voz."
+  },
+  {
+    "id": "la_08",
+    "domain": "LA",
+    "text": "Sílabas isoladas (An)",
+    "age_start_months": 5,
+    "age_end_months": 8,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se o bebê produz sílabas isoladas como 'ba', 'da', 'ga'. Critério (Passa): cuidador confirma a produção dessas sílabas."
+  },
+  {
+    "id": "la_09",
+    "domain": "LA",
+    "text": "Imita sons (An)",
+    "age_start_months": 6,
+    "age_end_months": 9,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança tenta imitar sons da fala do adulto. Critério (Passa): cuidador confirma tentativas de imitação vocal."
+  },
+  {
+    "id": "la_10",
+    "domain": "LA",
+    "text": "Duplica sílabas (An)",
+    "age_start_months": 7,
+    "age_end_months": 10,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança duplica sílabas, tipo 'mama', 'papa', sem significado específico. Critério (Passa): cuidador confirma essa duplicação."
+  },
+  {
+    "id": "la_11",
+    "domain": "LA",
+    "text": "Combina sílabas (An)",
+    "age_start_months": 8,
+    "age_end_months": 11,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança combina diferentes sílabas em sequência (ex.: 'badaga'). Critério (Passa): cuidador confirma a combinação de sílabas variadas."
+  },
+  {
+    "id": "la_12",
+    "domain": "LA",
+    "text": "Jargão (An)",
+    "age_start_months": 9,
+    "age_end_months": 13,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança usa 'jargão' — sequências de sons com entonação de fala, sem palavras reais. Critério (Passa): cuidador confirma esse padrão vocal."
+  },
+  {
+    "id": "la_13",
+    "domain": "LA",
+    "text": "Papa ou mama específico (An)",
+    "age_start_months": 10,
+    "age_end_months": 14,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança usa 'papa' ou 'mama' especificamente para se referir ao pai/mãe. Critério (Passa): cuidador confirma o uso específico e consistente."
+  },
+  {
+    "id": "la_14",
+    "domain": "LA",
+    "text": "1 palavra (An)",
+    "age_start_months": 11,
+    "age_end_months": 15,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança fala pelo menos 1 palavra com significado além de mamãe/papai. Critério (Passa): cuidador confirma a primeira palavra."
+  },
+  {
+    "id": "la_15",
+    "domain": "LA",
+    "text": "2 palavras (An)",
+    "age_start_months": 12,
+    "age_end_months": 18,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança fala pelo menos 2 palavras diferentes com significado. Critério (Passa): cuidador confirma esse vocabulário."
+  },
+  {
+    "id": "la_16",
+    "domain": "LA",
+    "text": "3 palavras (An)",
+    "age_start_months": 13,
+    "age_end_months": 20,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança usa pelo menos 3 palavras diferentes. Critério (Passa): cuidador confirma o vocabulário."
+  },
+  {
+    "id": "la_17",
+    "domain": "LA",
+    "text": "6 palavras (An)",
+    "age_start_months": 14,
+    "age_end_months": 22,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança usa pelo menos 6 palavras diferentes com significado. Critério (Passa): cuidador confirma esse vocabulário."
+  },
+  {
+    "id": "la_18",
+    "domain": "LA",
+    "text": "Aponta 2 figuras",
     "age_start_months": 15,
-    "age_end_months": 18
+    "age_end_months": 22,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: apresente uma prancha com várias figuras e peça que a criança aponte 2 delas, nomeadas pelo examinador. Critério (Passa): a criança aponta corretamente as 2 figuras solicitadas."
+  },
+  {
+    "id": "la_19",
+    "domain": "LA",
+    "text": "Combina palavras (An)",
+    "age_start_months": 16,
+    "age_end_months": 24,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança combina duas palavras em uma frase curta (ex.: 'quer água'). Critério (Passa): cuidador confirma combinações de palavras."
+  },
+  {
+    "id": "la_20",
+    "domain": "LA",
+    "text": "Nomeia 1 figura",
+    "age_start_months": 17,
+    "age_end_months": 23,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: apresente uma figura simples e pergunte 'o que é isso?'. Critério (Passa): a criança nomeia corretamente ao menos 1 figura."
+  },
+  {
+    "id": "la_21",
+    "domain": "LA",
+    "text": "Aponta 6 partes do corpo",
+    "age_start_months": 18,
+    "age_end_months": 24,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: peça que a criança aponte partes do próprio corpo ou de uma boneca (nariz, olhos, boca etc.). Critério (Passa): a criança aponta corretamente ao menos 6 partes do corpo."
+  },
+  {
+    "id": "la_22",
+    "domain": "LA",
+    "text": "Aponta 4 figuras",
+    "age_start_months": 19,
+    "age_end_months": 25,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: apresente uma prancha com figuras e peça que a criança aponte 4 delas, nomeadas pelo examinador. Critério (Passa): a criança aponta corretamente ao menos 4 figuras."
+  },
+  {
+    "id": "la_23",
+    "domain": "LA",
+    "text": "50% de inteligibilidade de fala",
+    "age_start_months": 20,
+    "age_end_months": 31,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: observe a fala espontânea da criança durante a avaliação. Critério (Passa): cerca de metade da fala é compreensível para um interlocutor não familiarizado."
+  },
+  {
+    "id": "la_24",
+    "domain": "LA",
+    "text": "Nomeia 4 figuras",
+    "age_start_months": 21,
+    "age_end_months": 31,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: apresente uma prancha com figuras e peça que a criança nomeie cada uma. Critério (Passa): a criança nomeia corretamente ao menos 4 figuras."
+  },
+  {
+    "id": "la_25",
+    "domain": "LA",
+    "text": "Reconhece 2 ações",
+    "age_start_months": 22,
+    "age_end_months": 32,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: apresente figuras de ações (ex.: correndo, comendo) e pergunte 'quem está...?'. Critério (Passa): a criança reconhece corretamente ao menos 2 ações."
+  },
+  {
+    "id": "la_26",
+    "domain": "LA",
+    "text": "Compreende 2 adjetivos",
+    "age_start_months": 24,
+    "age_end_months": 36,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: peça que a criança execute comandos simples com adjetivos (ex.: 'me dê o lápis maior'). Critério (Passa): a criança responde corretamente a ao menos 2 comandos com adjetivos."
+  },
+  {
+    "id": "la_27",
+    "domain": "LA",
+    "text": "Nomeia 1 cor",
+    "age_start_months": 26,
+    "age_end_months": 40,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: aponte para um objeto colorido e pergunte 'de que cor é isso?'. Critério (Passa): a criança nomeia corretamente ao menos 1 cor."
+  },
+  {
+    "id": "la_28",
+    "domain": "LA",
+    "text": "Define 2 objetos pelo uso",
+    "age_start_months": 27,
+    "age_end_months": 40,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: pergunte 'para que serve...?' sobre objetos comuns. Critério (Passa): a criança descreve corretamente o uso de ao menos 2 objetos."
+  },
+  {
+    "id": "la_29",
+    "domain": "LA",
+    "text": "Conta 1 bloco",
+    "age_start_months": 28,
+    "age_end_months": 40,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: peça que a criança conte um bloco entregue a ela ('me dê 1 bloco'). Critério (Passa): a criança entrega corretamente a quantidade solicitada."
+  },
+  {
+    "id": "la_30",
+    "domain": "LA",
+    "text": "Define 3 objetos pelo uso",
+    "age_start_months": 30,
+    "age_end_months": 44,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: pergunte 'para que serve...?' sobre diferentes objetos comuns. Critério (Passa): a criança descreve corretamente o uso de ao menos 3 objetos."
+  },
+  {
+    "id": "la_31",
+    "domain": "LA",
+    "text": "Reconhece 4 ações",
+    "age_start_months": 31,
+    "age_end_months": 44,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: apresente figuras de ações e pergunte 'quem está...?'. Critério (Passa): a criança reconhece corretamente ao menos 4 ações."
+  },
+  {
+    "id": "la_32",
+    "domain": "LA",
+    "text": "Fala inteligível",
+    "age_start_months": 32,
+    "age_end_months": 46,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: observe a fala espontânea da criança durante toda a avaliação. Critério (Passa): a fala é totalmente compreensível para um interlocutor não familiarizado."
+  },
+  {
+    "id": "la_33",
+    "domain": "LA",
+    "text": "Compreende 4 preposições",
+    "age_start_months": 34,
+    "age_end_months": 48,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: peça que a criança coloque um objeto em relação a outro (em cima, embaixo, atrás, na frente). Critério (Passa): a criança executa corretamente ao menos 4 comandos com preposições."
+  },
+  {
+    "id": "la_34",
+    "domain": "LA",
+    "text": "Nomeia 4 cores",
+    "age_start_months": 37,
+    "age_end_months": 52,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: aponte objetos/figuras de cores diferentes e pergunte a cor de cada um. Critério (Passa): a criança nomeia corretamente ao menos 4 cores."
+  },
+  {
+    "id": "la_35",
+    "domain": "LA",
+    "text": "Define 5 palavras",
+    "age_start_months": 39,
+    "age_end_months": 55,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: pergunte 'o que é...?' sobre palavras comuns. Critério (Passa): a criança define corretamente ao menos 5 palavras."
+  },
+  {
+    "id": "la_36",
+    "domain": "LA",
+    "text": "Compreende 3 adjetivos",
+    "age_start_months": 40,
+    "age_end_months": 55,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: peça que a criança execute comandos com diferentes adjetivos (ex.: 'me dê o objeto mais leve'). Critério (Passa): a criança responde corretamente a ao menos 3 comandos."
+  },
+  {
+    "id": "la_37",
+    "domain": "LA",
+    "text": "Conta 5 blocos",
+    "age_start_months": 42,
+    "age_end_months": 58,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: peça que a criança conte e entregue 5 blocos. Critério (Passa): a criança conta corretamente até 5 blocos."
+  },
+  {
+    "id": "la_38",
+    "domain": "LA",
+    "text": "Faz analogias - 2",
+    "age_start_months": 45,
+    "age_end_months": 60,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: apresente analogias verbais simples (ex.: 'gelo é frio, fogo é...'). Critério (Passa): a criança completa corretamente ao menos 2 analogias."
+  },
+  {
+    "id": "la_39",
+    "domain": "LA",
+    "text": "Define 7 palavras",
+    "age_start_months": 48,
+    "age_end_months": 65,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: pergunte 'o que é...?' sobre palavras comuns e abstratas. Critério (Passa): a criança define corretamente ao menos 7 palavras."
   }
 ]

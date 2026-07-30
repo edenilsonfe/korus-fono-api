@@ -1,6 +1,8 @@
 """Tests for developmental_screening scoring engine."""
 
 from app.services.battery_scoring_service import (
+    administration_start_index,
+    developmental_window_item_ids,
     score_developmental_module,
     synthesize_battery_scores,
 )
@@ -127,3 +129,55 @@ def test_synthesize_developmental_battery():
     assert synthesized["total_delays"] == 1
     assert "domain_levels" in synthesized
     assert synthesized["domain_levels"]["PS"] == "caution"
+
+
+def test_denver_package_full_item_counts():
+    _clear_cache()
+    package = get_instrument_content_package("denver-ii")
+    assert package.data.get("content_status") == "official-structure"
+    assert len(package.get_module_items("pessoal-social")) == 25
+    assert len(package.get_module_items("motor-fino")) == 29
+    assert len(package.get_module_items("linguagem")) == 39
+    assert len(package.get_module_items("motor-grosso")) == 32
+    rules = package.scoring.get("administration_rules") or {}
+    assert int(rules.get("basal_rule") or 0) == 3
+    assert int(rules.get("ceiling_rule") or 0) == 3
+
+
+def test_denver_start_index_limits_window_for_school_age():
+    """Criança ~5a começa na metade final; itens anteriores não entram na janela."""
+    _clear_cache()
+    package = get_instrument_content_package("denver-ii")
+    items = package.get_module_items("linguagem")
+    start = administration_start_index(items, age_months=60)
+    assert start >= len(items) // 2
+    assert start < len(items)
+
+    answers = {
+        "_session": {"start_index": start},
+        items[start]["id"]: {"response": "pass"},
+        items[min(start + 1, len(items) - 1)]["id"]: {"response": "pass"},
+        items[min(start + 2, len(items) - 1)]["id"]: {"response": "pass"},
+    }
+    result = score_developmental_module(
+        package, "linguagem", answers, patient_age_months=60
+    )
+    scored_ids = {item["id"] for item in result["items"]}
+    for idx in range(start):
+        assert items[idx]["id"] not in scored_ids
+    assert items[start]["id"] in scored_ids
+
+    window = developmental_window_item_ids(items, answers, patient_age_months=60)
+    assert window[0] == items[start]["id"]
+    assert len(window) == len(items) - start
+
+
+def test_denver_progress_total_from_patient_age_before_session():
+    _clear_cache()
+    package = get_instrument_content_package("denver-ii")
+    items = package.get_module_items("linguagem")
+    window_school = developmental_window_item_ids(items, {}, patient_age_months=60)
+    window_infant = developmental_window_item_ids(items, {}, patient_age_months=6)
+    assert len(window_school) >= 1
+    assert len(window_school) < len(items)
+    assert len(window_infant) > len(window_school)

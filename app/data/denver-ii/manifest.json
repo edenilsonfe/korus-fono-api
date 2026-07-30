@@ -1,22 +1,47 @@
 {
-  "version": 2,
+  "version": 3,
   "package_id": "denver-ii-br-v1",
   "instrument_slug": "denver-ii",
   "instrument_title": "Denver II — Triagem do Desenvolvimento",
-  "license_ref": "PUBLIC-STRUCTURE",
-  "content_status": "draft-knowledge",
+  "publisher": "Pedromônico et al. (1999) — tradução UNIFESP/EPM",
+  "license_ref": "UNIFESP-TRANSLATION-1999",
+  "content_status": "official-structure",
+  "content_note": "Itens traduzidos e adaptados por Pedromônico MRM et al. (1999), Escola Paulista de Medicina — UNIFESP, a partir do Denver II (Frankenburg & Dodds, 1990/1992). Estrutura e enunciados fiéis à tradução brasileira; uso comercial do instrumento requer autorização do detentor dos direitos (Denver Developmental Materials). Cobertura etária: 0 a 6 anos.",
   "norms_region": "BR",
+  "norms_file": "norms-br.json",
+  "age_coverage_months": {
+    "min": 0,
+    "max": 72
+  },
   "archetype": "observational",
   "supports_multi_session": true,
   "scale": [
-    { "value": 0, "label": "Falha / Ausente" },
-    { "value": 1, "label": "Passa / Presente" }
+    {
+      "value": 0,
+      "label": "Falha / Ausente"
+    },
+    {
+      "value": 1,
+      "label": "Passa / Presente"
+    }
   ],
   "domains": [
-    { "id": "PS", "title": "Pessoal-Social" },
-    { "id": "FM", "title": "Motor Fino" },
-    { "id": "LA", "title": "Linguagem" },
-    { "id": "MG", "title": "Motor Grosso" }
+    {
+      "id": "PS",
+      "title": "Pessoal-Social"
+    },
+    {
+      "id": "FM",
+      "title": "Motor Fino"
+    },
+    {
+      "id": "LA",
+      "title": "Linguagem"
+    },
+    {
+      "id": "MG",
+      "title": "Motor Grosso"
+    }
   ],
   "modules": {
     "pessoal-social": {
@@ -25,7 +50,7 @@
       "domain": "PS",
       "module_kind": "developmental",
       "items_file": "items/pessoal-social.json",
-      "item_count": 6,
+      "item_count": 25,
       "filler": "clinician"
     },
     "motor-fino": {
@@ -34,7 +59,7 @@
       "domain": "FM",
       "module_kind": "developmental",
       "items_file": "items/motor-fino.json",
-      "item_count": 6,
+      "item_count": 29,
       "filler": "clinician"
     },
     "linguagem": {
@@ -43,7 +68,7 @@
       "domain": "LA",
       "module_kind": "developmental",
       "items_file": "items/linguagem.json",
-      "item_count": 6,
+      "item_count": 39,
       "filler": "clinician"
     },
     "motor-grosso": {
@@ -52,27 +77,64 @@
       "domain": "MG",
       "module_kind": "developmental",
       "items_file": "items/motor-grosso.json",
-      "item_count": 6,
+      "item_count": 32,
       "filler": "clinician"
     }
   },
   "subtests": [
-    { "id": "pessoal-social", "title": "Pessoal-Social", "item_count": 6 },
-    { "id": "motor-fino", "title": "Motor Fino", "item_count": 6 },
-    { "id": "linguagem", "title": "Linguagem", "item_count": 6 },
-    { "id": "motor-grosso", "title": "Motor Grosso", "item_count": 6 }
+    {
+      "id": "pessoal-social",
+      "title": "Pessoal-Social",
+      "item_count": 25
+    },
+    {
+      "id": "motor-fino",
+      "title": "Motor Fino",
+      "item_count": 29
+    },
+    {
+      "id": "linguagem",
+      "title": "Linguagem",
+      "item_count": 39
+    },
+    {
+      "id": "motor-grosso",
+      "title": "Motor Grosso",
+      "item_count": 32
+    }
   ],
   "scoring": {
     "engine": "developmental_screening",
+    "administration_rules": {
+      "basal_rule": 3,
+      "ceiling_rule": 3
+    },
     "interpretations": [
-      { "level": "expected", "max_delays": 0, "label": "Desenvolvimento esperado" },
-      { "level": "caution", "max_delays": 2, "label": "Atenção — possível atraso" },
-      { "level": "delay", "max_delays": 999, "label": "Atraso significativo" }
+      {
+        "level": "expected",
+        "max_delays": 0,
+        "label": "Desenvolvimento esperado"
+      },
+      {
+        "level": "caution",
+        "max_delays": 2,
+        "label": "Atenção — possível atraso"
+      },
+      {
+        "level": "delay",
+        "max_delays": 999,
+        "label": "Atraso significativo"
+      }
     ]
   },
   "report": {
     "template_id": "denver-ii-br-v1",
-    "sections": ["identificacao", "resultados", "interpretacao", "recomendacoes"]
+    "sections": [
+      "identificacao",
+      "resultados",
+      "interpretacao",
+      "recomendacoes"
+    ]
   },
   "informant_forms": [],
   "requires_competency_ack": false

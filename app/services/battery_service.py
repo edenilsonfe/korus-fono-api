@@ -33,6 +33,7 @@ from app.schemas.battery import (
 from app.services.assessment_scoring import build_assessment_from_scores
 from app.services.battery_scoring_service import (
     battery_scores_to_fields,
+    developmental_window_item_ids,
     score_battery_subform,
     synthesize_battery_scores,
 )
@@ -119,10 +120,39 @@ class BatteryService:
         meta = record.assessment_metadata or {}
         return meta.get(BATTERY_METADATA_KEY, {})
 
+    def _subform_progress(
+        self,
+        subform: BatterySubformAssessment,
+        package: InstrumentContentPackage,
+        *,
+        patient_age_months: int | None,
+    ) -> tuple[int, int]:
+        mod = package.get_module_config(subform.subform_slug)
+        if mod.get("module_kind") != "developmental":
+            return subform.items_answered, subform.items_total
+
+        items = package.get_module_items(subform.subform_slug)
+        window_ids = developmental_window_item_ids(
+            items,
+            subform.answers or {},
+            patient_age_months=patient_age_months,
+            admin_rules=package.scoring.get("administration_rules") or {},
+        )
+        if not window_ids:
+            return subform.items_answered, subform.items_total
+        return _count_answered(subform.answers or {}, window_ids), len(window_ids)
+
     def _to_subform_response(
-        self, subform: BatterySubformAssessment, package: InstrumentContentPackage
+        self,
+        subform: BatterySubformAssessment,
+        package: InstrumentContentPackage,
+        *,
+        patient_age_months: int | None = None,
     ) -> BatterySubformResponse:
         mod = package.get_module_config(subform.subform_slug)
+        answered, total = self._subform_progress(
+            subform, package, patient_age_months=patient_age_months
+        )
         return BatterySubformResponse(
             id=str(subform.id),
             subform_slug=subform.subform_slug,
@@ -131,8 +161,8 @@ class BatteryService:
             domain=mod.get("domain"),
             required=subform.required and not package.is_legacy_module(subform.subform_slug),
             status=subform.status,
-            items_answered=subform.items_answered,
-            items_total=subform.items_total,
+            items_answered=answered,
+            items_total=total,
             scores=subform.scores,
             answers=subform.answers if subform.answers else None,
             completed_at=subform.completed_at,
@@ -151,6 +181,7 @@ class BatteryService:
     def _to_battery_response(self, record: Assessment, package: InstrumentContentPackage) -> BatteryResponse:
         meta = self._battery_metadata(record)
         subforms = sorted(record.battery_subforms, key=lambda s: s.subform_slug)
+        age = _patient_age_months(record.patient.birth_date if record.patient else None)
         return BatteryResponse(
             id=str(record.id),
             patient_id=str(record.patient_id),
@@ -162,7 +193,9 @@ class BatteryService:
             scores=record.scores,
             percentage=record.percentage,
             interpretation=record.interpretation,
-            subforms=[self._to_subform_response(sf, package) for sf in subforms],
+            subforms=[
+                self._to_subform_response(sf, package, patient_age_months=age) for sf in subforms
+            ],
             started_at=meta.get("started_at"),
             completed_at=meta.get("completed_at"),
             duration_minutes=meta.get("duration_minutes"),
@@ -341,21 +374,42 @@ class BatteryService:
         merged = {**subform.answers, **data.answers}
         subform.answers = merged
         items = package.get_module_items(subform_slug)
-        item_ids = [item["id"] for item in items]
-        subform.items_answered = _count_answered(merged, item_ids)
+        mod = package.get_module_config(subform_slug)
+        age = _patient_age_months(record.patient.birth_date if record.patient else None)
+        if mod.get("module_kind") == "developmental":
+            window_ids = developmental_window_item_ids(
+                items,
+                merged,
+                patient_age_months=age,
+                admin_rules=package.scoring.get("administration_rules") or {},
+            )
+            subform.items_total = len(window_ids) if window_ids else len(items)
+            subform.items_answered = _count_answered(merged, window_ids or [i["id"] for i in items])
+        else:
+            item_ids = [item["id"] for item in items]
+            subform.items_answered = _count_answered(merged, item_ids)
 
         if subform.status == BATTERY_SUBFORM_STATUS_PENDING:
             subform.status = BATTERY_SUBFORM_STATUS_IN_PROGRESS
             subform.started_at = subform.started_at or _utcnow()
 
         if finalize:
-            age = _patient_age_months(record.patient.birth_date if record.patient else None)
             scores = score_battery_subform(
                 package, subform_slug, merged, patient_age_months=age
             )
             subform.scores = scores
             subform.status = BATTERY_SUBFORM_STATUS_COMPLETED
             subform.completed_at = _utcnow()
+            if mod.get("module_kind") == "developmental":
+                window_ids = developmental_window_item_ids(
+                    items,
+                    merged,
+                    patient_age_months=age,
+                    admin_rules=package.scoring.get("administration_rules") or {},
+                )
+                if window_ids:
+                    subform.items_total = len(window_ids)
+                    subform.items_answered = _count_answered(merged, window_ids)
 
         await self.db.commit()
         await self.db.refresh(record, ["battery_subforms", "patient"])

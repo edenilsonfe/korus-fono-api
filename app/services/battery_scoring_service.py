@@ -638,6 +638,69 @@ def _is_developmental_fail(ans: dict[str, Any]) -> bool:
     return value is not None and int(value) == 0
 
 
+def administration_start_index(items: list[dict[str, Any]], age_months: int) -> int:
+    """Index where age-band administration starts (mirrors web adl2-age-bands)."""
+    bands: list[tuple[int, int]] = []
+    seen: set[tuple[int, int]] = set()
+    for item in items:
+        start = item.get("age_start_months")
+        end = item.get("age_end_months")
+        if start is None or end is None:
+            continue
+        key = (int(start), int(end))
+        if key not in seen:
+            seen.add(key)
+            bands.append(key)
+    bands.sort(key=lambda b: b[0])
+    if not bands:
+        return 0
+
+    selected: tuple[int, int] | None = None
+    for start, end in bands:
+        if start <= age_months <= end:
+            selected = (start, end)
+            break
+    if selected is None:
+        selected = min(bands, key=lambda b: abs(age_months - (b[0] + b[1]) / 2))
+
+    for idx, item in enumerate(items):
+        if item.get("age_start_months") == selected[0] and item.get("age_end_months") == selected[1]:
+            return idx
+    for idx, item in enumerate(items):
+        start = item.get("age_start_months")
+        if start is not None and int(start) >= selected[0]:
+            return idx
+    return 0
+
+
+def developmental_window_item_ids(
+    items: list[dict[str, Any]],
+    answers: dict[str, Any] | None,
+    *,
+    patient_age_months: int | None = None,
+    admin_rules: dict[str, Any] | None = None,
+) -> list[str]:
+    """Item ids from the age-band start through the end of the module (progress totals).
+
+    Matches the web `itemsFromAgeBandStart` window. Basal/ceiling affect scoring, not the
+    denominator shown while applying — otherwise in-progress totals collapse to 1/1.
+    """
+    _ = admin_rules  # kept for call-site compatibility; progress uses start→end
+    answers = answers or {}
+    session = _item_answer(answers, "_session")
+    start_index: int | None = None
+    if session and session.get("start_index") is not None:
+        start_index = int(session["start_index"])
+    elif patient_age_months is not None and items:
+        start_index = administration_start_index(items, patient_age_months)
+
+    if start_index is None:
+        return [item["id"] for item in items if item.get("id")]
+    if items:
+        start_index = max(0, min(start_index, len(items) - 1))
+    return [item["id"] for item in items[start_index:] if item.get("id")]
+
+
 def _apply_basal_ceiling_window(
     items: list[dict[str, Any]],
     answers: dict[str, Any],
@@ -653,8 +716,22 @@ def _apply_basal_ceiling_window(
     if basal_index is None and ceiling_index is None:
         basal_rule = int(admin_rules.get("basal_rule") or 0)
         ceiling_rule = int(admin_rules.get("ceiling_rule") or 0)
-        if not basal_rule and not ceiling_rule:
+        start_index = session.get("start_index")
+        if start_index is None and admin_rules:
+            start_index = len(items) // 2
+        if start_index is None:
             return items, session_meta
+        start_index = int(start_index)
+        if items:
+            start_index = max(0, min(start_index, len(items) - 1))
+
+        # Denver (sem basal/ceiling): janela = itens a partir da faixa etária.
+        if not basal_rule and not ceiling_rule:
+            return items[start_index:], {
+                "start_index": start_index,
+                "basal_index": start_index,
+                "ceiling_index": len(items) - 1 if items else 0,
+            }
 
         passes: list[bool] = []
         for item in items:
@@ -663,11 +740,6 @@ def _apply_basal_ceiling_window(
                 passes.append(_is_developmental_pass(ans))
             else:
                 passes.append(False)
-
-        start_index = session.get("start_index")
-        if start_index is None and admin_rules:
-            start_index = len(items) // 2
-        start_index = int(start_index or 0)
 
         if basal_rule and basal_index is None:
             streak = 0

@@ -2,43 +2,289 @@
   {
     "id": "mg_01",
     "domain": "MG",
-    "text": "Levanta cabeça em prono",
-    "age_start_months": 2,
-    "age_end_months": 4
+    "text": "Movimentos simétricos",
+    "age_start_months": 0,
+    "age_end_months": 1,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: observe os movimentos espontâneos dos membros do bebê em decúbito dorsal. Critério (Passa): os movimentos dos braços e pernas são simétricos entre os lados."
   },
   {
     "id": "mg_02",
     "domain": "MG",
-    "text": "Rola de prono para supino",
-    "age_start_months": 4,
-    "age_end_months": 6
+    "text": "Eleva a cabeça (An)",
+    "age_start_months": 0,
+    "age_end_months": 2,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se, em posição de bruços, o bebê eleva a cabeça brevemente. Critério (Passa): cuidador confirma a elevação da cabeça."
   },
   {
     "id": "mg_03",
     "domain": "MG",
-    "text": "Senta sem apoio",
-    "age_start_months": 6,
-    "age_end_months": 9
+    "text": "Mantém a cabeça a 45°",
+    "age_start_months": 1,
+    "age_end_months": 3,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: coloque o bebê em decúbito ventral e observe. Critério (Passa): o bebê eleva e mantém a cabeça a cerca de 45° por alguns segundos."
   },
   {
     "id": "mg_04",
     "domain": "MG",
-    "text": "Engatinha ou se arrasta",
-    "age_start_months": 9,
-    "age_end_months": 12
+    "text": "Mantém a cabeça a 90°",
+    "age_start_months": 2,
+    "age_end_months": 4,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: coloque o bebê em decúbito ventral e observe. Critério (Passa): o bebê eleva e mantém a cabeça a cerca de 90°, sustentando-se nos antebraços."
   },
   {
     "id": "mg_05",
     "domain": "MG",
-    "text": "Fica em pé com apoio",
-    "age_start_months": 12,
-    "age_end_months": 15
+    "text": "Sentada, sustenta a cabeça",
+    "age_start_months": 2,
+    "age_end_months": 4,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: segure o bebê sentado, apoiando o tronco. Critério (Passa): o bebê mantém a cabeça firme e ereta, sem cair para os lados."
   },
   {
     "id": "mg_06",
     "domain": "MG",
-    "text": "Anda sem apoio",
+    "text": "Sustenta seu peso nas pernas",
+    "age_start_months": 3,
+    "age_end_months": 5,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: segure o bebê em pé, com apoio, sobre uma superfície firme. Critério (Passa): o bebê sustenta parte do peso nas pernas, sem dobrar os joelhos completamente."
+  },
+  {
+    "id": "mg_07",
+    "domain": "MG",
+    "text": "Eleva o peito",
+    "age_start_months": 3,
+    "age_end_months": 5,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: coloque o bebê em decúbito ventral e observe. Critério (Passa): o bebê eleva o peito apoiando-se nas mãos/antebraços estendidos."
+  },
+  {
+    "id": "mg_08",
+    "domain": "MG",
+    "text": "Muda de posição",
+    "age_start_months": 4,
+    "age_end_months": 7,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: observe o bebê livre em uma superfície segura. Critério (Passa): o bebê rola de barriga para as costas ou vice-versa."
+  },
+  {
+    "id": "mg_09",
+    "domain": "MG",
+    "text": "Puxada para sentar-se, mantém a cabeça firme",
+    "age_start_months": 4,
+    "age_end_months": 7,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: segure as mãos do bebê e puxe-o suavemente para a posição sentada. Critério (Passa): a cabeça acompanha o movimento do tronco, sem cair para trás."
+  },
+  {
+    "id": "mg_10",
+    "domain": "MG",
+    "text": "Senta sem apoio",
+    "age_start_months": 6,
+    "age_end_months": 9,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: coloque o bebê sentado sem apoio das mãos do examinador. Critério (Passa): o bebê permanece sentado sozinho por alguns segundos."
+  },
+  {
+    "id": "mg_11",
+    "domain": "MG",
+    "text": "De pé, sustenta o corpo",
+    "age_start_months": 6,
+    "age_end_months": 10,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: segure o bebê em pé com apoio leve. Critério (Passa): o bebê sustenta o peso do corpo firmemente sobre as pernas estendidas."
+  },
+  {
+    "id": "mg_12",
+    "domain": "MG",
+    "text": "Puxa para levantar-se",
+    "age_start_months": 8,
+    "age_end_months": 12,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: observe a criança próxima a um móvel estável. Critério (Passa): a criança se puxa para ficar em pé segurando-se em um apoio."
+  },
+  {
+    "id": "mg_13",
+    "domain": "MG",
+    "text": "Senta-se",
+    "age_start_months": 8,
+    "age_end_months": 12,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: observe a criança em posição livre, sem auxílio. Critério (Passa): a criança consegue sentar-se sozinha a partir de outra posição."
+  },
+  {
+    "id": "mg_14",
+    "domain": "MG",
+    "text": "Fica de pé",
+    "age_start_months": 9,
+    "age_end_months": 13,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: observe a criança próxima a um apoio. Critério (Passa): a criança fica em pé segurando-se em um móvel/apoio, por alguns segundos."
+  },
+  {
+    "id": "mg_15",
+    "domain": "MG",
+    "text": "Fica de pé sozinha",
+    "age_start_months": 10,
+    "age_end_months": 14,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: observe a criança sem oferecer apoio. Critério (Passa): a criança permanece em pé sozinha por alguns segundos, sem se apoiar."
+  },
+  {
+    "id": "mg_16",
+    "domain": "MG",
+    "text": "Abaixa-se e levanta-se",
+    "age_start_months": 11,
+    "age_end_months": 15,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: coloque um objeto no chão e observe a criança pegá-lo. Critério (Passa): a criança se abaixa para pegar o objeto e volta a ficar em pé sozinha."
+  },
+  {
+    "id": "mg_17",
+    "domain": "MG",
+    "text": "Anda bem",
+    "age_start_months": 11,
+    "age_end_months": 15,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: observe a marcha independente da criança em superfície plana. Critério (Passa): a criança anda sozinha com boa estabilidade, sem apoio."
+  },
+  {
+    "id": "mg_18",
+    "domain": "MG",
+    "text": "Anda para trás (An)",
+    "age_start_months": 14,
+    "age_end_months": 20,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança consegue andar alguns passos para trás. Critério (Passa): cuidador confirma essa habilidade."
+  },
+  {
+    "id": "mg_19",
+    "domain": "MG",
+    "text": "Corre",
     "age_start_months": 15,
-    "age_end_months": 18
+    "age_end_months": 21,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: observe a criança em espaço livre, incentivando-a a correr. Critério (Passa): a criança corre com coordenação, sem cair com frequência."
+  },
+  {
+    "id": "mg_20",
+    "domain": "MG",
+    "text": "Sobe escada (An)",
+    "age_start_months": 15,
+    "age_end_months": 22,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança sobe escadas, mesmo que com apoio, alternando ou não os pés. Critério (Passa): cuidador confirma essa habilidade."
+  },
+  {
+    "id": "mg_21",
+    "domain": "MG",
+    "text": "Chuta bola",
+    "age_start_months": 18,
+    "age_end_months": 24,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: coloque uma bola no chão e peça que a criança a chute. Critério (Passa): a criança chuta a bola sem perder o equilíbrio ao ponto de cair."
+  },
+  {
+    "id": "mg_22",
+    "domain": "MG",
+    "text": "Pula",
+    "age_start_months": 21,
+    "age_end_months": 28,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: demonstre pular com os dois pés e peça que a criança repita. Critério (Passa): a criança pula com os dois pés saindo do chão simultaneamente."
+  },
+  {
+    "id": "mg_23",
+    "domain": "MG",
+    "text": "Arremessa bola",
+    "age_start_months": 23,
+    "age_end_months": 33,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: peça que a criança arremesse uma bola em direção ao examinador, por cima do ombro. Critério (Passa): a criança arremessa a bola de forma dirigida."
+  },
+  {
+    "id": "mg_24",
+    "domain": "MG",
+    "text": "Salta",
+    "age_start_months": 26,
+    "age_end_months": 36,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: demonstre saltar para frente com os dois pés juntos e peça que a criança repita. Critério (Passa): a criança salta para frente sem cair."
+  },
+  {
+    "id": "mg_25",
+    "domain": "MG",
+    "text": "Equilibra-se em cada pé por 1 segundo",
+    "age_start_months": 28,
+    "age_end_months": 40,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: peça que a criança fique em um pé só, sem apoio, cronometrando o tempo. Critério (Passa): a criança mantém o equilíbrio em cada pé por pelo menos 1 segundo."
+  },
+  {
+    "id": "mg_26",
+    "domain": "MG",
+    "text": "Equilibra-se em cada pé por 2 segundos",
+    "age_start_months": 31,
+    "age_end_months": 44,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: peça que a criança fique em um pé só, sem apoio, cronometrando o tempo. Critério (Passa): a criança mantém o equilíbrio em cada pé por pelo menos 2 segundos."
+  },
+  {
+    "id": "mg_27",
+    "domain": "MG",
+    "text": "Pula em um pé só",
+    "age_start_months": 33,
+    "age_end_months": 48,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: demonstre pular em um pé só e peça que a criança repita. Critério (Passa): a criança pula ao menos uma vez em um pé só, mantendo o equilíbrio."
+  },
+  {
+    "id": "mg_28",
+    "domain": "MG",
+    "text": "Equilibra-se em cada pé por 3 segundos",
+    "age_start_months": 36,
+    "age_end_months": 50,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: peça que a criança fique em um pé só, sem apoio, cronometrando o tempo. Critério (Passa): a criança mantém o equilíbrio em cada pé por pelo menos 3 segundos."
+  },
+  {
+    "id": "mg_29",
+    "domain": "MG",
+    "text": "Equilibra-se em cada pé por 4 segundos",
+    "age_start_months": 39,
+    "age_end_months": 54,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: peça que a criança fique em um pé só, sem apoio, cronometrando o tempo. Critério (Passa): a criança mantém o equilíbrio em cada pé por pelo menos 4 segundos."
+  },
+  {
+    "id": "mg_30",
+    "domain": "MG",
+    "text": "Equilibra-se em cada pé por 5 segundos",
+    "age_start_months": 42,
+    "age_end_months": 58,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: peça que a criança fique em um pé só, sem apoio, cronometrando o tempo. Critério (Passa): a criança mantém o equilíbrio em cada pé por pelo menos 5 segundos."
+  },
+  {
+    "id": "mg_31",
+    "domain": "MG",
+    "text": "Marcha ponta-calcanhar",
+    "age_start_months": 45,
+    "age_end_months": 60,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: demonstre andar em linha reta encostando o calcanhar na ponta do pé oposto a cada passo e peça que a criança repita. Critério (Passa): a criança executa a marcha ponta-calcanhar por alguns passos com equilíbrio."
+  },
+  {
+    "id": "mg_32",
+    "domain": "MG",
+    "text": "Equilibra-se em cada pé por 6 segundos",
+    "age_start_months": 48,
+    "age_end_months": 65,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: peça que a criança fique em um pé só, sem apoio, cronometrando o tempo. Critério (Passa): a criança mantém o equilíbrio em cada pé por pelo menos 6 segundos."
   }
 ]

@@ -2,43 +2,262 @@
   {
     "id": "fm_01",
     "domain": "FM",
-    "text": "Segue objeto até linha média",
-    "age_start_months": 2,
-    "age_end_months": 4
+    "text": "Segue até a linha média",
+    "age_start_months": 0,
+    "age_end_months": 2,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: com o bebê em decúbito dorsal, mova um objeto colorido lentamente até a linha média do campo visual. Critério (Passa): o bebê acompanha o objeto com o olhar até a linha média."
   },
   {
     "id": "fm_02",
     "domain": "FM",
-    "text": "Transfere objeto de uma mão para outra",
-    "age_start_months": 4,
-    "age_end_months": 6
+    "text": "Ultrapassa a linha média",
+    "age_start_months": 1,
+    "age_end_months": 3,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: mova o objeto além da linha média, para o lado. Critério (Passa): o bebê acompanha o movimento do objeto ultrapassando a linha média."
   },
   {
     "id": "fm_03",
     "domain": "FM",
-    "text": "Pega objetos pequenos com preensão em pinça inferior",
-    "age_start_months": 6,
-    "age_end_months": 9
+    "text": "Segura um chocalho",
+    "age_start_months": 2,
+    "age_end_months": 4,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: coloque um chocalho na mão do bebê. Critério (Passa): o bebê segura o chocalho por alguns segundos."
   },
   {
     "id": "fm_04",
     "domain": "FM",
-    "text": "Bate palmas",
-    "age_start_months": 9,
-    "age_end_months": 12
+    "text": "Junta as mãos",
+    "age_start_months": 2,
+    "age_end_months": 4,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: observe o bebê em posição de alerta, sem estimular diretamente. Critério (Passa): o bebê junta as duas mãos na linha média do corpo."
   },
   {
     "id": "fm_05",
     "domain": "FM",
-    "text": "Faz torre de 2 cubos",
-    "age_start_months": 12,
-    "age_end_months": 15
+    "text": "Segue até 180°",
+    "age_start_months": 3,
+    "age_end_months": 5,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: mova o objeto em um arco de 180° diante do bebê. Critério (Passa): o bebê acompanha o objeto com o olhar por todo o percurso."
   },
   {
     "id": "fm_06",
     "domain": "FM",
+    "text": "Olha para um objeto pequeno",
+    "age_start_months": 3,
+    "age_end_months": 5,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: apresente um objeto pequeno (ex.: passa/uva-passa) a cerca de 30 cm do rosto do bebê. Critério (Passa): o bebê fixa o olhar no objeto pequeno."
+  },
+  {
+    "id": "fm_07",
+    "domain": "FM",
+    "text": "Tenta alcançar um objeto pequeno",
+    "age_start_months": 3,
+    "age_end_months": 6,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: aproxime o objeto pequeno ao alcance da criança. Critério (Passa): a criança estende a mão em direção ao objeto."
+  },
+  {
+    "id": "fm_08",
+    "domain": "FM",
+    "text": "Procura o pom-pom",
+    "age_start_months": 5,
+    "age_end_months": 8,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: deixe cair um pom-pom (ou objeto pequeno) fora da vista da criança. Critério (Passa): a criança procura o objeto com o olhar/mão."
+  },
+  {
+    "id": "fm_09",
+    "domain": "FM",
+    "text": "Pega objeto pequeno",
+    "age_start_months": 5,
+    "age_end_months": 8,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: coloque o objeto pequeno ao alcance da criança sobre uma superfície plana. Critério (Passa): a criança pega o objeto usando toda a mão (preensão palmar)."
+  },
+  {
+    "id": "fm_10",
+    "domain": "FM",
+    "text": "Transfere um cubo",
+    "age_start_months": 5,
+    "age_end_months": 8,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: entregue um cubo a uma das mãos da criança. Critério (Passa): a criança passa o cubo de uma mão para a outra."
+  },
+  {
+    "id": "fm_11",
+    "domain": "FM",
+    "text": "Pega dois cubos",
+    "age_start_months": 6,
+    "age_end_months": 9,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: ofereça um segundo cubo enquanto a criança já segura o primeiro. Critério (Passa): a criança segura um cubo em cada mão simultaneamente."
+  },
+  {
+    "id": "fm_12",
+    "domain": "FM",
+    "text": "Pinça polegar-dedo",
+    "age_start_months": 7,
+    "age_end_months": 10,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: ofereça o objeto pequeno sobre a mesa. Critério (Passa): a criança pega o objeto usando pinça entre polegar e indicador."
+  },
+  {
+    "id": "fm_13",
+    "domain": "FM",
+    "text": "Bate dois cubos seguros nas mãos (An)",
+    "age_start_months": 7,
+    "age_end_months": 11,
+    "report_item": true,
+    "examiner_instructions": "Pergunte ao cuidador se a criança bate dois cubos (um em cada mão) um contra o outro. Critério (Passa): cuidador confirma esse comportamento."
+  },
+  {
+    "id": "fm_14",
+    "domain": "FM",
+    "text": "Coloca bloco na caneca",
+    "age_start_months": 9,
+    "age_end_months": 14,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: ofereça um cubo e uma caneca/xícara pequena. Critério (Passa): a criança coloca o cubo dentro da caneca sem demonstração prévia."
+  },
+  {
+    "id": "fm_15",
+    "domain": "FM",
     "text": "Rabisca espontaneamente",
+    "age_start_months": 11,
+    "age_end_months": 17,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: ofereça papel e lápis/giz de cera à criança. Critério (Passa): a criança rabisca espontaneamente, sem demonstração."
+  },
+  {
+    "id": "fm_16",
+    "domain": "FM",
+    "text": "Retira objeto pequeno, por demonstração",
+    "age_start_months": 12,
+    "age_end_months": 18,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: demonstre retirar o objeto pequeno de dentro de um frasco transparente e peça que a criança repita. Critério (Passa): a criança retira o objeto após a demonstração."
+  },
+  {
+    "id": "fm_17",
+    "domain": "FM",
+    "text": "Torre de 2 cubos",
+    "age_start_months": 12,
+    "age_end_months": 19,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: demonstre empilhar 2 cubos e peça que a criança repita. Critério (Passa): a criança empilha 2 cubos sem derrubar."
+  },
+  {
+    "id": "fm_18",
+    "domain": "FM",
+    "text": "Torre de 4 cubos",
     "age_start_months": 15,
-    "age_end_months": 18
+    "age_end_months": 22,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: demonstre empilhar 4 cubos e peça que a criança repita. Critério (Passa): a criança empilha 4 cubos."
+  },
+  {
+    "id": "fm_19",
+    "domain": "FM",
+    "text": "Torre de 6 cubos",
+    "age_start_months": 18,
+    "age_end_months": 27,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: demonstre empilhar 6 cubos e peça que a criança repita. Critério (Passa): a criança empilha 6 cubos."
+  },
+  {
+    "id": "fm_20",
+    "domain": "FM",
+    "text": "Imita linha vertical",
+    "age_start_months": 18,
+    "age_end_months": 27,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: desenhe uma linha vertical diante da criança e peça que ela copie. Critério (Passa): a criança desenha uma linha com orientação predominantemente vertical."
+  },
+  {
+    "id": "fm_21",
+    "domain": "FM",
+    "text": "Torre de 8 cubos",
+    "age_start_months": 21,
+    "age_end_months": 31,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: demonstre empilhar 8 cubos e peça que a criança repita. Critério (Passa): a criança empilha 8 cubos."
+  },
+  {
+    "id": "fm_22",
+    "domain": "FM",
+    "text": "Move o polegar com a mão fechada",
+    "age_start_months": 22,
+    "age_end_months": 32,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: peça que a criança feche a mão e mova apenas o polegar, por demonstração. Critério (Passa): a criança movimenta o polegar isoladamente, sem mover os demais dedos."
+  },
+  {
+    "id": "fm_23",
+    "domain": "FM",
+    "text": "Copia um círculo",
+    "age_start_months": 27,
+    "age_end_months": 38,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: desenhe um círculo e peça que a criança copie, sem demonstração do traçado. Critério (Passa): a criança desenha uma forma fechada e circular reconhecível."
+  },
+  {
+    "id": "fm_24",
+    "domain": "FM",
+    "text": "Desenha pessoa (3 partes)",
+    "age_start_months": 31,
+    "age_end_months": 44,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: peça que a criança desenhe uma pessoa. Critério (Passa): o desenho contém ao menos 3 partes do corpo."
+  },
+  {
+    "id": "fm_25",
+    "domain": "FM",
+    "text": "Copia cruz (+)",
+    "age_start_months": 33,
+    "age_end_months": 47,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: desenhe uma cruz (+) e peça que a criança copie. Critério (Passa): a criança reproduz a cruz com dois traços que se cruzam."
+  },
+  {
+    "id": "fm_26",
+    "domain": "FM",
+    "text": "Aponta a linha mais comprida",
+    "age_start_months": 36,
+    "age_end_months": 50,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: apresente pares de linhas de tamanhos diferentes e peça que a criança aponte a mais comprida. Critério (Passa): a criança aponta corretamente a linha mais longa na maioria das tentativas."
+  },
+  {
+    "id": "fm_27",
+    "domain": "FM",
+    "text": "Copia quadrado, com demonstração",
+    "age_start_months": 40,
+    "age_end_months": 54,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: desenhe um quadrado enquanto a criança observa e peça que ela copie. Critério (Passa): a criança reproduz uma forma com quatro lados reconhecível."
+  },
+  {
+    "id": "fm_28",
+    "domain": "FM",
+    "text": "Desenha pessoa (6 partes)",
+    "age_start_months": 43,
+    "age_end_months": 58,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: peça que a criança desenhe uma pessoa. Critério (Passa): o desenho contém ao menos 6 partes do corpo."
+  },
+  {
+    "id": "fm_29",
+    "domain": "FM",
+    "text": "Copia quadrado",
+    "age_start_months": 48,
+    "age_end_months": 65,
+    "report_item": false,
+    "examiner_instructions": "Procedimento: peça que a criança copie um quadrado já desenhado, sem demonstração do traçado. Critério (Passa): a criança reproduz um quadrado reconhecível."
   }
 ]

@@ -1,8 +1,9 @@
 {
-  "version": 1,
+  "version": 2,
   "region": "BR",
-  "status": "stub",
-  "note": "Normas brasileiras em desenvolvimento — scoring raw até publicação licenciada.",
+  "status": "partial",
+  "source": "Pedromônico et al. (1999) — tradução UNIFESP/EPM do Denver II",
+  "note": "Percentis 25%/75%/90% de idade aproximados estão embutidos em cada item do pacote (age_start_months ~25%, age_end_months ~90%), como referência de triagem. Tabelas normativas brasileiras completas (incluindo 75%) e barras oficiais de fidelidade psicométrica ainda dependem da publicação de um kit licenciado do editor.",
   "domains": {},
   "age_bands": []
 }
