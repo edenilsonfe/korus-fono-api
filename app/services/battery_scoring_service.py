@@ -679,8 +679,10 @@ def _apply_basal_ceiling_window(
                         break
                 else:
                     streak = 0
+            # Sem basal atrás do ponto de partida: janela começa na faixa escolhida
+            # (itens anteriores não administrados não entram como unanswered).
             if basal_index is None:
-                basal_index = 0
+                basal_index = start_index
 
         if ceiling_rule and ceiling_index is None:
             streak = 0
@@ -694,7 +696,12 @@ def _apply_basal_ceiling_window(
                 else:
                     streak = 0
             if ceiling_index is None:
-                ceiling_index = len(items) - 1
+                # Sem teto por falhas: fecha na última resposta administrada.
+                last_answered = start_index
+                for idx in range(start_index, len(items)):
+                    if _item_answer(answers, items[idx]["id"]):
+                        last_answered = idx
+                ceiling_index = last_answered
 
     session_meta = {
         "basal_index": basal_index,
@@ -739,11 +746,14 @@ def score_observational_module(
 
     scale = mod.get("scale") or package.scale
     max_value = max((int(s["value"]) for s in scale), default=2)
+    min_value = min((int(s["value"]) for s in scale), default=0)
     interpretations = package.scoring.get("interpretations", [])
     zero_label = next((str(s.get("label", "")) for s in scale if int(s["value"]) == 0), "")
     zero_is_not_observed = mod.get("zero_is_not_observed")
     if zero_is_not_observed is None:
         zero_is_not_observed = "não observado" in zero_label.lower() or "not observed" in zero_label.lower()
+    scale_direction = _resolve_scale_direction(package, mod)
+    lower_is_better = scale_direction == "lower_is_better"
 
     item_details: list[dict[str, Any]] = []
     not_observed = 0
@@ -756,6 +766,7 @@ def score_observational_module(
     for item in items:
         input_type = item.get("input_type") or mod.get("input_type", "scale")
         ans = _item_answer(answers, item["id"])
+        label = item.get("text", item["id"])
 
         if input_type == "checklist":
             selected = ans.get("selected") or []
@@ -778,10 +789,19 @@ def score_observational_module(
                 possible_points += max_value
                 item_points = round((present_count / total_options) * max_value)
                 points += item_points
-                if present_count >= total_options * 0.7:
-                    strengths.append(item.get("text", item["id"]))
-                elif present_count <= total_options * 0.3:
-                    attention_items.append(item.get("text", item["id"]))
+                # lower_is_better: checklist de sinais de risco — muitos marcados = atenção
+                many = present_count >= total_options * 0.7
+                few = present_count <= total_options * 0.3
+                if lower_is_better:
+                    if many:
+                        attention_items.append(label)
+                    elif few:
+                        strengths.append(label)
+                else:
+                    if many:
+                        strengths.append(label)
+                    elif few:
+                        attention_items.append(label)
             item_details.append(
                 {
                     "id": item["id"],
@@ -847,14 +867,20 @@ def score_observational_module(
                 "notes": ans.get("notes", ""),
             }
         )
-        if value == max_value:
-            strengths.append(item.get("text", item["id"]))
-        elif value == 1:
-            attention_items.append(item.get("text", item["id"]))
+        if lower_is_better:
+            # Normal/min → força; qualquer severidade → atenção (PARD engasgo, MBGR etc.)
+            if value == min_value:
+                strengths.append(label)
+            else:
+                attention_items.append(label)
+        else:
+            if value == max_value:
+                strengths.append(label)
+            elif value == 1:
+                attention_items.append(label)
 
     percentage = round((points / possible_points) * 100, 1) if possible_points else 0.0
-    scale_direction = _resolve_scale_direction(package, mod)
-    if scale_direction == "lower_is_better":
+    if lower_is_better:
         percentage = round(100 - percentage, 1)
 
     interpretations = package.scoring.get("interpretations", [])

@@ -35,6 +35,13 @@ def test_resolve_instrument_slug_aliases():
     assert resolve_instrument_slug("vbmapp") == "vb-mapp"
 
 
+def test_eat10_masa_removed_from_aliases():
+    assert resolve_instrument_slug("eat10") is None
+    assert resolve_instrument_slug("masa") is None
+    assert resolve_protocol_id("eat-10") == "eat-10"
+    assert resolve_protocol_id("masa") == "masa"
+
+
 def test_resolve_protocol_id_aliases():
     assert resolve_protocol_id("ados-2") == "ados2"
     assert resolve_protocol_id("denver-ii") == "denver2"

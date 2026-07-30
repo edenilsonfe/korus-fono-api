@@ -208,19 +208,6 @@ PROTOCOLS = [
         ],
     },
     {
-        "id": "eat10",
-        "name": "EAT-10",
-        "full_name": "Eating Assessment Tool — 10 itens",
-        "description": "Questionário de autorrelato para triagem de disfagia.",
-        "age_range": "Adultos",
-        "field_templates": [
-            {"key": "score_total", "label": "Score total"},
-            {"key": "item_comprometido", "label": "Item mais comprometido"},
-            {"key": "qualidade_vida", "label": "Qualidade de vida"},
-            {"key": "conduta", "label": "Conduta"},
-        ],
-    },
-    {
         "id": "doss",
         "name": "DOSS",
         "full_name": "Dysphagia Outcome and Severity Scale",
@@ -231,20 +218,6 @@ PROTOCOLS = [
             {"key": "consistencias", "label": "Consistências aceitas"},
             {"key": "compensacoes", "label": "Compensações"},
             {"key": "aspiracao", "label": "Aspiração"},
-        ],
-    },
-    {
-        "id": "masa",
-        "name": "MASA",
-        "full_name": "The Mann Assessment of Swallowing Ability",
-        "description": "Instrumento padronizado de avaliação clínica da deglutição.",
-        "age_range": "Adultos e idosos",
-        "field_templates": [
-            {"key": "score_total", "label": "Score total"},
-            {"key": "risco_aspiracao", "label": "Risco de aspiração"},
-            {"key": "consciencia", "label": "Consciência"},
-            {"key": "degluticao", "label": "Deglutição"},
-            {"key": "conduta", "label": "Conduta"},
         ],
     },
     {

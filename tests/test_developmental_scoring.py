@@ -81,6 +81,30 @@ def test_bayley_auto_basal_ceiling_rules():
     assert result["session"]["basal_index"] is not None or result["passes"] >= 1
 
 
+def test_bayley_start_index_excludes_prior_unanswered():
+    """Faixa etária = start: itens anteriores à janela não entram como unanswered."""
+    _clear_cache()
+    package = get_instrument_content_package("bayley-iii")
+    items = package.get_module_items("cognicao")
+    answers = {
+        "_session": {"start_index": 3},
+        items[3]["id"]: {"response": "pass"},
+        items[4]["id"]: {"response": "pass"},
+        items[5]["id"]: {"response": "pass"},
+    }
+    result = score_developmental_module(
+        package, "cognicao", answers, patient_age_months=18
+    )
+    scored_ids = {item["id"] for item in result["items"]}
+    assert items[0]["id"] not in scored_ids
+    assert items[1]["id"] not in scored_ids
+    assert items[2]["id"] not in scored_ids
+    assert items[3]["id"] in scored_ids
+    assert result["unanswered"] == 0
+    assert result["session"]["basal_index"] == 3
+    assert result["session"]["ceiling_index"] == 5
+
+
 def test_synthesize_developmental_battery():
     _clear_cache()
     package = get_instrument_content_package("denver-ii")

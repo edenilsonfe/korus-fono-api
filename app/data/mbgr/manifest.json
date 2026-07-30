@@ -2,17 +2,17 @@
   "version": 2,
   "package_id": "mbgr-br-v1",
   "instrument_slug": "mbgr",
-  "instrument_title": "MBGR — Motricidade Bucofacial",
+  "instrument_title": "MBGR — Avaliação Miofuncional Orofacial",
   "license_ref": "PUBLIC-STRUCTURE",
   "content_status": "draft-knowledge",
   "norms_region": "BR",
   "archetype": "observational",
   "supports_multi_session": true,
   "scale": [
-    { "value": 0, "label": "Nunca / Ausente" },
-    { "value": 1, "label": "Ocasionalmente" },
-    { "value": 2, "label": "Frequentemente" },
-    { "value": 3, "label": "Muito frequentemente / Severo" }
+    { "value": 0, "label": "Adequado" },
+    { "value": 1, "label": "Alteração leve" },
+    { "value": 2, "label": "Alteração severa" },
+    { "value": 3, "label": "Não realiza" }
   ],
   "domains": [
     { "id": "historia", "title": "História clínica" },

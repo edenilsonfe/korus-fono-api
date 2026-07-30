@@ -2,12 +2,12 @@
   {
     "id": "deg_reflexo",
     "domain": "degluticao",
-    "text": "Presença e latência do reflexo de deglutição."
+    "text": "Postura da língua na deglutição habitual."
   },
   {
     "id": "deg_fases",
     "domain": "degluticao",
-    "text": "Integração das fases oral, faríngea e esofágica."
+    "text": "Postura dos lábios e contenção na deglutição."
   },
   {
     "id": "deg_escape",
@@ -17,6 +17,6 @@
   {
     "id": "deg_tosse",
     "domain": "degluticao",
-    "text": "Tosse ou engasgo durante deglutição."
+    "text": "Resíduo após deglutição."
   }
 ]

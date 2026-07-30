@@ -7,16 +7,16 @@
   {
     "id": "fala_diccao",
     "domain": "fala",
-    "text": "Díção e inteligibilidade da fala."
+    "text": "Dicção e inteligibilidade da fala."
   },
   {
     "id": "fala_ritmo",
     "domain": "fala",
-    "text": "Ritmo e fluência da fala."
+    "text": "Imprecisão articulatória / distorções."
   },
   {
     "id": "fala_resistencia",
     "domain": "fala",
-    "text": "Resistência durante exercícios de fala."
+    "text": "Ressonância da fala."
   }
 ]

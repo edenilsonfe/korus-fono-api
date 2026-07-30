@@ -28,6 +28,7 @@ async def seed_protocols(session) -> None:
             existing.description = p["description"]
             existing.age_range = p["age_range"]
             existing.field_templates = p["field_templates"]
+            existing.is_active = True
         else:
             session.add(ProtocolCatalog(**p))
 
@@ -40,6 +41,9 @@ async def seed_protocols(session) -> None:
         )
         if has_assessments.scalar_one_or_none() is None:
             await session.delete(existing)
+        else:
+            # Keep row for FK/history; hide from applicable catalog.
+            existing.is_active = False
 
 
 async def seed_demo(session) -> None:

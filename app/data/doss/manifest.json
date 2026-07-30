@@ -1,41 +1,41 @@
 {
-  "version": 2,
+  "version": 3,
   "package_id": "doss-br",
   "instrument_slug": "doss",
   "instrument_title": "DOSS — Dysphagia Outcome and Severity Scale",
   "publisher": "O'Neil et al. (1999) — estrutura pública",
   "license_ref": "PUBLIC-ONEIL-1999",
   "content_status": "official-structure",
-  "norms_region": "BR",
+  "norms_region": null,
   "archetype": "scaled",
   "scale": [
     {
       "value": 1,
-      "label": "Nível 1 — Disfagia severa: NPO (nada por via oral)"
+      "label": "Nível 1 — Disfagia severa: NPO (nada por via oral). Incapaz de tolerar qualquer ingestão oral com segurança."
     },
     {
       "value": 2,
-      "label": "Nível 2 — Disfagia moderadamente severa: máxima assistência / dependência"
+      "label": "Nível 2 — Disfagia moderadamente severa: assistência máxima ou uso total de estratégias, com ingestão oral parcial apenas (tolera com segurança ao menos uma consistência com uso total de estratégias). Nutrição não oral necessária."
     },
     {
       "value": 3,
-      "label": "Nível 3 — Disfagia moderada: assistência total / supervisão total"
+      "label": "Nível 3 — Disfagia moderada: assistência/supervisão total ou estratégias; duas ou mais consistências de dieta restritas. Nutrição oral plena com dieta e/ou independência modificadas."
     },
     {
       "value": 4,
-      "label": "Nível 4 — Disfagia leve a moderada: assistência intermitente / supervisão"
+      "label": "Nível 4 — Disfagia leve a moderada: supervisão/cueing intermitente; uma ou duas consistências restritas. Nutrição oral plena com dieta e/ou independência modificadas."
     },
     {
       "value": 5,
-      "label": "Nível 5 — Disfagia leve: supervisão mínima / restrições de dieta"
+      "label": "Nível 5 — Disfagia leve: supervisão à distância; pode necessitar restrição de uma consistência de dieta. Nutrição oral plena com dieta e/ou independência modificadas."
     },
     {
       "value": 6,
-      "label": "Nível 6 — Deglutição funcional limitada: restrições mínimas / independência modificada"
+      "label": "Nível 6 — Dentro dos limites funcionais / independência modificada: dieta normal, deglutição funcional; pode precisar de tempo extra; compensações espontâneas. Nutrição oral plena, dieta normal."
     },
     {
       "value": 7,
-      "label": "Nível 7 — Deglutição normal em todas as situações"
+      "label": "Nível 7 — Normal em todas as situações: dieta normal; sem estratégias nem tempo extra. Nutrição oral plena, dieta normal."
     }
   ],
   "domains": [{ "id": "TOTAL", "title": "Nível DOSS" }],
@@ -55,14 +55,25 @@
       }
     },
     "interpretations": [
-      { "min": 1, "max": 2, "label": "Disfagia severa a moderadamente severa — suporte máximo / NPO" },
-      { "min": 3, "max": 4, "label": "Disfagia moderada a leve-moderada — assistência/supervisão" },
-      { "min": 5, "max": 5, "label": "Disfagia leve — supervisão mínima / restrições" },
-      { "min": 6, "max": 7, "label": "Função oral funcional a normal" }
+      {
+        "min": 1,
+        "max": 2,
+        "label": "Disfagia severa a moderadamente severa — nutrição não oral / NPO ou PO parcial"
+      },
+      {
+        "min": 3,
+        "max": 5,
+        "label": "Disfagia moderada a leve — nutrição oral plena com dieta e/ou supervisão modificadas"
+      },
+      {
+        "min": 6,
+        "max": 7,
+        "label": "Deglutição funcional a normal — dieta normal"
+      }
     ]
   },
   "report": {
-    "template_id": "doss-br-v2",
+    "template_id": "doss-br-v3",
     "sections": ["identificacao", "resultados", "interpretacao", "recomendacoes"]
   },
   "informant_forms": [],
