@@ -8,7 +8,6 @@ PROTOCOL_TO_INSTRUMENT_SLUG: dict[str, str] = {
     "cars": "cars",
     "vbmapp": "vb-mapp",
     "abllsr": "ablls-r",
-    "tli": "tli",
     "denver2": "denver-ii",
     "bayley3": "bayley-iii",
     "pard": "pard",

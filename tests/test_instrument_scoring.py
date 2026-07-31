@@ -34,12 +34,20 @@ def test_pard_risk_cutoff():
 
 def test_vb_mapp_domain_mastery():
     package = get_instrument_content_package("vb-mapp")
+    items = package.get_items()
+    assert len(items) == 170
+    assert package.data.get("content_status") == "official-structure"
+    assert not any("Registrar conclusão" in (it.get("text") or "") for it in items)
+    assert {it["id"] for it in items} >= {"MAND_01", "PLAY_05", "MATH_15"}
+
     domain_config = package.scoring["domains"]["LING"]
-    item_ids = domain_config["item_ids"][:3]
-    answers = {item_id: 2 for item_id in item_ids}
+    item_ids = domain_config["item_ids"]
+    assert len(item_ids) == 10
+    answers = {item_id: 2 for item_id in item_ids[:3]}
     scores = InstrumentScoringService.score(package, answers)
     assert scores["engine"] == "domain_mastery"
     assert "LING" in scores["domains"]
+    assert scores["domains"]["LING"] == round((3 / 10) * 100, 1)
 
 
 def test_ablls_r_domain_mastery():

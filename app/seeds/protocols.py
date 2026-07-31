@@ -112,20 +112,6 @@ PROTOCOLS = [
         ],
     },
     {
-        "id": "tli",
-        "name": "TLI",
-        "full_name": "Teste de Linguagem Infantil",
-        "description": "Avaliação completa das habilidades de linguagem oral em crianças.",
-        "age_range": "2 a 6 anos",
-        "field_templates": [
-            {"key": "fonologia", "label": "Fonologia"},
-            {"key": "vocabulario_expressivo", "label": "Vocabulário expressivo"},
-            {"key": "vocabulario_receptivo", "label": "Vocabulário receptivo"},
-            {"key": "sintaxe", "label": "Sintaxe"},
-            {"key": "pragmatica", "label": "Pragmática"},
-        ],
-    },
-    {
         "id": "denver2",
         "name": "Denver II",
         "full_name": "Denver Developmental Screening Test II",

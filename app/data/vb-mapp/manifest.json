@@ -1,26 +1,27 @@
 {
   "version": 2,
-  "package_id": "vb-mapp-br-v2",
+  "package_id": "vb-mapp-br-v3-martone",
   "instrument_slug": "vb-mapp",
   "instrument_title": "VB-MAPP — Verbal Behavior Milestones Assessment and Placement Program",
-  "publisher": "Sundberg — estrutura pública das áreas de marcos (sem itens proprietários)",
-  "license_ref": "REQUIRES-LICENSE",
-  "content_status": "structure-only",
+  "publisher": "Adaptação pt-BR Martone & Goyos (2017) — Protocolo de Registro (Marcos)",
+  "license_ref": "MARTONE-GOYOS-2017-VBMAPP-PT",
+  "content_status": "official-structure",
   "norms_region": "BR",
+  "norms_file": "norms-br.json",
   "archetype": "multi_domain",
-  "administration_notes": "STRUCTURE-ONLY: 16 áreas públicas de marcos VB-MAPP (Milestones). Barriers, Transition e Task Analysis NÃO estão neste pacote. Estímulos, critérios de marco e materiais oficiais exigem kit/licença VB-MAPP.",
+  "administration_notes": "Avaliação de Marcos (170 itens) — adaptação Martone & Goyos (2017). Comercialização do VB-MAPP original é proibida pelo autor M.L. Sundberg. Barreiras, Transition Assessment, Task Analysis e subteste APCE detalhado não estão neste pacote. Escala 0/1/2 mapeia 0 / 0,5 / 1 do protocolo.",
   "scale": [
     {
       "value": 0,
-      "label": "Não adquirido / área não registrada"
+      "label": "Não adquirido (0)"
     },
     {
       "value": 1,
-      "label": "Emergente / registro parcial"
+      "label": "Parcial / emergente (0,5)"
     },
     {
       "value": 2,
-      "label": "Adquirido / área registrada (kit licenciado)"
+      "label": "Adquirido (1)"
     }
   ],
   "domains": [
@@ -54,7 +55,7 @@
     },
     {
       "id": "ECHOIC",
-      "title": "Ecoico (incl. EESA)"
+      "title": "Ecoico (incl. EESA/APCE)"
     },
     {
       "id": "VOCAL",
@@ -91,84 +92,1352 @@
   ],
   "items": [
     {
-      "id": "MAND_checkpoint",
+      "id": "MAND_01",
       "domain": "MAND",
-      "text": "Registrar conclusão da área de marcos «Mandos (pedidos)» (kit VB-MAPP licenciado). Não inclui marcos/itens proprietários — use o protocolo oficial para pontuar cada marco."
+      "text": "N1 · Marco 1: Emite 2 palavras, sinais ou PECS, porém pode precisar de dica ecóica, imitativa ou outras dicas, desde que não físicas. (O/T)",
+      "level": 1,
+      "milestone": 1,
+      "admin": "O/T"
     },
     {
-      "id": "TACT_checkpoint",
+      "id": "MAND_02",
+      "domain": "MAND",
+      "text": "N1 · Marco 2: Emite 4 mandos diferentes sem dicas (exceto pela dica verbal “O que você quer?”). O item desejado pode estar presente (e.g., música, comida, bola). (O/T)",
+      "level": 1,
+      "milestone": 2,
+      "admin": "O/T"
+    },
+    {
+      "id": "MAND_03",
+      "domain": "MAND",
+      "text": "N1 · Marco 3: Generaliza 6 mandos entre duas pessoas, dois ambientes e entre dois tipos diferentes de um mesmo reforçador (e.g., emite mandos para bolinhas de sabão tanto para a mãe quanto para o pai, dentro e fora da casa e em um pote plástico vermelho ou azul). (O/T)",
+      "level": 1,
+      "milestone": 3,
+      "admin": "O/T"
+    },
+    {
+      "id": "MAND_04",
+      "domain": "MAND",
+      "text": "N1 · Marco 4: Espontaneamente (sem dica verbal) emite 5 mandos. O item desejado pode estar presente. (OC 60 min)",
+      "level": 1,
+      "milestone": 4,
+      "admin": "OC 60 min"
+    },
+    {
+      "id": "MAND_05",
+      "domain": "MAND",
+      "text": "N1 · Marco 5: Emite 10 mandos diferentes sem dicas (exceto pela dica ”O que você quer”). O item desejado pode estar presente (e.g., maça, balanço, carro, suco).",
+      "level": 1,
+      "milestone": 5
+    },
+    {
+      "id": "TACT_01",
       "domain": "TACT",
-      "text": "Registrar conclusão da área de marcos «Tatos (nomeação)» (kit VB-MAPP licenciado). Não inclui marcos/itens proprietários — use o protocolo oficial para pontuar cada marco."
+      "text": "N1 · Marco 1: Emite 2 tatos com dica ecóica ou imitativa (e.g., pessoas, bichos de estimação, personagens ou objetos favoritos). (T)",
+      "level": 1,
+      "milestone": 1,
+      "admin": "T"
     },
     {
-      "id": "LR_checkpoint",
+      "id": "TACT_02",
+      "domain": "TACT",
+      "text": "N1 · Marco 2: Emite tatos para 4 itens quaisquer sem dica ecóica ou imitativa (e.g., pessoas, bichos de estimação, personagens ou outros objetos). (T)",
+      "level": 1,
+      "milestone": 2,
+      "admin": "T"
+    },
+    {
+      "id": "TACT_03",
+      "domain": "TACT",
+      "text": "N1 · Marco 3: Tateia 6 itens não-reforçadores (e.g., sapato, chapéu, colher, carrinho, copo, cama). (T)",
+      "level": 1,
+      "milestone": 3,
+      "admin": "T"
+    },
+    {
+      "id": "TACT_04",
+      "domain": "TACT",
+      "text": "N1 · Marco 4: Emite tatos espontaneamente (sem dicas verbais) para 2 itens diferentes. (OC: 60 min)",
+      "level": 1,
+      "milestone": 4,
+      "admin": "OC: 60 min"
+    },
+    {
+      "id": "TACT_05",
+      "domain": "TACT",
+      "text": "N1 · Marco 5: Emite tatos para 10 itens (objetos comuns, pessoas, partes do corpo ou figuras). (T)",
+      "level": 1,
+      "milestone": 5,
+      "admin": "T"
+    },
+    {
+      "id": "LR_01",
       "domain": "LR",
-      "text": "Registrar conclusão da área de marcos «Resposta de ouvinte (Listener Responding)» (kit VB-MAPP licenciado). Não inclui marcos/itens proprietários — use o protocolo oficial para pontuar cada marco."
+      "text": "N1 · Marco 1: Atenta para a voz de um falante ao estabelecer contato visual com ele por 5 vezes. (OC 30 min)",
+      "level": 1,
+      "milestone": 1,
+      "admin": "OC 30 min"
     },
     {
-      "id": "VP_MTS_checkpoint",
+      "id": "LR_02",
+      "domain": "LR",
+      "text": "N1 · Marco 2: Responde ao ouvir seu nome 5 vezes (e. g ., olha para o falante). (T)",
+      "level": 1,
+      "milestone": 2,
+      "admin": "T"
+    },
+    {
+      "id": "LR_03",
+      "domain": "LR",
+      "text": "N1 · Marco 3: Criança olha, toca ou aponta para o membro correto da família, bicho de estimação ou outro reforçador quando esses estímulos são apresentados em arranjos de dois, para 5 reforçadores diferentes (e.g., “Onde está o Elmo?” ou “ Onde está mamãe? ”). (O/T)",
+      "level": 1,
+      "milestone": 3,
+      "admin": "O/T"
+    },
+    {
+      "id": "LR_04",
+      "domain": "LR",
+      "text": "N1 · Marco 4: Executa 4 ações motoras diferentes quando solicitada e não necessita de uma dica visual (e.g., Você pode pular?, Mostre-me como se bate palmas?). (T)",
+      "level": 1,
+      "milestone": 4,
+      "admin": "T"
+    },
+    {
+      "id": "LR_05",
+      "domain": "LR",
+      "text": "N1 · Marco 5: Seleciona o item correto em um arranjo de 4 estímulos para 20 objetos e figuras diferentes (e.g., Mostre-me o gato, toque no sapato). (T)",
+      "level": 1,
+      "milestone": 5,
+      "admin": "T"
+    },
+    {
+      "id": "VP_MTS_01",
       "domain": "VP_MTS",
-      "text": "Registrar conclusão da área de marcos «Percepção visual e matching-to-sample (VP-MTS)» (kit VB-MAPP licenciado). Não inclui marcos/itens proprietários — use o protocolo oficial para pontuar cada marco."
+      "text": "N1 · Marco 1: Segue visualmente um estímulo móvel por 2 segundos, por 5 vezes. (OC 30 min)",
+      "level": 1,
+      "milestone": 1,
+      "admin": "OC 30 min"
     },
     {
-      "id": "PLAY_checkpoint",
+      "id": "VP_MTS_02",
+      "domain": "VP_MTS",
+      "text": "N1 · Marco 2: Pega pequenos objetos com o polegar, indicador e dedo médio (movimento de pinça). (O)",
+      "level": 1,
+      "milestone": 2,
+      "admin": "O"
+    },
+    {
+      "id": "VP_MTS_03",
+      "domain": "VP_MTS",
+      "text": "N1 · Marco 3: Atenta visualmente para um brinquedo ou livro por 30 segundos (não vale se o item é utilizado para auto estimulação). (O)",
+      "level": 1,
+      "milestone": 3,
+      "admin": "O"
+    },
+    {
+      "id": "VP_MTS_04",
+      "domain": "VP_MTS",
+      "text": "N1 · Marco 4: Coloca 3 itens em um recipiente, empilha 3 blocos ou coloca 3 anéis em uma haste. Verificar se a criança realiza duas destas atividades ou atividades similares. (O/T)",
+      "level": 1,
+      "milestone": 4,
+      "admin": "O/T"
+    },
+    {
+      "id": "VP_MTS_05",
+      "domain": "VP_MTS",
+      "text": "N1 · Marco 5: Emparelha quaisquer 10 itens idênticos (e.g., quebra-cabeças, brinquedos ou figuras). (O/T)",
+      "level": 1,
+      "milestone": 5,
+      "admin": "O/T"
+    },
+    {
+      "id": "PLAY_01",
       "domain": "PLAY",
-      "text": "Registrar conclusão da área de marcos «Brincadeira independente» (kit VB-MAPP licenciado). Não inclui marcos/itens proprietários — use o protocolo oficial para pontuar cada marco."
+      "text": "N1 · Marco 1: Manipula e explora objetos por 1 minuto (e.g., olha para um brinquedo, vira o brinquedo, aperta botões). (OC 30 min.)",
+      "level": 1,
+      "milestone": 1,
+      "admin": "OC 30 min"
     },
     {
-      "id": "SOCIAL_checkpoint",
+      "id": "PLAY_02",
+      "domain": "PLAY",
+      "text": "N1 · Marco 2: Mostra variação na brincadeira ao interagir de forma independente com 5 itens diferentes (e.g., brinca com anéis, depois com uma bola, depois blocos). (OC 30 min)",
+      "level": 1,
+      "milestone": 2,
+      "admin": "OC 30 min"
+    },
+    {
+      "id": "PLAY_03",
+      "domain": "PLAY",
+      "text": "N1 · Marco 3: Demonstra generalização ao engajar-se em movimentos exploratórios e brincadeira com brinquedos em um novo ambiente por 2 minutos (e.g., em uma nova brinquedoteca). (OC 30 min)",
+      "level": 1,
+      "milestone": 3,
+      "admin": "OC 30 min"
+    },
+    {
+      "id": "PLAY_04",
+      "domain": "PLAY",
+      "text": "N1 · Marco 4: Envolve-se de forma independente em brincadeiras de movimento por 2 minutos (e.g., balançar, dançar, pular, balançar, escalar, correr). (OC 30 min)",
+      "level": 1,
+      "milestone": 4,
+      "admin": "OC 30 min"
+    },
+    {
+      "id": "PLAY_05",
+      "domain": "PLAY",
+      "text": "N1 · Marco 5: Envolve-se de forma independente em brincadeiras de causa e efeito por 2 minutos (e.g., esvaziar recipientes, brincar com brinquedos que pulam, empurrar brinquedos, etc.). (OC 30 min)",
+      "level": 1,
+      "milestone": 5,
+      "admin": "OC 30 min"
+    },
+    {
+      "id": "SOCIAL_01",
       "domain": "SOCIAL",
-      "text": "Registrar conclusão da área de marcos «Comportamento social e brincadeira social» (kit VB-MAPP licenciado). Não inclui marcos/itens proprietários — use o protocolo oficial para pontuar cada marco."
+      "text": "N1 · Marco 1: Faz contato visual como forma de mando por 05 vezes. (OC 30 min)",
+      "level": 1,
+      "milestone": 1,
+      "admin": "OC 30 min"
     },
     {
-      "id": "IMIT_checkpoint",
+      "id": "SOCIAL_02",
+      "domain": "SOCIAL",
+      "text": "N1 · Marco 2: Indica que quer ser segurada ou que brinquem fisicamente com ela por 2 vezes (e.g., subir no colo da mãe). (OC 60 min)",
+      "level": 1,
+      "milestone": 2,
+      "admin": "OC 60 min"
+    },
+    {
+      "id": "SOCIAL_03",
+      "domain": "SOCIAL",
+      "text": "N1 · Marco 3: Espontaneamente estabelece contato visual com outras crianças por 5 vezes. (OC 30 min).",
+      "level": 1,
+      "milestone": 3
+    },
+    {
+      "id": "SOCIAL_04",
+      "domain": "SOCIAL",
+      "text": "N1 · Marco 4: Espontaneamente se envolve em brincadeira paralela perto de outras crianças por um total de 2 minutos (e.g., senta na caixa de areia perto de outras crianças). (OC 30 min)",
+      "level": 1,
+      "milestone": 4,
+      "admin": "OC 30 min"
+    },
+    {
+      "id": "SOCIAL_05",
+      "domain": "SOCIAL",
+      "text": "N1 · Marco 5: Espontaneamente segue colegas ou imita o comportamento motor deles por 2 vezes (e.g., segue um colega numa casa de brincar). (OC 30 min)",
+      "level": 1,
+      "milestone": 5,
+      "admin": "OC 30 min"
+    },
+    {
+      "id": "IMIT_01",
       "domain": "IMIT",
-      "text": "Registrar conclusão da área de marcos «Imitação motora» (kit VB-MAPP licenciado). Não inclui marcos/itens proprietários — use o protocolo oficial para pontuar cada marco."
+      "text": "N1 · Marco 1: Imita 2 movimentos motores grossos com a dica “Faça isso “ (e.g., bater palmas, levantar braços). (T)",
+      "level": 1,
+      "milestone": 1,
+      "admin": "T"
     },
     {
-      "id": "ECHOIC_checkpoint",
+      "id": "IMIT_02",
+      "domain": "IMIT",
+      "text": "N1 · Marco 2: Imita 4 movimentos motores grossos com a dica “Faça isso”. (T)",
+      "level": 1,
+      "milestone": 2,
+      "admin": "T"
+    },
+    {
+      "id": "IMIT_03",
+      "domain": "IMIT",
+      "text": "N1 · Marco 3: Imita 8 movimentos motores, 2 dos quais envolvendo objetos (e.g., balançar um chocalho, bater pauzinhos). (T)",
+      "level": 1,
+      "milestone": 3,
+      "admin": "T"
+    },
+    {
+      "id": "IMIT_04",
+      "domain": "IMIT",
+      "text": "N1 · Marco 4: Imita espontaneamente o comportamento motor de outros em 5 ocasiões. (O)",
+      "level": 1,
+      "milestone": 4,
+      "admin": "O"
+    },
+    {
+      "id": "IMIT_05",
+      "domain": "IMIT",
+      "text": "N1 · Marco 5: Imita 20 movimentos motores de qualquer tipo (e.g., motor fino, motor grosso, imitação com objetos). (T)",
+      "level": 1,
+      "milestone": 5,
+      "admin": "T"
+    },
+    {
+      "id": "ECHOIC_01",
       "domain": "ECHOIC",
-      "text": "Registrar conclusão da área de marcos «Ecoico (incl. EESA)» (kit VB-MAPP licenciado). Não inclui marcos/itens proprietários — use o protocolo oficial para pontuar cada marco."
+      "text": "N1 · Marco 1: Pontuação de no mínimo 2 no subteste APCE. (T)",
+      "level": 1,
+      "milestone": 1,
+      "admin": "T"
     },
     {
-      "id": "VOCAL_checkpoint",
+      "id": "ECHOIC_02",
+      "domain": "ECHOIC",
+      "text": "N1 · Marco 2: Pontuação de no mínimo 5 no subteste APCE. (T)",
+      "level": 1,
+      "milestone": 2,
+      "admin": "T"
+    },
+    {
+      "id": "ECHOIC_03",
+      "domain": "ECHOIC",
+      "text": "N1 · Marco 3: Pontuação de no mínimo 10 no subteste APCE. (T)",
+      "level": 1,
+      "milestone": 3,
+      "admin": "T"
+    },
+    {
+      "id": "ECHOIC_04",
+      "domain": "ECHOIC",
+      "text": "N1 · Marco 4: Pontuação de no mínimo 15 no subteste APCE. (T)",
+      "level": 1,
+      "milestone": 4,
+      "admin": "T"
+    },
+    {
+      "id": "ECHOIC_05",
+      "domain": "ECHOIC",
+      "text": "N1 · Marco 5: Pontuação de no mínimo 25 no subteste APCE (ao menos 20 do grupo1)",
+      "level": 1,
+      "milestone": 5
+    },
+    {
+      "id": "VOCAL_01",
       "domain": "VOCAL",
-      "text": "Registrar conclusão da área de marcos «Comportamento vocal espontâneo» (kit VB-MAPP licenciado). Não inclui marcos/itens proprietários — use o protocolo oficial para pontuar cada marco."
+      "text": "N1 · Marco 1: Emissão espontânea de em média 5 sons por hora (OC: 60 min).",
+      "level": 1,
+      "milestone": 1
     },
     {
-      "id": "LRFFC_checkpoint",
+      "id": "VOCAL_02",
+      "domain": "VOCAL",
+      "text": "N1 · Marco 2: Emissão espontânea de 5 sons diferentes, com uma média total de 10 sons a cada hora (OC: 60 min).",
+      "level": 1,
+      "milestone": 2
+    },
+    {
+      "id": "VOCAL_03",
+      "domain": "VOCAL",
+      "text": "N1 · Marco 3: Emissão espontânea de 10 sons diferentes, com variação de entonação, com uma média total de 25 sons a cada hora (OC: 60 min).",
+      "level": 1,
+      "milestone": 3
+    },
+    {
+      "id": "VOCAL_04",
+      "domain": "VOCAL",
+      "text": "N1 · Marco 4: Emissão espontânea de 15 palavras inteiras ou frases com entonação apropriada e ritmo. (OC:60 min).",
+      "level": 1,
+      "milestone": 4
+    },
+    {
+      "id": "VOCAL_05",
+      "domain": "VOCAL",
+      "text": "N1 · Marco 5: Vocalização espontânea de 15 palavras inteiras ou frases com entonação apropriada e ritmo (OC: 60 min).",
+      "level": 1,
+      "milestone": 5
+    },
+    {
+      "id": "MAND_06",
+      "domain": "MAND",
+      "text": "N2 · Marco 6: Emite mandos para 20 itens diferentes que estão ausentes e sem o uso de dicas (exceto, e.g., O que você precisa? ) (e.g., emite um mando para papel quando ganha um giz de cera). (O/T)",
+      "level": 2,
+      "milestone": 6,
+      "admin": "O/T"
+    },
+    {
+      "id": "MAND_07",
+      "domain": "MAND",
+      "text": "N2 · Marco 7: Emite mandos para que outras pessoas realizem cinco (5) ações diferentes e necessárias para que uma atividade desejada seja possível e apreciada. (e.g., abrir a porta para sair, empurrar no balanço). (O/T)",
+      "level": 2,
+      "milestone": 7,
+      "admin": "O/T"
+    },
+    {
+      "id": "MAND_08",
+      "domain": "MAND",
+      "text": "N2 · Marco 8: Emite 5 mandos diferentes que contenham 2 ou mais palavras (não incluindo “Eu quero”). Por exemplo, “Vai rápido” “Minha vez “Põe suco”. (OC 60 min)",
+      "level": 2,
+      "milestone": 8,
+      "admin": "OC 60 min"
+    },
+    {
+      "id": "MAND_09",
+      "domain": "MAND",
+      "text": "N2 · Marco 9: Espontaneamente emite 15 mandos diferentes (e. g., “Vamos brincar” “Abre” “Eu quero livro”. (OC 30 min)",
+      "level": 2,
+      "milestone": 9,
+      "admin": "OC 30 min"
+    },
+    {
+      "id": "MAND_10",
+      "domain": "MAND",
+      "text": "N2 · Marco 10: Emite 10 mandos novos sem treino específico (e.g., espontaneamente diz “Onde o gatinho foi?” sem treino formal de mando). (O)",
+      "level": 2,
+      "milestone": 10,
+      "admin": "O"
+    },
+    {
+      "id": "TACT_06",
+      "domain": "TACT",
+      "text": "N2 · Marco 6: A criança emite tatos para 25 itens ao ser indagada “O que é isso?” (e.g., livro, sapato, carro, cachorro, boné). (T)",
+      "level": 2,
+      "milestone": 6,
+      "admin": "T"
+    },
+    {
+      "id": "TACT_07",
+      "domain": "TACT",
+      "text": "N2 · Marco 7: Generaliza tatos para 50 itens, sendo 3 exemplares de cada item, por testagem ou de uma lista de generalizações conhecidas (e.g., emite tatos para 3 carrinhos diferentes). (T)",
+      "level": 2,
+      "milestone": 7,
+      "admin": "T"
+    },
+    {
+      "id": "TACT_08",
+      "domain": "TACT",
+      "text": "N2 · Marco 8: A criança emite tatos para 10 ações ao ser indagada, por exemplo, “O que eu estou fazendo?” (e.g., pulando, dormindo, comendo). (T)",
+      "level": 2,
+      "milestone": 8,
+      "admin": "T"
+    },
+    {
+      "id": "TACT_09",
+      "domain": "TACT",
+      "text": "N2 · Marco 9: Emite tatos para 50 combinações de dois componentes verbo-nome ou nome- verbo (e.g., lavar rosto, Paulo balançando, bebê dormindo). (T)",
+      "level": 2,
+      "milestone": 9,
+      "admin": "T"
+    },
+    {
+      "id": "TACT_10",
+      "domain": "TACT",
+      "text": "N2 · Marco 10: Emite tatos para um total de 200 nomes e/ou verbos (ou outras partes do discurso) testados ou de uma lista acumulada de tatos conhecidos. (T)",
+      "level": 2,
+      "milestone": 10,
+      "admin": "T"
+    },
+    {
+      "id": "LR_06",
+      "domain": "LR",
+      "text": "N2 · Marco 6: Seleciona o item correto em um arranjo misturado com 6 itens, para 40 objetos ou figuras diferentes (e. g ., Ache gato, Toque na bola). (T)",
+      "level": 2,
+      "milestone": 6,
+      "admin": "T"
+    },
+    {
+      "id": "LR_07",
+      "domain": "LR",
+      "text": "N2 · Marco 7: Generaliza discriminações de ouvinte em um arranjo misturado de 8 itens, para 50 itens, sendo 3 exemplares diferentes de cada item (e.g., a criança pode achar 3 exemplares de um trenzinho). (T)",
+      "level": 2,
+      "milestone": 7,
+      "admin": "T"
+    },
+    {
+      "id": "LR_08",
+      "domain": "LR",
+      "text": "N2 · Marco 8: Criança executa 10 ações motoras específicas quando solicitada (e.g., “Mostre- me bater palmas” “Você pode pular?”). (T)",
+      "level": 2,
+      "milestone": 8,
+      "admin": "T"
+    },
+    {
+      "id": "LR_09",
+      "domain": "LR",
+      "text": "N2 · Marco 9: Segue 50 instruções de dois componentes nome-verbo e/ou verbo-nome (e.g., “Me mostre um bebê dormindo” , “Empurre o balanço”). (T)",
+      "level": 2,
+      "milestone": 9,
+      "admin": "T"
+    },
+    {
+      "id": "LR_10",
+      "domain": "LR",
+      "text": "N2 · Marco 10: Criança seleciona, quando solicitada, o item correto em um livro, cenário ou ambiente natural, para 250 itens (testados ou de uma lista acumulada de palavras conhecidas). (T)",
+      "level": 2,
+      "milestone": 10,
+      "admin": "T"
+    },
+    {
+      "id": "VP_MTS_06",
+      "domain": "VP_MTS",
+      "text": "N2 · Marco 6: Emparelha objetos ou figuras idênticas em um arranjo misturado de 6 itens, para 25 itens. (T)",
+      "level": 2,
+      "milestone": 6,
+      "admin": "T"
+    },
+    {
+      "id": "VP_MTS_07",
+      "domain": "VP_MTS",
+      "text": "N2 · Marco 7: Organiza itens diferentes por cores e formas dado 10 modelos diferentes de cores ou formas (e.g., dado um recipiente amarelo, outro azul e um vermelho e um conjunto de carrinhos vermelhos, amarelos e azuis, a criança combina os itens por suas respectivas cores. (T)",
+      "level": 2,
+      "milestone": 7,
+      "admin": "T"
+    },
+    {
+      "id": "VP_MTS_08",
+      "domain": "VP_MTS",
+      "text": "N2 · Marco 8: Emparelha objetos ou figuras idênticas em um arranjo misturado de 8 itens que contenham 3 estímulos similares, para 25 itens (e.g., combina um cão com outro cão em uma seleção que também contenha um gato, um porco e um pônei). (T)",
+      "level": 2,
+      "milestone": 8,
+      "admin": "T"
+    },
+    {
+      "id": "VP_MTS_09",
+      "domain": "VP_MTS",
+      "text": "N2 · Marco 9: Emparelha objetos ou figuras não idênticos em um arranjo misturado de 10 itens, para 25 itens (e.g., combina uma caminhonete Ford com uma caminhonete Toyota). (T)",
+      "level": 2,
+      "milestone": 9,
+      "admin": "T"
+    },
+    {
+      "id": "VP_MTS_10",
+      "domain": "VP_MTS",
+      "text": "N2 · Marco 10: Emparelha objetos não idênticos (3D) com figuras (2D) e/ou vice versa, em um arranjo misturado de 10 itens, contendo 3 estímulos similares, para 25 itens. (T)",
+      "level": 2,
+      "milestone": 10,
+      "admin": "T"
+    },
+    {
+      "id": "PLAY_06",
+      "domain": "PLAY",
+      "text": "N2 · Marco 6: Procura por um brinquedo ausente ou parte de um conjunto que está faltando (e.g., uma peça de quebra-cabeça, uma bola para brincar de cesta, uma mamadeira para uma boneca) para 5 itens ou conjuntos. (O/T)",
+      "level": 2,
+      "milestone": 6,
+      "admin": "O/T"
+    },
+    {
+      "id": "PLAY_07",
+      "domain": "PLAY",
+      "text": "N2 · Marco 7: De forma independente faz uso de brinquedos e objetos de acordo com as suas respectivas funções para 5 itens (e.g., colocar um trem nos trilhos, puxar um vagão, segurar um telefone no ouvido). (O)",
+      "level": 2,
+      "milestone": 7,
+      "admin": "O"
+    },
+    {
+      "id": "PLAY_08",
+      "domain": "PLAY",
+      "text": "N2 · Marco 8: Brinca com objetos do cotidiano de uma forma criativa por 2 vezes (e.g., usa uma tigela como tambor e uma caixa como carro imaginário). (O)",
+      "level": 2,
+      "milestone": 8,
+      "admin": "O"
+    },
+    {
+      "id": "PLAY_09",
+      "domain": "PLAY",
+      "text": "N2 · Marco 9: De forma independente brinca em estruturas e equipamentos de playgrounds por um total de 5 minutos (e.g., escorrega no escorregador, balanço). OC 30 min.",
+      "level": 2,
+      "milestone": 9,
+      "admin": "OC 30 min"
+    },
+    {
+      "id": "PLAY_10",
+      "domain": "PLAY",
+      "text": "N2 · Marco 10: Monta brinquedos com múltiplas partes para 5 conjuntos diferentes (e. g ., cabeça de batata, kit polibol, Legos). (O)",
+      "level": 2,
+      "milestone": 10,
+      "admin": "O"
+    },
+    {
+      "id": "SOCIAL_06",
+      "domain": "SOCIAL",
+      "text": "N2 · Marco 6: Inicia interação física com um colega por 2 vezes (e. g ., empurrar colega em um carrinho, segurar na mão, brincar de roda). (OC 30 min)",
+      "level": 2,
+      "milestone": 6,
+      "admin": "OC 30 min"
+    },
+    {
+      "id": "SOCIAL_07",
+      "domain": "SOCIAL",
+      "text": "N2 · Marco 7: Espontaneamente emite mandos para os colegas por 5 vezes (e.g ., “Minha vez”,; “Me empurra”; “Olhe! Vem”). (OC 60 min.)",
+      "level": 2,
+      "milestone": 7,
+      "admin": "OC 60 min"
+    },
+    {
+      "id": "SOCIAL_08",
+      "domain": "SOCIAL",
+      "text": "N2 · Marco 8: Se envolve e sustenta uma brincadeira social com colegas por 3 minutos sem dicas ou reforçamento de adultos (e. g ., monta um conjunto para brincar de forma cooperativa; brinca na água com colegas). (OC 30 min)",
+      "level": 2,
+      "milestone": 8,
+      "admin": "OC 30 min"
+    },
+    {
+      "id": "SOCIAL_09",
+      "domain": "SOCIAL",
+      "text": "N2 · Marco 9: Espontaneamente responde aos mandos de colegas por 5 vezes (e. g., colega diz \"me empurra no carrinho\" e a criança empurra; colega diz \"eu quero o trenzinho\" e a criança entrega o trenzinho). (O/T)",
+      "level": 2,
+      "milestone": 9,
+      "admin": "O/T"
+    },
+    {
+      "id": "SOCIAL_10",
+      "domain": "SOCIAL",
+      "text": "N2 · Marco 10: Espontaneamente emite mandos para que colegas participem de jogos, brincadeira social, etc., por 2 vezes (e.g., “Venham todos”; “Vamos cavar um buraco”). (OC 60 min)",
+      "level": 2,
+      "milestone": 10,
+      "admin": "OC 60 min"
+    },
+    {
+      "id": "IMIT_06",
+      "domain": "IMIT",
+      "text": "N2 · Marco 6: Imita10 ações que exigem selecionar um objeto específico de um arranjo (e. g., seleciona uma baqueta de um arranjo que também contém uma corneta e um sino e imita o adulto batendo tambor com a baqueta). (T)",
+      "level": 2,
+      "milestone": 6,
+      "admin": "T"
+    },
+    {
+      "id": "IMIT_07",
+      "domain": "IMIT",
+      "text": "N2 · Marco 7: Imita 20 ações motoras finas diferentes ao receber a dica “Faça isso” (e.g ., balançar dedos, beliscar, fazer punho, imitar uma borboleta). (T)",
+      "level": 2,
+      "milestone": 7,
+      "admin": "T"
+    },
+    {
+      "id": "IMIT_08",
+      "domain": "IMIT",
+      "text": "N2 · Marco 8: Imita 10 sequências de ações de três componentes diferentes ao receber a dica “Faça isso”. (e. g., bater palmas, saltar e tocar dedos do pé; pegar uma boneca, colocá-la no berço e balançar o berço). (T)",
+      "level": 2,
+      "milestone": 8,
+      "admin": "T"
+    },
+    {
+      "id": "IMIT_09",
+      "domain": "IMIT",
+      "text": "N2 · Marco 9: Espontaneamente imita 5 habilidades funcionais em ambiente natural (e.g., comer com uma colher, colocar casaco, tirar sapatos). (O)",
+      "level": 2,
+      "milestone": 9,
+      "admin": "O"
+    },
+    {
+      "id": "IMIT_10",
+      "domain": "IMIT",
+      "text": "N2 · Marco 10: Imita (ou tenta imitar de forma aproximada) qualquer ação motora nova modelada por um adulto com ou sem objetos (i.e., apresenta repertório imitativo generalizado). (T)",
+      "level": 2,
+      "milestone": 10,
+      "admin": "T"
+    },
+    {
+      "id": "ECHOIC_06",
+      "domain": "ECHOIC",
+      "text": "N2 · Marco 6: Pontuação de ao menos 50 no teste APCE (ao menos 20 do grupo2). (T)",
+      "level": 2,
+      "milestone": 6,
+      "admin": "T"
+    },
+    {
+      "id": "ECHOIC_07",
+      "domain": "ECHOIC",
+      "text": "N2 · Marco 7: Pontuação de ao menos 60 no teste APCE. (T)",
+      "level": 2,
+      "milestone": 7,
+      "admin": "T"
+    },
+    {
+      "id": "ECHOIC_08",
+      "domain": "ECHOIC",
+      "text": "N2 · Marco 8: Pontuação de ao menos 70 no teste APCE. (T)",
+      "level": 2,
+      "milestone": 8,
+      "admin": "T"
+    },
+    {
+      "id": "ECHOIC_09",
+      "domain": "ECHOIC",
+      "text": "N2 · Marco 9: Pontuação de ao menos 80 no teste APCE. (T)",
+      "level": 2,
+      "milestone": 9,
+      "admin": "T"
+    },
+    {
+      "id": "ECHOIC_10",
+      "domain": "ECHOIC",
+      "text": "N2 · Marco 10: Pontuação de ao menos 90 no teste APCE (ao menos 10 dos grupos 4 e 5 grupo). (T)",
+      "level": 2,
+      "milestone": 10,
+      "admin": "T"
+    },
+    {
+      "id": "LRFFC_06",
       "domain": "LRFFC",
-      "text": "Registrar conclusão da área de marcos «Ouvinte por função, característica e classe (LRFFC)» (kit VB-MAPP licenciado). Não inclui marcos/itens proprietários — use o protocolo oficial para pontuar cada marco."
+      "text": "N2 · Marco 6: Seleciona comidas ou bebidas diferentes quando apresentados em um conjunto de 05 itens (juntamente com 4 outros itens que não sejam nem comidas e nem bebidas) a partir do preenchimento de frases do tipo você come...... ou você bebe...... para 05 comidas ou bebidas diferentes (T).",
+      "level": 2,
+      "milestone": 6
     },
     {
-      "id": "INTRA_checkpoint",
+      "id": "LRFFC_07",
+      "domain": "LRFFC",
+      "text": "N2 · Marco 7: Seleciona o item correto em um arranjo de 8 itens completando quaisquer tipos de frases (e. g., você senta em uma...) para 25 LRFFC diferentes. (T)",
+      "level": 2,
+      "milestone": 7,
+      "admin": "T"
+    },
+    {
+      "id": "LRFFC_08",
+      "domain": "LRFFC",
+      "text": "N2 · Marco 8: Seleciona o item correto em um arranjo de 10 itens (ou de um livro), para 25 questões LRFFC verbo – substantivo diferentes utilizando “O que, Qual, Quem” (e. g., “O que você pedala?” “Qual deles late?” “Quem come capim?”). (T)",
+      "level": 2,
+      "milestone": 8,
+      "admin": "T"
+    },
+    {
+      "id": "LRFFC_09",
+      "domain": "LRFFC",
+      "text": "N2 · Marco 9: Seleciona um item quando 3 informações diferentes são fornecidas sobre ele e cada uma delas é apresentada de forma independente (e. g., “Encontre um animal” “Quem late?” “Quem tem patas?” ) para 25 itens. (T)",
+      "level": 2,
+      "milestone": 9,
+      "admin": "T"
+    },
+    {
+      "id": "LRFFC_10",
+      "domain": "LRFFC",
+      "text": "N2 · Marco 10: Emite espontaneamente tatos para os itens em 50% das tentativas LRFFC (e. g., diz cão ao ser solicitada “Ache um animal”, em um arranjo visual que contenha a figura de um cão). (O)",
+      "level": 2,
+      "milestone": 10,
+      "admin": "O"
+    },
+    {
+      "id": "INTRA_06",
       "domain": "INTRA",
-      "text": "Registrar conclusão da área de marcos «Intraverbal» (kit VB-MAPP licenciado). Não inclui marcos/itens proprietários — use o protocolo oficial para pontuar cada marco."
+      "text": "N2 · Marco 6: Completa 10 frases diferentes de qualquer tipo no formato de preencher lacunas (e. g., continuar uma música, expressões verbais divertidas, sons de objetos ou animais). (T)",
+      "level": 2,
+      "milestone": 6,
+      "admin": "T"
     },
     {
-      "id": "GROUP_checkpoint",
+      "id": "INTRA_07",
+      "domain": "INTRA",
+      "text": "N2 · Marco 7: Criança fala o primeiro nome quando perguntamos “ Qual o seu nome?”. (T)",
+      "level": 2,
+      "milestone": 7,
+      "admin": "T"
+    },
+    {
+      "id": "INTRA_08",
+      "domain": "INTRA",
+      "text": "N2 · Marco 8: Completa 25 diferentes frases preenchendo lacunas (não incluindo músicas). Por exemplo: Você come..., Você dorme em uma...., Sapatos e...). (T)",
+      "level": 2,
+      "milestone": 8,
+      "admin": "T"
+    },
+    {
+      "id": "INTRA_09",
+      "domain": "INTRA",
+      "text": "N2 · Marco 9: Responde 25 questões diferentes que iniciam com “ O que /qual ” (e. g., “O que você gosta de comer?”). (T)",
+      "level": 2,
+      "milestone": 9,
+      "admin": "T"
+    },
+    {
+      "id": "INTRA_10",
+      "domain": "INTRA",
+      "text": "N2 · Marco 10: Responde 25 questões diferentes que iniciam com “Quem ou Onde” (e.g., “Quem é seu amigo?” “Onde está seu travesseiro?”). (T)",
+      "level": 2,
+      "milestone": 10,
+      "admin": "T"
+    },
+    {
+      "id": "GROUP_06",
       "domain": "GROUP",
-      "text": "Registrar conclusão da área de marcos «Rotinas de sala e habilidades em grupo» (kit VB-MAPP licenciado). Não inclui marcos/itens proprietários — use o protocolo oficial para pontuar cada marco."
+      "text": "N2 · Marco 6: Senta em grupo para lanche ou almoço sem comportamento negativo por 3 minutos. (O)",
+      "level": 2,
+      "milestone": 6,
+      "admin": "O"
     },
     {
-      "id": "LING_checkpoint",
+      "id": "GROUP_07",
+      "domain": "GROUP",
+      "text": "N2 · Marco 7: Guarda objetos pessoais, entra na fila ou vem à mesa com apenas 1 dica verbal. (O)",
+      "level": 2,
+      "milestone": 7,
+      "admin": "O"
+    },
+    {
+      "id": "GROUP_08",
+      "domain": "GROUP",
+      "text": "N2 · Marco 8: Faz transição entre as atividades de sala de aula sem necessitar de mais de uma dica gestual ou verbal. (O)",
+      "level": 2,
+      "milestone": 8,
+      "admin": "O"
+    },
+    {
+      "id": "GROUP_09",
+      "domain": "GROUP",
+      "text": "N2 · Marco 9: Senta em um grupo pequeno por 5 minutos sem comportamento disruptivo ou tentativa de deixar o grupo. (O)",
+      "level": 2,
+      "milestone": 9,
+      "admin": "O"
+    },
+    {
+      "id": "GROUP_10",
+      "domain": "GROUP",
+      "text": "N2 · Marco 10: Senta em um grupo pequeno por 10 minutos, atenta ao professor ou ao material por 50% do período e responde a 5 SDs do professor. (O)",
+      "level": 2,
+      "milestone": 10,
+      "admin": "O"
+    },
+    {
+      "id": "LING_06",
       "domain": "LING",
-      "text": "Registrar conclusão da área de marcos «Estrutura linguística» (kit VB-MAPP licenciado). Não inclui marcos/itens proprietários — use o protocolo oficial para pontuar cada marco."
+      "text": "N2 · Marco 6: A articulação da criança está tornando-se mais clara? O vocabulário de falante e ouvinte está crescendo? Ela está começando a emitir mais frases com 2 ou 3 palavras?",
+      "level": 2,
+      "milestone": 6
     },
     {
-      "id": "READ_checkpoint",
+      "id": "LING_07",
+      "domain": "LING",
+      "text": "N2 · Marco 7: Tem um vocabulário total de ouvinte de 100 palavras (e .g ., toque o nariz; pule; ache as chave). (T)",
+      "level": 2,
+      "milestone": 7,
+      "admin": "T"
+    },
+    {
+      "id": "LING_08",
+      "domain": "LING",
+      "text": "N2 · Marco 8: Emite 10 sentenças diferentes (por dia) de 2 palavras, de qualquer tipo, exceto ecóicas (e. g., mando, tato). (O)",
+      "level": 2,
+      "milestone": 8,
+      "admin": "O"
+    },
+    {
+      "id": "LING_09",
+      "domain": "LING",
+      "text": "N2 · Marco 9: Emite prosódia funcional (e. g., ritmo, ênfase, entonação) em 5 ocasiões em um dia (e. g., põe ênfase ou acentua certas palavras tais como “É MEU!”). (O)",
+      "level": 2,
+      "milestone": 9,
+      "admin": "O"
+    },
+    {
+      "id": "LING_10",
+      "domain": "LING",
+      "text": "N2 · Marco 10: Tem um vocabulário total de falante de 300 palavras (todos os operantes verbais, exceto ecóico). (O/T)",
+      "level": 2,
+      "milestone": 10,
+      "admin": "O/T"
+    },
+    {
+      "id": "MAND_11",
+      "domain": "MAND",
+      "text": "N3 · Marco 11: Espontaneamente emite mandos diferentes para obter informações verbais usando questões WH6 ou faz uso de uma palavra em forma de pergunta por 5 vezes (e.g., “Qual o seu nome?” “Quem é você?” “Dormindo?” ). (OC 60 min)",
+      "level": 3,
+      "milestone": 11,
+      "admin": "OC 60 min"
+    },
+    {
+      "id": "MAND_12",
+      "domain": "MAND",
+      "text": "N3 · Marco 12: Educadamente emite mandos para parar uma atividade indesejada ou remover qualquer OM aversiva em 5 circunstâncias diferentes (e.g., “Por favor para de me empurrar” “Não obrigado” “Você pode sair da frente?”). (O/T)",
+      "level": 3,
+      "milestone": 12,
+      "admin": "O/T"
+    },
+    {
+      "id": "MAND_13",
+      "domain": "MAND",
+      "text": "N3 · Marco 13: Emite mandos contendo 10 adjetivos, preposições ou advérbios diferentes (e.g., “Meu giz de cera amarelo quebrou” “Não leva isso para fora” “Vai rápido”). (OC 60 min.)",
+      "level": 3,
+      "milestone": 13,
+      "admin": "OC 60 min"
+    },
+    {
+      "id": "MAND_14",
+      "domain": "MAND",
+      "text": "N3 · Marco 14: Fornece informações, instruções ou explicações para como fazer algo ou para como participar de uma atividade, por 5 vezes (e.g., Você passa a cola primeiro, depois cola. Você senta aqui enquanto eu busco o livro). (O)",
+      "level": 3,
+      "milestone": 14,
+      "admin": "O"
+    },
+    {
+      "id": "MAND_15",
+      "domain": "MAND",
+      "text": "N3 · Marco 15: Emite mandos para que os outros atentem para o seu comportamento",
+      "level": 3,
+      "milestone": 15
+    },
+    {
+      "id": "INTRA_11",
+      "domain": "INTRA",
+      "text": "N3 · Marco 11: estou contando a história...). (O)",
+      "level": 3,
+      "milestone": 11,
+      "admin": "O"
+    },
+    {
+      "id": "TACT_11",
+      "domain": "TACT",
+      "text": "N3 · Marco 11: Emite tatos para cor, forma e função de 5 objetos (15 tentativas) quando cada objeto e pergunta são apresentados em ordem misturada (e. g., Qual a cor da geladeira? Qual a forma de um ovo? O que você faz com a bola?) (Isto é parte tato e parte intraverbal). (T)",
+      "level": 3,
+      "milestone": 11,
+      "admin": "T"
+    },
+    {
+      "id": "TACT_12",
+      "domain": "TACT",
+      "text": "N3 · Marco 12: Emite tatos para 4 preposições diferentes (e.g., dentro, fora, sobre, embaixo) e 4 pronomes (e. g., eu, você, meu, minha). (O/T)",
+      "level": 3,
+      "milestone": 12,
+      "admin": "O/T"
+    },
+    {
+      "id": "TACT_13",
+      "domain": "TACT",
+      "text": "N3 · Marco 13: Emite tatos para 4 adjetivos diferentes, excluindo cores e formas (e.g., grande, pequeno, comprido, curto) e 4 advérbios (e. g., rápido, devagar, gentilmente, discretamente). (O/T)",
+      "level": 3,
+      "milestone": 13,
+      "admin": "O/T"
+    },
+    {
+      "id": "TACT_14",
+      "domain": "TACT",
+      "text": "N3 · Marco 14: Emite tatos com sentenças completas contendo 4 ou mais palavras, 20 vezes (O/T)",
+      "level": 3,
+      "milestone": 14,
+      "admin": "O/T"
+    },
+    {
+      "id": "TACT_15",
+      "domain": "TACT",
+      "text": "N3 · Marco 15: Possui um vocabulário de tato de 1000 palavras (nomes, verbos, adjetivos, etc) que foram testados ou de uma lista acumulada de tatos conhecidos. (T)",
+      "level": 3,
+      "milestone": 15,
+      "admin": "T"
+    },
+    {
+      "id": "LR_11",
+      "domain": "LR",
+      "text": "N3 · Marco 11: Seleciona itens por cor e forma em um arranjo de 6 estímulos similares, para 4 cores e 4 formas (e.g., “Encontre o carro vermelho” “Encontre o biscoito quadrado”). (T)",
+      "level": 3,
+      "milestone": 11,
+      "admin": "T"
+    },
+    {
+      "id": "LR_12",
+      "domain": "LR",
+      "text": "N3 · Marco 12: Segue 2 instruções envolvendo 6 preposições diferentes (e.g., “Fique atrás da cadeira”) e 4 pronomes diferentes (e. g., “Toque minha orelha”). (T)",
+      "level": 3,
+      "milestone": 12,
+      "admin": "T"
+    },
+    {
+      "id": "LR_13",
+      "domain": "LR",
+      "text": "N3 · Marco 13: Seleciona itens de um arranjo de estímulos similares baseado na relacão entre 4 pares de adjetivos (e.g., grande – pequeno, comprido – curto) e demostra ações baseadas na relação entre 4 pares de advérbios (e. g., quieto – barulhento, rápido – devagar). (T)",
+      "level": 3,
+      "milestone": 13,
+      "admin": "T"
+    },
+    {
+      "id": "LR_14",
+      "domain": "LR",
+      "text": "N3 · Marco 14: Segue instruções com 3 passos para 10 direções diferentes (e.g., “Pegue o casaco, pendure e sente na cadeira”). (T)",
+      "level": 3,
+      "milestone": 14,
+      "admin": "T"
+    },
+    {
+      "id": "LR_15",
+      "domain": "LR",
+      "text": "N3 · Marco 15: Tem um repertório de ouvinte no total de 1200 palavras (nomes, verbos, adjetivos, etc.), testados ou de uma lista de registro acumulada de palavras conhecidas. (T)",
+      "level": 3,
+      "milestone": 15,
+      "admin": "T"
+    },
+    {
+      "id": "VP_MTS_11",
+      "domain": "VP_MTS",
+      "text": "N3 · Marco 11: Emparelha espontaneamente qualquer parte de uma atividade artística ou artesanato com o modelo de outra pessoa por 2 vezes (e.g., um colega colore um balão de vermelho e a criança copia a cor para seu balão). (O)",
+      "level": 3,
+      "milestone": 11,
+      "admin": "O"
+    },
+    {
+      "id": "VP_MTS_12",
+      "domain": "VP_MTS",
+      "text": "N3 · Marco 12: Demonstra emparelhamento generalizado não idêntico em um conjunto desordenado de 10 itens com 3 estímulos similares, para 25 itens (e.g., combina novos itens na primeira tentativa). (T)",
+      "level": 3,
+      "milestone": 12,
+      "admin": "T"
+    },
+    {
+      "id": "VP_MTS_13",
+      "domain": "VP_MTS",
+      "text": "N3 · Marco 13: Completa 20 estruturas diferentes com blocos, encaixes, quebra cabeças de formas ou atividades similares que contenham pelo menos 8 peças diferentes. (T)",
+      "level": 3,
+      "milestone": 13,
+      "admin": "T"
+    },
+    {
+      "id": "VP_MTS_14",
+      "domain": "VP_MTS",
+      "text": "N3 · Marco 14: Organiza 5 itens de 5 categorias diferentes sem necessidade um modelo (e.g., animais. roupas, móveis). (T)",
+      "level": 3,
+      "milestone": 14,
+      "admin": "T"
+    },
+    {
+      "id": "VP_MTS_15",
+      "domain": "VP_MTS",
+      "text": "N3 · Marco 15: Continua 20 padrões de três passos, sequências ou tarefas seriadas (e.g., estrela, triângulo, coração, estrela, triângulo…). (T)",
+      "level": 3,
+      "milestone": 15,
+      "admin": "T"
+    },
+    {
+      "id": "PLAY_11",
+      "domain": "PLAY",
+      "text": "N3 · Marco 11: Espontaneamente envolve- se em brincadeira imaginária ou de faz de conta em 5 ocasiões (e.g., brincar de vestir, uma festa com bichos de pelúcia, fingir que está cozinhando). (O)",
+      "level": 3,
+      "milestone": 11,
+      "admin": "O"
+    },
+    {
+      "id": "PLAY_12",
+      "domain": "PLAY",
+      "text": "N3 · Marco 12: Repete uma brincadeira motora grossa para obter um resultado melhor em duas atividades diferentes (e.g., jogar uma bola na cesta, acertar a bola no jogo de taco, bater o pé para lançar um foguete, se esforçar para balançar mais rápido no balanço). (O)",
+      "level": 3,
+      "milestone": 12,
+      "admin": "O"
+    },
+    {
+      "id": "PLAY_13",
+      "domain": "PLAY",
+      "text": "N3 · Marco 13: Engaja-se de forma independente em atividades do tipo artesanato por 5 minutos (e.g., colorir, pintura, cortar, colar). (O)",
+      "level": 3,
+      "milestone": 13,
+      "admin": "O"
+    },
+    {
+      "id": "PLAY_14",
+      "domain": "PLAY",
+      "text": "N3 · Marco 14: De forma independente se envolve em atividades de brincadeira contínua por 10 minutos sem a presença de dicas ou reforçamento de um adulto (e.g., brincando com uma lousa mágica, brincar de vestir roupas diferentes). (O)",
+      "level": 3,
+      "milestone": 14,
+      "admin": "O"
+    },
+    {
+      "id": "PLAY_15",
+      "domain": "PLAY",
+      "text": "N3 · Marco 15: De forma independente desenha ou escreve em livros de atividade pré- acadêmicas por 5 minutos (e.g., ponto a ponto, jogos de pareamento, labirintos, traçar letras e números). (O)",
+      "level": 3,
+      "milestone": 15,
+      "admin": "O"
+    },
+    {
+      "id": "SOCIAL_11",
+      "domain": "SOCIAL",
+      "text": "N3 · Marco 11: Espontaneamente coopera com um colega para alcançar um resultado específico por 5 vezes (e.g., uma criança segura um balde enquanto outra o enche de água). (O/T)",
+      "level": 3,
+      "milestone": 11,
+      "admin": "O/T"
+    },
+    {
+      "id": "SOCIAL_12",
+      "domain": "SOCIAL",
+      "text": "N3 · Marco 12: Espontaneamente emite mandos aos colegas utilizando uma pergunta WH por 5 vezes (e.g., “Onde você está indo?” “O que é isso?” “Quem você está imitando?”). (OC 60 min.)",
+      "level": 3,
+      "milestone": 12,
+      "admin": "OC 60 min"
+    },
+    {
+      "id": "SOCIAL_13",
+      "domain": "SOCIAL",
+      "text": "N3 · Marco 13: Responde de forma intraverbal a 5 questões ou afirmações diferentes oriundas dos colegas (e.g., verbalmente responde quando o colega pergunta “Do que você quer brincar?”). (O/T)",
+      "level": 3,
+      "milestone": 13,
+      "admin": "O/T"
+    },
+    {
+      "id": "SOCIAL_14",
+      "domain": "SOCIAL",
+      "text": "N3 · Marco 14: Participa de atividades de faz de conta e brincadeira social com colegas por 5 minutos sem dicas de adulto (e.g., brincadeira de vestir fantasia, encenar filmes, brincar de casinha). (O)",
+      "level": 3,
+      "milestone": 14,
+      "admin": "O"
+    },
+    {
+      "id": "SOCIAL_15",
+      "domain": "SOCIAL",
+      "text": "N3 · Marco 15: Participa de 4 trocas verbais sobre 1 tópico com colegas para 5 tópicos (e.g., as crianças conversam entre elas como fazer um rio em uma caixa de areia). (O)",
+      "level": 3,
+      "milestone": 15,
+      "admin": "O"
+    },
+    {
+      "id": "READ_11",
       "domain": "READ",
-      "text": "Registrar conclusão da área de marcos «Leitura» (kit VB-MAPP licenciado). Não inclui marcos/itens proprietários — use o protocolo oficial para pontuar cada marco."
+      "text": "N3 · Marco 11: Atenta para um livro quando uma história está sendo lida para ela por 75% do tempo. (OC 3min.)",
+      "level": 3,
+      "milestone": 11,
+      "admin": "OC 3min"
     },
     {
-      "id": "WRITE_checkpoint",
+      "id": "READ_12",
+      "domain": "READ",
+      "text": "N3 · Marco 12: Seleciona (discriminação de ouvinte) a letra maiúscula correta em um arranjo de 5 letras para 10 letras diferentes. (T)",
+      "level": 3,
+      "milestone": 12,
+      "admin": "T"
+    },
+    {
+      "id": "READ_13",
+      "domain": "READ",
+      "text": "N3 · Marco 13: Emite tatos para 10 letras maiúsculas quando solicitada. (T)",
+      "level": 3,
+      "milestone": 13,
+      "admin": "T"
+    },
+    {
+      "id": "READ_14",
+      "domain": "READ",
+      "text": "N3 · Marco 14: Lê seu próprio nome. (T)",
+      "level": 3,
+      "milestone": 14,
+      "admin": "T"
+    },
+    {
+      "id": "READ_15",
+      "domain": "READ",
+      "text": "N3 · Marco 15: Emparelha 5 palavras com os itens ou figuras correspondentes em um arranjo de 5 e vice versa (e.g., combina a palavra escrita pássaro com a figura de um pássaro)",
+      "level": 3,
+      "milestone": 15
+    },
+    {
+      "id": "WRITE_11",
       "domain": "WRITE",
-      "text": "Registrar conclusão da área de marcos «Escrita» (kit VB-MAPP licenciado). Não inclui marcos/itens proprietários — use o protocolo oficial para pontuar cada marco."
+      "text": "N3 · Marco 11: Imita 5 ações diferentes de escrita a partir de um modelo fornecido por um adulto usando um instrumento de escrita e uma superfície de escrita. (T)",
+      "level": 3,
+      "milestone": 11,
+      "admin": "T"
     },
     {
-      "id": "MATH_checkpoint",
+      "id": "WRITE_12",
+      "domain": "WRITE",
+      "text": "N3 · Marco 12: Faz um traçado de forma independente (distante cerca de 0.5 cm) das linhas de 05 formas geométricas diferentes (e.g., círculo, quadrado, triângulo, retângulo, estrela). (T)",
+      "level": 3,
+      "milestone": 12,
+      "admin": "T"
+    },
+    {
+      "id": "WRITE_13",
+      "domain": "WRITE",
+      "text": "N3 · Marco 13: Copia 10 letras ou números de forma legível. (T)",
+      "level": 3,
+      "milestone": 13,
+      "admin": "T"
+    },
+    {
+      "id": "WRITE_14",
+      "domain": "WRITE",
+      "text": "N3 · Marco 14: De forma legível soletra e escreve seu próprio nome sem fazer cópia. (T)",
+      "level": 3,
+      "milestone": 14,
+      "admin": "T"
+    },
+    {
+      "id": "WRITE_15",
+      "domain": "WRITE",
+      "text": "N3 · Marco 15: Copia todas as 26 letras maiúsculas e minúsculas de forma legível. (T)",
+      "level": 3,
+      "milestone": 15,
+      "admin": "T"
+    },
+    {
+      "id": "LRFFC_11",
+      "domain": "LRFFC",
+      "text": "N3 · Marco 11: Seleciona corretamente um item apresentado em um arranjo de 10 itens e que contenha 3 estímulos similares (e.g., cor similar, forma ou classe, sendo eles as escolhas erradas), para 25 questões WH diferentes em tarefas de LRFFC. (T)",
+      "level": 3,
+      "milestone": 11,
+      "admin": "T"
+    },
+    {
+      "id": "LRFFC_12",
+      "domain": "LRFFC",
+      "text": "N3 · Marco 12: Seleciona itens de um livro baseado em 2 componentes verbais: uma característica (e.g., cor) ou função (e.g., desenha com) ou classe (e.g., roupa), para 25 tarefas LRFFC (e.g., “Você vê um animal marrom?” “Você consegue encontrar a roupa com botões?”). (T)",
+      "level": 3,
+      "milestone": 12,
+      "admin": "T"
+    },
+    {
+      "id": "LRFFC_13",
+      "domain": "LRFFC",
+      "text": "N3 · Marco 13: Seleciona itens de uma página de livro ou do ambiente natural a partir de 3 componentes verbais (e.g., verbo, adjetivo, preposição, pronome), para 25 tarefas LRFFC iniciadas com perguntas WH (e.g., Qual fruta cresce em árvores?). (T)",
+      "level": 3,
+      "milestone": 13,
+      "admin": "T"
+    },
+    {
+      "id": "LRFFC_14",
+      "domain": "LRFFC",
+      "text": "N3 · Marco 14: Seleciona corretamente os itens de um livro ou do ambiente natural quando 4 perguntas LRFFC diferentes e sobre um único assunto são realizadas de forma alternada (Onde mora a vaca? O que a vaca come? Quem ordenha a vaca? ) para 25 tópicos diferentes. (T)",
+      "level": 3,
+      "milestone": 14,
+      "admin": "T"
+    },
+    {
+      "id": "LRFFC_15",
+      "domain": "LRFFC",
+      "text": "N3 · Marco 15: Demonstra 1000 respostas LRFFC diferentes, testadas ou obtidas de uma lista acumulada de respostas conhecidas. (T)",
+      "level": 3,
+      "milestone": 15,
+      "admin": "T"
+    },
+    {
+      "id": "INTRA_12",
+      "domain": "INTRA",
+      "text": "N3 · Marco 12: Demonstra 300 respostas intraverbais diferentes testadas ou obtidas de uma lista acumulada de intraverbais conhecidos. (T)",
+      "level": 3,
+      "milestone": 12,
+      "admin": "T"
+    },
+    {
+      "id": "INTRA_13",
+      "domain": "INTRA",
+      "text": "N3 · Marco 13: Responde 2 perguntas depois de ter ouvido a leitura de duas passagens curtas (15 ou mais palavras) de um livro, para 25 passagens (e.g,. Quem soprou a casa até derrubá-la?). (T)",
+      "level": 3,
+      "milestone": 13,
+      "admin": "T"
+    },
+    {
+      "id": "INTRA_14",
+      "domain": "INTRA",
+      "text": "N3 · Marco 14: Descreve 25 eventos diferentes, vídeos, histórias, etc. com 8 ou mais palavras (e.g., Me conte o que aconteceu ... “O monstro grande assustou todo mundo e eles correram para dentro de casa”). (O/T)",
+      "level": 3,
+      "milestone": 14,
+      "admin": "O/T"
+    },
+    {
+      "id": "INTRA_15",
+      "domain": "INTRA",
+      "text": "N3 · Marco 15: Responde a 4 questões WH diferentes e alternadas sobre um único tópico, para 10 tópicos diferentes (e.g.,. Quem leva você para a escola? Que escola você vai? O que você leva para a escola?). (T)",
+      "level": 3,
+      "milestone": 15,
+      "admin": "T"
+    },
+    {
+      "id": "GROUP_11",
+      "domain": "GROUP",
+      "text": "N3 · Marco 11: Usa o vaso e lava as mãos apenas com dicas verbais. (O)",
+      "level": 3,
+      "milestone": 11,
+      "admin": "O"
+    },
+    {
+      "id": "GROUP_12",
+      "domain": "GROUP",
+      "text": "N3 · Marco 12: Responde 5 diferentes perguntas ou instruções quando em grupo de 3 ou mais crianças sem necessitar de dicas diretas (e.g., “Todo mundo levantando! “. “Alguém está usando uma camisa vermelha?”). (O)",
+      "level": 3,
+      "milestone": 12,
+      "admin": "O"
+    },
+    {
+      "id": "GROUP_13",
+      "domain": "GROUP",
+      "text": "N3 · Marco 13: Trabalha em grupo de forma independente por 5 minutos e permanece na tarefa por 50% do período. (O)",
+      "level": 3,
+      "milestone": 13,
+      "admin": "O"
+    },
+    {
+      "id": "GROUP_14",
+      "domain": "GROUP",
+      "text": "N3 · Marco 14: Adquire 2 comportamentos novos quando colocada por 15 minutos em uma tarefa de ensino de grupo que envolva 5 ou mais crianças. (T)",
+      "level": 3,
+      "milestone": 14,
+      "admin": "T"
+    },
+    {
+      "id": "GROUP_15",
+      "domain": "GROUP",
+      "text": "N3 · Marco 15: Senta em uma sessão de grupo que tenha 5 crianças, por 20 minutos, sem comportamento disruptivo e responde 5 questões intraverbais. (T)",
+      "level": 3,
+      "milestone": 15,
+      "admin": "T"
+    },
+    {
+      "id": "LING_11",
+      "domain": "LING",
+      "text": "N3 · Marco 11: Emite inflexão 7 de nome ao combinar a raiz de 10 substantivos com sufixos para o plural (e.g., cachorro vs. cachorros) e 10 pronomes possessivos (e.g., Essa é a bicicleta dela). (O/T)",
+      "level": 3,
+      "milestone": 11,
+      "admin": "O/T"
+    },
+    {
+      "id": "LING_12",
+      "domain": "LING",
+      "text": "N3 · Marco 12: Emite inflexões de verbo ao combinar 10 verbos com sufixo para passado simples (e.g., comeu) e 10 verbos para futuro simples (e.g., comerá). (O/T)",
+      "level": 3,
+      "milestone": 12,
+      "admin": "O/T"
+    },
+    {
+      "id": "LING_13",
+      "domain": "LING",
+      "text": "N3 · Marco 13: Emite 10 frases diferentes com substantivos que contenham pelo menos 3 palavras com 2 modificadores (adjetivos, preposições, pronomes) (e.g., “Esta é minha boneca” “Eu quero sorvete de chocolate”). (O/T)",
+      "level": 3,
+      "milestone": 13,
+      "admin": "O/T"
+    },
+    {
+      "id": "LING_14",
+      "domain": "LING",
+      "text": "N3 · Marco 14: Emite 10 frases diferentes com verbos que contenham pelo menos 3 palavras e 2 modificadores (advérbio, preposição, pronome) (e.g., “Empurra com força” “Fique em cima dos degraus”). (O/T)",
+      "level": 3,
+      "milestone": 14,
+      "admin": "O/T"
+    },
+    {
+      "id": "LING_15",
+      "domain": "LING",
+      "text": "N3 · Marco 15: Combina frases com substantivo e verbo para produzir 10 sentenças diferentes, sintaticamente corretas, contendo pelo menos 5 palavras (e.g., O cachorro lambeu minha cara”). (O/T)",
+      "level": 3,
+      "milestone": 15,
+      "admin": "O/T"
+    },
+    {
+      "id": "MATH_11",
       "domain": "MATH",
-      "text": "Registrar conclusão da área de marcos «Matemática» (kit VB-MAPP licenciado). Não inclui marcos/itens proprietários — use o protocolo oficial para pontuar cada marco."
+      "text": "N3 · Marco 11: Identifica como ouvinte os números de 1 a 5 em um arranjo com 5 números diferentes. (T)",
+      "level": 3,
+      "milestone": 11,
+      "admin": "T"
+    },
+    {
+      "id": "MATH_12",
+      "domain": "MATH",
+      "text": "N3 · Marco 12: Emite tatos para os números 1 a 5. (T)",
+      "level": 3,
+      "milestone": 12,
+      "admin": "T"
+    },
+    {
+      "id": "MATH_13",
+      "domain": "MATH",
+      "text": "N3 · Marco 13: Retira a quantidade correta de itens de um conjunto, entre 1 e 5 (e.g., “Pegue 4 carros”; “Agora me dê 2 carros”). (T)",
+      "level": 3,
+      "milestone": 13,
+      "admin": "T"
+    },
+    {
+      "id": "MATH_14",
+      "domain": "MATH",
+      "text": "N3 · Marco 14: Identifica como ouvinte 8 comparações diferentes que envolvam medidas (e.g., mais e menos, grande e pequeno, comprido e curto, cheio e vazio, alto e baixo). (T)",
+      "level": 3,
+      "milestone": 14,
+      "admin": "T"
+    },
+    {
+      "id": "MATH_15",
+      "domain": "MATH",
+      "text": "N3 · Marco 15: Corretamente combina um número escrito com a quantidade e a quantidade com um número escrito para os números de 1 a 5 (e.g., combina o número 3 com uma figura que mostra 3 caminhões). (T)",
+      "level": 3,
+      "milestone": 15,
+      "admin": "T"
     }
   ],
   "scoring": {
@@ -177,97 +1446,251 @@
       "MAND": {
         "method": "mastery_pct",
         "item_ids": [
-          "MAND_checkpoint"
+          "MAND_01",
+          "MAND_02",
+          "MAND_03",
+          "MAND_04",
+          "MAND_05",
+          "MAND_06",
+          "MAND_07",
+          "MAND_08",
+          "MAND_09",
+          "MAND_10",
+          "MAND_11",
+          "MAND_12",
+          "MAND_13",
+          "MAND_14",
+          "MAND_15"
         ]
       },
       "TACT": {
         "method": "mastery_pct",
         "item_ids": [
-          "TACT_checkpoint"
+          "TACT_01",
+          "TACT_02",
+          "TACT_03",
+          "TACT_04",
+          "TACT_05",
+          "TACT_06",
+          "TACT_07",
+          "TACT_08",
+          "TACT_09",
+          "TACT_10",
+          "TACT_11",
+          "TACT_12",
+          "TACT_13",
+          "TACT_14",
+          "TACT_15"
         ]
       },
       "LR": {
         "method": "mastery_pct",
         "item_ids": [
-          "LR_checkpoint"
+          "LR_01",
+          "LR_02",
+          "LR_03",
+          "LR_04",
+          "LR_05",
+          "LR_06",
+          "LR_07",
+          "LR_08",
+          "LR_09",
+          "LR_10",
+          "LR_11",
+          "LR_12",
+          "LR_13",
+          "LR_14",
+          "LR_15"
         ]
       },
       "VP_MTS": {
         "method": "mastery_pct",
         "item_ids": [
-          "VP_MTS_checkpoint"
+          "VP_MTS_01",
+          "VP_MTS_02",
+          "VP_MTS_03",
+          "VP_MTS_04",
+          "VP_MTS_05",
+          "VP_MTS_06",
+          "VP_MTS_07",
+          "VP_MTS_08",
+          "VP_MTS_09",
+          "VP_MTS_10",
+          "VP_MTS_11",
+          "VP_MTS_12",
+          "VP_MTS_13",
+          "VP_MTS_14",
+          "VP_MTS_15"
         ]
       },
       "PLAY": {
         "method": "mastery_pct",
         "item_ids": [
-          "PLAY_checkpoint"
+          "PLAY_01",
+          "PLAY_02",
+          "PLAY_03",
+          "PLAY_04",
+          "PLAY_05",
+          "PLAY_06",
+          "PLAY_07",
+          "PLAY_08",
+          "PLAY_09",
+          "PLAY_10",
+          "PLAY_11",
+          "PLAY_12",
+          "PLAY_13",
+          "PLAY_14",
+          "PLAY_15"
         ]
       },
       "SOCIAL": {
         "method": "mastery_pct",
         "item_ids": [
-          "SOCIAL_checkpoint"
+          "SOCIAL_01",
+          "SOCIAL_02",
+          "SOCIAL_03",
+          "SOCIAL_04",
+          "SOCIAL_05",
+          "SOCIAL_06",
+          "SOCIAL_07",
+          "SOCIAL_08",
+          "SOCIAL_09",
+          "SOCIAL_10",
+          "SOCIAL_11",
+          "SOCIAL_12",
+          "SOCIAL_13",
+          "SOCIAL_14",
+          "SOCIAL_15"
         ]
       },
       "IMIT": {
         "method": "mastery_pct",
         "item_ids": [
-          "IMIT_checkpoint"
+          "IMIT_01",
+          "IMIT_02",
+          "IMIT_03",
+          "IMIT_04",
+          "IMIT_05",
+          "IMIT_06",
+          "IMIT_07",
+          "IMIT_08",
+          "IMIT_09",
+          "IMIT_10"
         ]
       },
       "ECHOIC": {
         "method": "mastery_pct",
         "item_ids": [
-          "ECHOIC_checkpoint"
+          "ECHOIC_01",
+          "ECHOIC_02",
+          "ECHOIC_03",
+          "ECHOIC_04",
+          "ECHOIC_05",
+          "ECHOIC_06",
+          "ECHOIC_07",
+          "ECHOIC_08",
+          "ECHOIC_09",
+          "ECHOIC_10"
         ]
       },
       "VOCAL": {
         "method": "mastery_pct",
         "item_ids": [
-          "VOCAL_checkpoint"
+          "VOCAL_01",
+          "VOCAL_02",
+          "VOCAL_03",
+          "VOCAL_04",
+          "VOCAL_05"
         ]
       },
       "LRFFC": {
         "method": "mastery_pct",
         "item_ids": [
-          "LRFFC_checkpoint"
+          "LRFFC_06",
+          "LRFFC_07",
+          "LRFFC_08",
+          "LRFFC_09",
+          "LRFFC_10",
+          "LRFFC_11",
+          "LRFFC_12",
+          "LRFFC_13",
+          "LRFFC_14",
+          "LRFFC_15"
         ]
       },
       "INTRA": {
         "method": "mastery_pct",
         "item_ids": [
-          "INTRA_checkpoint"
+          "INTRA_06",
+          "INTRA_07",
+          "INTRA_08",
+          "INTRA_09",
+          "INTRA_10",
+          "INTRA_11",
+          "INTRA_12",
+          "INTRA_13",
+          "INTRA_14",
+          "INTRA_15"
         ]
       },
       "GROUP": {
         "method": "mastery_pct",
         "item_ids": [
-          "GROUP_checkpoint"
+          "GROUP_06",
+          "GROUP_07",
+          "GROUP_08",
+          "GROUP_09",
+          "GROUP_10",
+          "GROUP_11",
+          "GROUP_12",
+          "GROUP_13",
+          "GROUP_14",
+          "GROUP_15"
         ]
       },
       "LING": {
         "method": "mastery_pct",
         "item_ids": [
-          "LING_checkpoint"
+          "LING_06",
+          "LING_07",
+          "LING_08",
+          "LING_09",
+          "LING_10",
+          "LING_11",
+          "LING_12",
+          "LING_13",
+          "LING_14",
+          "LING_15"
         ]
       },
       "READ": {
         "method": "mastery_pct",
         "item_ids": [
-          "READ_checkpoint"
+          "READ_11",
+          "READ_12",
+          "READ_13",
+          "READ_14",
+          "READ_15"
         ]
       },
       "WRITE": {
         "method": "mastery_pct",
         "item_ids": [
-          "WRITE_checkpoint"
+          "WRITE_11",
+          "WRITE_12",
+          "WRITE_13",
+          "WRITE_14",
+          "WRITE_15"
         ]
       },
       "MATH": {
         "method": "mastery_pct",
         "item_ids": [
-          "MATH_checkpoint"
+          "MATH_11",
+          "MATH_12",
+          "MATH_13",
+          "MATH_14",
+          "MATH_15"
         ]
       }
     },
@@ -275,23 +1698,23 @@
       {
         "min": 0,
         "max": 49,
-        "label": "Registro estrutural inicial — aplicar marcos oficiais do kit"
+        "label": "Mestria inicial — priorizar marcos emergentes"
       },
       {
         "min": 50,
         "max": 79,
-        "label": "Registro parcial das áreas de marcos"
+        "label": "Mestria parcial nas áreas avaliadas"
       },
       {
         "min": 80,
         "max": 100,
-        "label": "Maioria das áreas com checkpoint registrado"
+        "label": "Alta mestria nos marcos registrados"
       }
     ],
-    "note": "Percentuais refletem checkpoints estruturais, não mestria real dos marcos VB-MAPP."
+    "note": "Percentuais por domínio = marcos com escore ≥2 (adquirido) / total do domínio."
   },
   "report": {
-    "template_id": "vb-mapp-br-v2",
+    "template_id": "vb-mapp-br-v3-martone",
     "sections": [
       "identificacao",
       "resultados",
@@ -301,6 +1724,5 @@
     ]
   },
   "informant_forms": [],
-  "suggested_goals_template": true,
-  "norms_file": "norms-br.json"
+  "suggested_goals_template": true
 }

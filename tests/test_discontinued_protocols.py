@@ -10,17 +10,20 @@ from app.seeds.demo import seed_protocols
 from app.seeds.protocols import PROTOCOLS
 
 
-def test_protocols_seed_excludes_eat10_masa():
+def test_protocols_seed_excludes_eat10_masa_tli():
     ids = {p["id"] for p in PROTOCOLS}
     assert "eat10" not in ids
     assert "masa" not in ids
+    assert "tli" not in ids
 
 
-def test_aliases_exclude_eat10_masa():
+def test_aliases_exclude_eat10_masa_tli():
     assert "eat10" not in PROTOCOL_TO_INSTRUMENT_SLUG
     assert "masa" not in PROTOCOL_TO_INSTRUMENT_SLUG
+    assert "tli" not in PROTOCOL_TO_INSTRUMENT_SLUG
     assert resolve_instrument_slug("eat10") is None
     assert resolve_instrument_slug("masa") is None
+    assert resolve_instrument_slug("tli") is None
 
 
 async def test_seed_deactivates_orphans_with_assessments(db_session, professional, patient):
@@ -69,3 +72,4 @@ async def test_seed_deactivates_orphans_with_assessments(db_session, professiona
     }
     assert "eat10" not in active_ids
     assert "masa" not in active_ids
+    assert "tli" not in active_ids
