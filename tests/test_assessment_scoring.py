@@ -4,7 +4,6 @@ import pytest
 
 from app.core.instrument_aliases import (
     CLIENT_SCORED_PROTOCOLS,
-    SPM_PROTOCOL,
     has_manifest_package,
     instrument_slug_for_protocol,
     resolve_instrument_slug,
@@ -21,7 +20,7 @@ from app.services.assessment_scoring import (
 @pytest.mark.parametrize(
     ("protocol_id", "expected_mode"),
     [
-        ("spm", "spm"),
+        ("protocolo-inexistente", "manual"),
         ("fois", "manifest"),
         ("mchat", "client"),
     ],
@@ -82,6 +81,3 @@ def test_build_assessment_from_scores():
 def test_scores_to_percentage(total, expected):
     assert scores_to_percentage({"total": total}) == expected
 
-
-def test_spm_protocol_constant():
-    assert SPM_PROTOCOL == "spm"

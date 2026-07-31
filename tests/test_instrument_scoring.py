@@ -66,19 +66,3 @@ def test_ablls_r_domain_mastery():
     assert "J20" in package.scoring["domains"]["J"]["item_ids"]
     assert "J21" not in {it["id"] for it in package.get_items()}
 
-
-def test_spm_subform_scoring():
-    from app.services.spm_content_package import get_spm_content_package
-    from app.services.spm_scoring_service import compute_subform_scores, synthesize_battery_scores
-
-    get_spm_content_package.cache_clear()
-    package = get_spm_content_package()
-    subforms = package.list_subforms()
-    clinical = next(s for s in subforms if s["filler"] == "clinical" and s["item_count"] > 0)
-    items = package.get_items(clinical["slug"])[:5]
-    answers = {str(item["id"]): 2 for item in items}
-    scores = compute_subform_scores(package, clinical["slug"], answers)
-    assert scores["subform_slug"] == clinical["slug"]
-    assert "overall" in scores
-    battery = synthesize_battery_scores([scores])
-    assert "summary" in battery

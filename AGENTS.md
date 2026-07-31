@@ -52,7 +52,7 @@ app/
 ├── core/                   # config, deps (auth), security, catálogos
 ├── db/                     # engine / session async
 ├── middleware/             # entitlement (trial/plano)
-├── data/                   # Pacotes de instrumentos {slug}/ + SPM JSON
+├── data/                   # Pacotes de instrumentos {slug}/ (+ instrument_samples/)
 ├── seeds/                  # demo.py, protocols.py
 └── utils/
 alembic/versions/           # Migrations — revisar autogenerate antes de commit
@@ -110,7 +110,7 @@ Não há codegen. O web copia tipos/chamadas em `korus-one-web/src/lib/api/`.
 - Quase tudo exige Bearer access token → `Professional`
 - Pacientes são escopados por `professional_id` (`get_patient_for_professional`)
 - Admin plataforma: `require_staff` (`is_staff`)
-- Público (sem auth): ex. `spm_informant`, webhooks, trechos de auth (login/register/forgot)
+- Público (sem auth): ex. webhooks, trechos de auth (login/register/forgot)
 
 ### Entitlement
 
@@ -133,7 +133,6 @@ Não há codegen. O web copia tipos/chamadas em `korus-one-web/src/lib/api/`.
 | Clínico | `clinical.py` | protocols, assessments, goals, analytics |
 | Instrumentos | `instruments.py` | manifesto + score (`/instruments/:id/score`) |
 | Baterias | `batteries.py` | ABFW, PROC, PARD, ADL Linguagem, etc. |
-| SPM | `spm.py` + `spm_informant.py` | bateria multi-subforma + link público |
 | Dashboard | `dashboard.py` | KPIs operacionais |
 | Catálogo | `catalog.py` | diagnósticos / especialidades |
 | IA | `ai.py` | jobs assíncronos + assistente |
@@ -151,10 +150,11 @@ Pacotes de conteúdo em `app/data/{slug}/` (prioridade sobre `instrument_samples
 
 | Modo (conceito) | Onde pontua | Serviços / rotas típicas |
 | --------------- | ----------- | ------------------------ |
-| Manifest | API | `instrument_scoring_service`, `instruments.py` — ABLLS-R (`domain_mastery`), FOIS, ADL… |
+| Manifest | API | `instrument_scoring_service`, `instruments.py` — ABLLS-R (`domain_mastery`), VB-MAPP, FOIS, ADL… |
 | Battery | API | `battery_scoring_service`, `battery_service`, `batteries.py` — ABFW, PROC, Denver, ADL Linguagem (`adl2`)… |
-| SPM | API | `spm_*_service`, `spm.py` / `spm_informant.py` |
 | Client-side | Frontend | API só persiste `answers`/`scores` via assessments |
+
+Removidos do produto (hard purge): SPM, TVIP, SDQ, TLI, EAT-10, MASA — IDs discontinued para histórico; migration `u0v1w2x3y4z5` dropa tabelas SPM.
 
 Rebuild de pacotes (exemplos):
 

@@ -58,10 +58,6 @@ class Assessment(Base, TimestampMixin):
 
     patient: Mapped["Patient"] = relationship(back_populates="assessments")  # noqa: F821
     protocol: Mapped["ProtocolCatalog"] = relationship()
-    spm_subforms: Mapped[list["SpmSubformAssessment"]] = relationship(  # noqa: F821
-        back_populates="battery",
-        cascade="all, delete-orphan",
-    )
     battery_subforms: Mapped[list["BatterySubformAssessment"]] = relationship(  # noqa: F821
         back_populates="battery",
         cascade="all, delete-orphan",

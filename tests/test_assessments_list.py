@@ -37,7 +37,7 @@ async def test_list_assessments_filters_by_status(
             Assessment(
                 patient_id=patient.id,
                 professional_id=professional.id,
-                protocol_id="spm",
+                protocol_id="fois",
                 date=date.today(),
                 result="Aguardando informante",
                 percentage=0,

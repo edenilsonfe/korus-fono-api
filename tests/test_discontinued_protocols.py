@@ -4,26 +4,35 @@ from datetime import date
 
 from sqlalchemy import select
 
-from app.core.instrument_aliases import PROTOCOL_TO_INSTRUMENT_SLUG, resolve_instrument_slug
+from app.core.instrument_aliases import (
+    CLIENT_SCORED_PROTOCOLS,
+    PROTOCOL_TO_INSTRUMENT_SLUG,
+    resolve_instrument_slug,
+)
 from app.models.assessment import Assessment, ProtocolCatalog
 from app.seeds.demo import seed_protocols
 from app.seeds.protocols import PROTOCOLS
 
 
-def test_protocols_seed_excludes_eat10_masa_tli():
+REMOVED_FROM_CATALOG = ("eat10", "masa", "tli", "spm", "tvip", "sdq")
+
+
+def test_protocols_seed_excludes_discontinued():
     ids = {p["id"] for p in PROTOCOLS}
-    assert "eat10" not in ids
-    assert "masa" not in ids
-    assert "tli" not in ids
+    for pid in REMOVED_FROM_CATALOG:
+        assert pid not in ids
 
 
-def test_aliases_exclude_eat10_masa_tli():
+def test_aliases_exclude_discontinued_manifest_slugs():
     assert "eat10" not in PROTOCOL_TO_INSTRUMENT_SLUG
     assert "masa" not in PROTOCOL_TO_INSTRUMENT_SLUG
     assert "tli" not in PROTOCOL_TO_INSTRUMENT_SLUG
+    assert "tvip" not in PROTOCOL_TO_INSTRUMENT_SLUG
     assert resolve_instrument_slug("eat10") is None
     assert resolve_instrument_slug("masa") is None
     assert resolve_instrument_slug("tli") is None
+    assert resolve_instrument_slug("tvip") is None
+    assert "sdq" not in CLIENT_SCORED_PROTOCOLS
 
 
 async def test_seed_deactivates_orphans_with_assessments(db_session, professional, patient):
@@ -70,6 +79,5 @@ async def test_seed_deactivates_orphans_with_assessments(db_session, professiona
         .scalars()
         .all()
     }
-    assert "eat10" not in active_ids
-    assert "masa" not in active_ids
-    assert "tli" not in active_ids
+    for pid in REMOVED_FROM_CATALOG:
+        assert pid not in active_ids

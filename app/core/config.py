@@ -95,8 +95,6 @@ class Settings(BaseSettings):
     trial_days: int = 7
 
     instrument_packages_root: str = ""
-    spm_content_package_path: str = ""
-    spm_informant_link_expire_days: int = 14
 
     max_upload_bytes: int = 26214400
 

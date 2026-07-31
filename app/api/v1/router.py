@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import ai, admin_announcements, admin_billing, admin_feature_flags, admin_professionals, admin_protocols, admin_resources, appointments, auth, batteries, billing, catalog, clinical, dashboard, instruments, me, notifications, patients, prontuario, resources, sessions, spm, spm_informant, timeline, webhooks, whatsapp
+from app.api.v1 import ai, admin_announcements, admin_billing, admin_feature_flags, admin_professionals, admin_protocols, admin_resources, appointments, auth, batteries, billing, catalog, clinical, dashboard, instruments, me, notifications, patients, prontuario, resources, sessions, timeline, webhooks, whatsapp
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
@@ -18,8 +18,6 @@ api_router.include_router(clinical.router)
 api_router.include_router(clinical.patient_router)
 api_router.include_router(instruments.router)
 api_router.include_router(batteries.router)
-api_router.include_router(spm.router)
-api_router.include_router(spm_informant.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(ai.router)
 api_router.include_router(whatsapp.router)

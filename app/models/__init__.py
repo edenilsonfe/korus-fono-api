@@ -9,7 +9,6 @@ from app.models.appointment import Appointment
 from app.models.assessment import Assessment, ProtocolCatalog
 from app.models.battery import BatterySubformAssessment
 from app.models.battery_evidence import BatteryItemEvidence, BatterySessionEvent
-from app.models.spm import SpmInformantLink, SpmSubformAssessment
 from app.models.attachment import Attachment
 from app.models.resource import Resource
 from app.models.caregiver import Caregiver
@@ -47,8 +46,6 @@ __all__ = [
     "BatterySubformAssessment",
     "BatteryItemEvidence",
     "BatterySessionEvent",
-    "SpmSubformAssessment",
-    "SpmInformantLink",
     "Goal",
     "ClinicalDomainSnapshot",
     "AIReport",

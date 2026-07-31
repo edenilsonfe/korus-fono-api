@@ -3,7 +3,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.core.deps import require_verified_professional
 from app.core.instrument_aliases import (
     CLIENT_SCORED_PROTOCOLS,
-    SPM_PROTOCOL,
     has_manifest_package,
     resolve_instrument_slug,
 )
@@ -37,7 +36,7 @@ async def get_protocol_capabilities(
             has_items = len(package.get_items()) > 0 or bool(package.modules)
         except FileNotFoundError:
             has_items = False
-    elif pid in CLIENT_SCORED_PROTOCOLS or pid == SPM_PROTOCOL:
+    elif pid in CLIENT_SCORED_PROTOCOLS:
         has_items = True
     return ProtocolCapabilitiesResponse(
         protocol_id=pid,

@@ -283,7 +283,7 @@ async def cancel_assessment(
     if not assessment.result or assessment.result.lower() in {
         "rascunho",
         "aguardando informante",
-        "em coordenação spm",
+        "em coordenação",
         "em coordenação",
     }:
         assessment.result = "Cancelada"

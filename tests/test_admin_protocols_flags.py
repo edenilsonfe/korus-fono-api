@@ -85,7 +85,7 @@ async def db(engine):
             FeatureFlag(key="ai_assistant", description="IA", enabled_global=True)
         )
         session.add(
-            FeatureFlag(key="spm", description="SPM", enabled_global=False)
+            FeatureFlag(key="demo_protocol", description="Demo", enabled_global=False)
         )
         await session.commit()
         yield session
@@ -165,7 +165,7 @@ async def test_unknown_flag_fail_closed(db):
     service = FeatureFlagService(db)
     assert await service.is_enabled(pro, "does_not_exist") is False
     assert await service.is_enabled(pro, "ai_assistant") is True
-    assert await service.is_enabled(pro, "spm") is False
+    assert await service.is_enabled(pro, "demo_protocol") is False
 
 
 async def test_override_forces_flag(db):
@@ -174,24 +174,24 @@ async def test_override_forces_flag(db):
     client = await _client(db)
     async with client:
         resp = await client.put(
-            f"/api/v1/admin/professionals/{target.id}/feature-flags/spm",
+            f"/api/v1/admin/professionals/{target.id}/feature-flags/demo_protocol",
             headers=_auth(staff),
             json={"enabled": True, "reason": "beta"},
         )
         assert resp.status_code == 200
         states = {s["key"]: s for s in resp.json()}
-        assert states["spm"]["override"] is True
-        assert states["spm"]["resolved"] is True
+        assert states["demo_protocol"]["override"] is True
+        assert states["demo_protocol"]["resolved"] is True
 
         resp = await client.put(
-            f"/api/v1/admin/professionals/{target.id}/feature-flags/spm",
+            f"/api/v1/admin/professionals/{target.id}/feature-flags/demo_protocol",
             headers=_auth(staff),
             json={"enabled": None},
         )
         assert resp.status_code == 200
         states = {s["key"]: s for s in resp.json()}
-        assert states["spm"]["override"] is None
-        assert states["spm"]["resolved"] is False
+        assert states["demo_protocol"]["override"] is None
+        assert states["demo_protocol"]["resolved"] is False
     _clear()
 
 

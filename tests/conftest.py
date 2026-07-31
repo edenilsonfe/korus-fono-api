@@ -69,7 +69,7 @@ async def db_session(db_engine):
 @pytest.fixture
 async def professional(db_session: AsyncSession):
     pro = Professional(
-        email="spm-test@example.com",
+        email="protocol-test@example.com",
         password_hash=hash_password("testpass123"),
         name="Dra. Teste",
         specialty_key="fono",
@@ -127,15 +127,6 @@ async def api_client(db_session: AsyncSession):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
     app.dependency_overrides.clear()
-
-
-@pytest.fixture(autouse=True)
-def clear_spm_cache():
-    from app.services.spm_content_package import get_spm_content_package
-
-    get_spm_content_package.cache_clear()
-    yield
-    get_spm_content_package.cache_clear()
 
 
 @pytest.fixture(autouse=True)

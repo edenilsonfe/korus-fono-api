@@ -76,9 +76,9 @@ def build_suggestions(pending: dict) -> list[dict]:
             "id": "pending-awaiting-informant",
             "title": "Aguardando informante",
             "text": (
-                f"Você tem {awaiting_informant} SPM aguardando resposta do informante."
+                f"Você tem {awaiting_informant} avaliação aguardando resposta do informante."
                 if awaiting_informant == 1
-                else f"Você tem {awaiting_informant} SPM aguardando resposta do informante."
+                else f"Você tem {awaiting_informant} avaliações aguardando resposta do informante."
             ),
             "ctaLabel": "Ver pendências",
             "ctaTo": "/avaliacoes?status=awaiting_informant",

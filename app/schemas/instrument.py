@@ -77,6 +77,6 @@ class InstrumentScoreResponse(CamelModel):
 
 class ProtocolCapabilitiesResponse(CamelModel):
     protocol_id: str
-    scoring_mode: str  # manifest | client | spm | manual
+    scoring_mode: str  # manifest | client | battery | manual
     instrument_slug: Optional[str] = None
     has_items: bool = False

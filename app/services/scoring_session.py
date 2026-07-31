@@ -1,6 +1,6 @@
 """C2 — ScoringSession: NormalizedScores behind a small interface.
 
-YAGNI slice: manifest + precomputed-scores adapters. Battery/SPM remain
+ YAGNI slice: manifest + precomputed-scores adapters. Battery remain
 behind their own engines until a later deepen.
 """
 

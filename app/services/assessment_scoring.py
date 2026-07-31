@@ -2,7 +2,6 @@ from typing import Any
 
 from app.core.instrument_aliases import (
     CLIENT_SCORED_PROTOCOLS,
-    SPM_PROTOCOL,
     has_manifest_package,
     resolve_instrument_slug,
 )
@@ -12,8 +11,6 @@ from app.services.scoring_session import ScoringSession, ScoreError, normalize_s
 
 def get_protocol_scoring_mode(protocol_id: str) -> str:
     pid = protocol_id.lower()
-    if pid == SPM_PROTOCOL:
-        return "spm"
     if pid == "abfw":
         return "battery"
     if has_manifest_package(pid):

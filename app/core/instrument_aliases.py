@@ -3,7 +3,6 @@
 PROTOCOL_TO_INSTRUMENT_SLUG: dict[str, str] = {
     "abfw": "abfw",
     "proc": "proc",
-    "tvip": "tvip",
     "ados2": "ados-2",
     "cars": "cars",
     "vbmapp": "vb-mapp",
@@ -30,7 +29,6 @@ CLIENT_SCORED_PROTOCOLS: frozenset[str] = frozenset(
         "rastreio-tdah",
         "rastreio-tea",
         "dislexia",
-        "sdq",
         "vanderbilt",
         "ata",
         "desenvolvimento-infantil",
@@ -39,8 +37,6 @@ CLIENT_SCORED_PROTOCOLS: frozenset[str] = frozenset(
         "portage",
     }
 )
-
-SPM_PROTOCOL = "spm"
 
 
 def resolve_instrument_slug(protocol_id: str) -> str | None:
