@@ -106,9 +106,11 @@ class MetaPixelService:
     ) -> bool:
         """Envia um evento à Graph API. Retorna False se desligado ou se a Meta rejeitar."""
         if not self.enabled:
+            logger.debug("Meta CAPI desligado (META_PIXEL_ID/META_CAPI_ACCESS_TOKEN ausentes) — %s ignorado", event_name)
             return False
         s = self.settings
         url = f"{_GRAPH_BASE}/{s.meta_graph_api_version}/{s.meta_pixel_id}/events"
+        logger.info("Meta CAPI enviando %s (%s) -> pixel=%s", event_name, event_id, s.meta_pixel_id)
         event: dict[str, Any] = {
             "event_name": event_name,
             "event_time": int((event_time or datetime.now(UTC)).timestamp()),
