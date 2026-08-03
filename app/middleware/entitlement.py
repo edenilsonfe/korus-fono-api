@@ -24,6 +24,8 @@ EXEMPT_PATH_PREFIXES: tuple[str, ...] = (
     # clinical data mutations — exempt from entitlement gating.
     "/api/v1/notifications",
     "/api/v1/announcements",
+    # Tracking (Meta Pixel) não é mutação de dado clínico — telemetria best-effort.
+    "/api/v1/tracking",
     # Platform staff console (accounts, future modules) — gated by require_staff.
     "/api/v1/admin",
 )

@@ -94,6 +94,13 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:5173"
     trial_days: int = 7
 
+    # Meta Pixel / Conversions API (server-side tracking). Vazio desliga.
+    meta_pixel_id: str = ""
+    meta_capi_access_token: str = ""
+    # Código de evento de teste gerado em Event Manager > Test Events (só dev).
+    meta_capi_test_event_code: str = ""
+    meta_graph_api_version: str = "v21.0"
+
     instrument_packages_root: str = ""
 
     max_upload_bytes: int = 26214400

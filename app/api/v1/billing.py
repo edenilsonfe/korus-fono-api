@@ -6,7 +6,7 @@ import logging
 import re
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -15,6 +15,7 @@ from app.billing import PaymentGatewayConfigError, get_payment_gateway
 from app.billing.checkout_urls import build_checkout_return_urls
 from app.billing.errors import PaymentGatewayError
 from app.billing.webhook_normalizer import get_normalizer
+from app.core.client_ip import get_client_ip
 from app.core.config import get_settings
 from app.core.deps import require_verified_professional
 from app.db.session import get_db
@@ -42,10 +43,38 @@ from app.services.entitlement_service import EntitlementService
 from app.services.plan_change_service import PlanChangeService
 from app.services.plan_catalog_seed import CANONICAL_PLAN_SLUGS
 from app.services.saas_billing_service import SaasBillingService
+from app.services.meta_pixel_service import MetaPixelService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/billing", tags=["billing"])
+
+
+async def track_checkout_started_task(
+    professional_id: str,
+    email: str,
+    name: str,
+    value_cents: int,
+    currency: str,
+    plan_slug: str,
+    client_ip: str | None,
+    client_user_agent: str | None,
+    fbp: str | None,
+    fbc: str | None,
+) -> None:
+    service = MetaPixelService()
+    await service.track_checkout_started(
+        professional_id=professional_id,
+        email=email,
+        name=name,
+        value_cents=value_cents,
+        currency=currency,
+        plan_slug=plan_slug,
+        client_ip=client_ip,
+        client_user_agent=client_user_agent,
+        fbp=fbp,
+        fbc=fbc,
+    )
 
 
 def _digits_only(value: str | None) -> str:
@@ -226,6 +255,8 @@ async def preview_plan_change(
 @router.post("/checkout", response_model=CheckoutResponse)
 async def create_billing_checkout(
     payload: CheckoutRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     professional: Professional = Depends(require_verified_professional),
 ):
@@ -356,6 +387,20 @@ async def create_billing_checkout(
 
     if session.get("status") == "completed":
         await BillingReconciliationService(db).reconcile_professional(professional.id)
+
+    background_tasks.add_task(
+        track_checkout_started_task,
+        professional_id,
+        professional.email,
+        professional.name,
+        charge_cents,
+        plan.currency,
+        plan.slug,
+        get_client_ip(request),
+        request.headers.get("user-agent"),
+        request.cookies.get("_fbp"),
+        request.cookies.get("_fbc"),
+    )
 
     return CheckoutResponse(
         checkout_url=session["checkout_url"],

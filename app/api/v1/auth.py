@@ -63,8 +63,46 @@ from app.services.refresh_token_service import (
     revoke_refresh_session,
     rotate_refresh_session,
 )
+from app.services.meta_pixel_service import MetaPixelService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _request_ip(request: Request) -> str:
+    return get_client_ip(request)
+
+
+async def track_registration_events_task(
+    professional_id: str,
+    email: str,
+    name: str,
+    phone: str | None,
+    client_ip: str | None,
+    client_user_agent: str | None,
+    fbp: str | None,
+    fbc: str | None,
+) -> None:
+    service = MetaPixelService()
+    await service.track_registration(
+        professional_id=professional_id,
+        email=email,
+        name=name,
+        phone=phone,
+        client_ip=client_ip,
+        client_user_agent=client_user_agent,
+        fbp=fbp,
+        fbc=fbc,
+    )
+    await service.track_start_trial(
+        professional_id=professional_id,
+        email=email,
+        name=name,
+        phone=phone,
+        client_ip=client_ip,
+        client_user_agent=client_user_agent,
+        fbp=fbp,
+        fbc=fbc,
+    )
 
 
 def _request_ip(request: Request) -> str:
@@ -161,6 +199,17 @@ async def register(
             professional.name,
             raw_token,
         )
+    background_tasks.add_task(
+        track_registration_events_task,
+        str(professional.id),
+        professional.email,
+        professional.name,
+        professional.phone,
+        _request_ip(request),
+        request.headers.get("user-agent"),
+        request.cookies.get("_fbp"),
+        request.cookies.get("_fbc"),
+    )
     return _apply_auth_cookies(response, access_token, refresh_token)
 
 

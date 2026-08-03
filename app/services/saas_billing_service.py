@@ -14,6 +14,7 @@ from app.billing.types import InternalBillingEventType
 from app.billing.webhook_normalizer import NormalizedBillingEvent
 from app.models.billing import BillingEvent, Plan, Subscription
 from app.models.professional import Professional
+from app.services.meta_pixel_service import MetaPixelService
 
 logger = logging.getLogger(__name__)
 
@@ -244,3 +245,29 @@ class SaasBillingService:
                 professional_id,
                 sub_status,
             )
+
+            await self._track_purchase_event(ev, sub_status=sub_status, plan_row=plan_row, professional=professional)
+
+    async def _track_purchase_event(
+        self,
+        ev: NormalizedBillingEvent,
+        *,
+        sub_status: str | None,
+        plan_row: Plan | None,
+        professional: Professional | None,
+    ) -> None:
+        """Purchase (Meta CAPI) quando um pagamento é confirmado — best-effort."""
+        if sub_status != "active" or ev.event_type != InternalBillingEventType.PAYMENT_SUCCEEDED:
+            return
+        if not professional or not plan_row:
+            return
+        service = MetaPixelService()
+        await service.track_purchase(
+            professional_id=str(professional.id),
+            email=professional.email,
+            name=professional.name,
+            value_cents=plan_row.price_cents,
+            currency=plan_row.currency,
+            plan_slug=plan_row.slug,
+            billing_event_id=ev.external_event_id,
+        )
