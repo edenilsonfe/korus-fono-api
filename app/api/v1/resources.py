@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import require_verified_professional
@@ -22,6 +22,7 @@ from app.services.resource_service import (
     parse_categories_form,
     to_resource_response,
 )
+from app.services.storage import safe_content_disposition_filename
 
 router = APIRouter(prefix="/resources", tags=["resources"])
 
@@ -65,6 +66,29 @@ async def get_resource_download_url(
         raise _http_forbidden(exc) from exc
     await db.commit()
     return ResourceDownloadUrl(url=url)
+
+
+@router.get("/{resource_id}/file")
+async def get_resource_file(
+    resource_id: UUID,
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stream the object same-origin (inline) — CSP/mixed-content-safe preview."""
+    service = ResourceService(db)
+    try:
+        body, resource = await service.download_content(professional, resource_id)
+    except ResourceNotFoundError as exc:
+        raise _http_not_found(exc) from exc
+    except ResourceForbiddenError as exc:
+        raise _http_forbidden(exc) from exc
+    await db.commit()
+    safe = safe_content_disposition_filename(resource.storage_key, resource.title)
+    return Response(
+        content=body,
+        media_type=resource.content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'inline; filename="{safe}"'},
+    )
 
 
 @router.post("", response_model=ResourceResponse, status_code=status.HTTP_201_CREATED)

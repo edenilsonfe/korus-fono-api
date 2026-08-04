@@ -276,6 +276,57 @@ async def test_delete_personal_forbidden_on_global(resources_env):
 
 
 @pytest.mark.asyncio
+async def test_resource_file_streams_inline(resources_env):
+    from datetime import UTC, datetime
+    from unittest.mock import AsyncMock, patch
+
+    client = resources_env["client"]
+    session = resources_env["session"]
+    owner = resources_env["owner"]
+    global_item = resources_env["global_item"]
+    owner.email_verified_at = datetime.now(UTC)
+    await session.commit()
+
+    with patch(
+        "app.services.resource_service.storage_service.download",
+        new_callable=AsyncMock,
+        return_value=(b"%PDF-1.7 test", "application/pdf"),
+    ):
+        res = await client.get(
+            f"/api/v1/resources/{global_item.id}/file",
+            headers=_headers(owner),
+        )
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "application/pdf"
+    assert res.headers["content-disposition"].startswith('inline; filename="Global"')
+    assert res.content == b"%PDF-1.7 test"
+
+
+@pytest.mark.asyncio
+async def test_resource_file_forbidden_for_stranger_personal(resources_env):
+    from datetime import UTC, datetime
+    from unittest.mock import patch
+
+    client = resources_env["client"]
+    session = resources_env["session"]
+    owner = resources_env["owner"]
+    other_item = resources_env["other_item"]
+    owner.email_verified_at = datetime.now(UTC)
+    await session.commit()
+
+    with patch(
+        "app.services.resource_service.storage_service.download",
+        new_callable=AsyncMock,
+        return_value=(b"data", "application/pdf"),
+    ):
+        res = await client.get(
+            f"/api/v1/resources/{other_item.id}/file",
+            headers=_headers(owner),
+        )
+    assert res.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_admin_create_global_resource(resources_env):
     client = resources_env["client"]
     staff = resources_env["staff"]

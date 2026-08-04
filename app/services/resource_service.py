@@ -380,3 +380,13 @@ class ResourceService:
             resource.storage_key,
             filename=resource.title,
         )
+
+    async def download_content(
+        self, professional: Professional, resource_id: uuid.UUID
+    ) -> tuple[bytes, Resource]:
+        """Fetch object bytes same-origin (inline preview) and bump the download counter."""
+        resource = await self.get_accessible(professional, resource_id)
+        resource.downloads += 1
+        await self.db.flush()
+        body, _ = await storage_service.download(resource.storage_key)
+        return body, resource
