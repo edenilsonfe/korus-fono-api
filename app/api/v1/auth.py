@@ -64,6 +64,7 @@ from app.services.refresh_token_service import (
     rotate_refresh_session,
 )
 from app.services.meta_pixel_service import MetaPixelService
+from app.services.new_account_notification import send_new_account_notification_sync
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -115,6 +116,26 @@ def send_password_reset_email_task(to_email: str, user_name: str, raw_token: str
 
 def send_email_verification_email_task(to_email: str, user_name: str, raw_token: str) -> None:
     send_email_verification_email_sync(to_email=to_email, user_name=user_name, raw_token=raw_token)
+
+
+def send_new_account_notification_task(
+    user_name: str,
+    user_email: str,
+    specialty: str,
+    council: str,
+    phone: str,
+    created_at: datetime,
+    trial_ends_at: datetime | None,
+) -> None:
+    send_new_account_notification_sync(
+        user_name=user_name,
+        user_email=user_email,
+        specialty=specialty,
+        council=council,
+        phone=phone,
+        created_at=created_at,
+        trial_ends_at=trial_ends_at,
+    )
 
 
 async def _issue_tokens(
@@ -199,6 +220,16 @@ async def register(
             professional.name,
             raw_token,
         )
+    background_tasks.add_task(
+        send_new_account_notification_task,
+        professional.name,
+        professional.email,
+        professional.specialty,
+        professional.council,
+        professional.phone,
+        now,
+        professional.trial_ends_at,
+    )
     background_tasks.add_task(
         track_registration_events_task,
         str(professional.id),

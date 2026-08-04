@@ -91,3 +91,61 @@ def email_verification_email(
         f"Atenciosamente,\n{PRODUCT_NAME}"
     )
     return RenderedEmail(subject=subject, html=_layout("Confirme seu e-mail", inner), text=text)
+
+
+def new_account_notification_email(
+    user_name: str,
+    user_email: str,
+    specialty: str,
+    council: str,
+    phone: str,
+    created_at: str,
+    trial_ends_at: str,
+) -> RenderedEmail:
+    """Internal notification when a new professional account is created."""
+    subject = f"Novo cadastro no {PRODUCT_NAME}"
+    safe_name = escape(user_name, quote=True)
+    safe_email = escape(user_email, quote=True)
+    safe_specialty = escape(specialty, quote=True)
+    safe_council = escape(council or "—", quote=True)
+    safe_phone = escape(phone or "—", quote=True)
+    inner = f"""
+      <p>Uma nova conta foi criada no {PRODUCT_NAME}:</p>
+      <table style="border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14px;">
+        <tr>
+          <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280; width: 40%;">Nome</td>
+          <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb;"><strong>{safe_name}</strong></td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280;">E-mail</td>
+          <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb;">{safe_email}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280;">Especialidade</td>
+          <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb;">{safe_specialty}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280;">Registro</td>
+          <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb;">{safe_council}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280;">Telefone</td>
+          <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb;">{safe_phone}</td>
+        </tr>
+      </table>
+      <p style="font-size: 13px; color: #6b7280;">
+        Cadastro em {created_at} &middot; Trial até {trial_ends_at}
+      </p>
+    """
+    text = (
+        f"Uma nova conta foi criada no {PRODUCT_NAME}.\n\n"
+        f"Nome: {user_name}\n"
+        f"E-mail: {user_email}\n"
+        f"Especialidade: {specialty}\n"
+        f"Registro: {council or '—'}\n"
+        f"Telefone: {phone or '—'}\n\n"
+        f"Cadastro em: {created_at}\n"
+        f"Trial até: {trial_ends_at}\n\n"
+        f"Atenciosamente,\n{PRODUCT_NAME}"
+    )
+    return RenderedEmail(subject=subject, html=_layout("Novo cadastro", inner), text=text)
