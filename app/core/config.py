@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     email_verification_cooldown_seconds: int = 60
     # Destinatário do aviso interno de novo cadastro (vazio = desligado).
     new_account_notification_email: str = ""
+    # Destinatário do canal de suporte (form de contato; vazio = desligado).
+    support_contact_email: str = ""
 
     # Vazio = AWS S3 real. Dev local (docker-compose / .env): http://localhost:9000 (MinIO).
     s3_endpoint: str = ""
