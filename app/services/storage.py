@@ -86,6 +86,13 @@ class StorageService:
                 ExpiresIn=expires,
             )
 
+    async def download(self, key: str) -> tuple[bytes, str | None]:
+        """Fetch object bytes and its stored content type (None when absent)."""
+        async with self._client() as client:
+            obj = await client.get_object(Bucket=self.settings.s3_bucket, Key=key)
+            body = await obj["Body"].read()
+            return body, obj.get("ContentType")
+
     @staticmethod
     def make_key(patient_id: uuid.UUID, filename: str) -> str:
         return f"patients/{patient_id}/{uuid.uuid4()}/{filename}"

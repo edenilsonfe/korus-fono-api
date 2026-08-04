@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,7 +27,7 @@ from app.services.attachment_upload import (
     validate_attachment_category,
     validate_attachment_upload,
 )
-from app.services.storage import storage_service
+from app.services.storage import safe_content_disposition_filename, storage_service
 from app.services.clinical_activity import record_evolution
 from app.services.timeline import create_timeline_event
 
@@ -266,3 +266,27 @@ async def get_attachment_url(
         as_attachment=False,
     )
     return {"url": url}
+
+
+@router.get("/attachments/{attachment_id}/file")
+async def get_attachment_file(
+    patient_id: UUID,
+    attachment_id: UUID,
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stream the object content same-origin (inline), bypassing CSP/mixed-content blocks."""
+    await get_patient_for_professional(patient_id, professional, db)
+    result = await db.execute(
+        select(Attachment).where(Attachment.id == attachment_id, Attachment.patient_id == patient_id)
+    )
+    attachment = result.scalar_one_or_none()
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Anexo não encontrado")
+    body, content_type = await storage_service.download(attachment.storage_key)
+    safe = safe_content_disposition_filename(attachment.storage_key, attachment.name)
+    return Response(
+        content=body,
+        media_type=content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'inline; filename="{safe}"'},
+    )
