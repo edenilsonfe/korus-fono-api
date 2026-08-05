@@ -1,20 +1,43 @@
 """Resources library — ownership, mime validation, admin gate."""
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 from app.core.security import create_access_token, hash_password
 from app.db.base import Base
+from app.db.session import engine as _real_engine
 from app.db.session import get_db
 from app.main import app
 from app.models.professional import Professional
 from app.models.resource import Resource
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+
+
+@pytest.fixture(autouse=True)
+async def _patch_middleware_db(monkeypatch):
+    """EntitlementMiddleware usa AsyncSessionLocal (engine Postgres real) direto,
+    e o pytest-asyncio troca o event loop a cada teste — conexões asyncpg
+    reaproveitadas entre loops quebram. Aponta o middleware para um sqlite em
+    memória vazio (novo por teste), mantendo a semântica: profissional ausente
+    -> middleware deixa a requisição passar."""
+    # Solta conexões asyncpg órfãs de outros arquivos de teste (loop fechado)
+    # sem tentar fechá-las — evita GC tardio estourando no loop deste teste.
+    await _real_engine.dispose(close=False)
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr("app.middleware.entitlement.AsyncSessionLocal", maker)
+    yield
 
 
 async def _engine():
@@ -45,6 +68,7 @@ async def _pro(
         council="CRFa",
         phone="11999990000",
         is_staff=is_staff,
+        email_verified_at=datetime.now(UTC),
     )
     db.add(pro)
     await db.commit()
@@ -215,6 +239,38 @@ async def test_create_personal_resource_pdf(resources_env):
     assert body["isMine"] is True
     assert body["sharedWithPlatform"] is True
     assert body["format"] == "PDF"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "legacy_category",
+    [
+        "Fonoaudiologia",
+        "Terapia Ocupacional",
+        "Psicologia",
+        "Fisioterapia",
+        "Psicopedagogia",
+    ],
+)
+async def test_create_resource_rejects_legacy_umbrella_category(
+    resources_env, legacy_category
+):
+    client = resources_env["client"]
+    owner = resources_env["owner"]
+
+    files = {"file": ("material.pdf", b"%PDF-1.4 test", "application/pdf")}
+    data = {
+        "title": "Legado",
+        "description": "Teste",
+        "categories": f'["{legacy_category}"]',
+    }
+    res = await client.post(
+        "/api/v1/resources",
+        headers=_headers(owner),
+        data=data,
+        files=files,
+    )
+    assert res.status_code == 422
 
 
 @pytest.mark.asyncio

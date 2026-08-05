@@ -1,17 +1,14 @@
 """Fixed catalog metadata for the resources library."""
 
 RESOURCE_CATEGORIES: tuple[str, ...] = (
-    "Linguagem",
-    "Fonoaudiologia",
-    "TEA",
-    "Comunicação Alternativa",
-    "Terapia Ocupacional",
-    "Psicologia",
-    "Fisioterapia",
-    "Psicopedagogia",
+    # Área clínica
+    "Linguagem", "Fala", "Voz", "Fluência", "Motricidade Orofacial",
+    "Leitura e Escrita", "Audição", "TEA", "Comunicação Alternativa",
+    # Tipo de material
+    "Jogos e Atividades", "Cartões e Figuras", "Guias e Orientações",
+    "Avaliação", "Quadros e Cartazes",
+    # Público
     "Orientação aos Pais",
-    "Avaliação",
-    "Jogos e Atividades",
 )
 
 RESOURCE_FORMATS: tuple[str, ...] = ("PDF", "Imagem")

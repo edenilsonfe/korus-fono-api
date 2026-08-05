@@ -1,8 +1,10 @@
 from contextlib import asynccontextmanager
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings, validate_settings
@@ -42,6 +44,17 @@ def create_app() -> FastAPI:
     else:
         docs_kwargs = {}
     app = FastAPI(title=settings.app_name, lifespan=lifespan, **docs_kwargs)
+
+    @app.exception_handler(ValidationError)
+    async def handle_validation_error(
+        request: Request, exc: ValidationError
+    ) -> JSONResponse:
+        # Routers constroem corpos Pydantic manualmente (ex.: form-data em
+        # resources) — sem este handler, ValidationError viraria 500 em vez
+        # de 422 para categorias inválidas removidas do catálogo.
+        details = [err["msg"].removeprefix("Value error, ") for err in exc.errors()]
+        return JSONResponse(status_code=422, content={"detail": "; ".join(details)})
+
     cors_kwargs: dict = {
         "allow_credentials": True,
         "allow_methods": ["*"],
