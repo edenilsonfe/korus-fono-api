@@ -65,6 +65,7 @@ from app.services.refresh_token_service import (
 )
 from app.services.meta_pixel_service import MetaPixelService
 from app.services.new_account_notification import send_new_account_notification_sync
+from app.services.whatsapp_welcome_service import send_whatsapp_welcome_message
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -136,6 +137,10 @@ def send_new_account_notification_task(
         created_at=created_at,
         trial_ends_at=trial_ends_at,
     )
+
+
+async def send_whatsapp_welcome_task(user_name: str, phone: str) -> None:
+    await send_whatsapp_welcome_message(user_name=user_name, phone=phone)
 
 
 async def _issue_tokens(
@@ -229,6 +234,11 @@ async def register(
         professional.phone,
         now,
         professional.trial_ends_at,
+    )
+    background_tasks.add_task(
+        send_whatsapp_welcome_task,
+        professional.name,
+        professional.phone,
     )
     background_tasks.add_task(
         track_registration_events_task,

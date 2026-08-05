@@ -11,6 +11,7 @@ WHATSAPP_EVENT_CANCELLED = "appointment_cancelled"
 WHATSAPP_EVENT_RESCHEDULED = "appointment_rescheduled"
 WHATSAPP_EVENT_BILLING_REMINDER = "billing_reminder"
 WHATSAPP_EVENT_BILLING_OVERDUE = "billing_overdue"
+WHATSAPP_EVENT_WELCOME = "welcome"
 
 WHATSAPP_EVENT_IDS: tuple[str, ...] = (
     WHATSAPP_EVENT_REMINDER_24H,
@@ -37,6 +38,21 @@ REMINDER_TEMPLATE_BODY = (
     "📍 {{5}}\n\n"
     "Qualquer imprevisto, me avise com antecedência."
 )
+
+# Welcome message sent by the platform's own number right after registration.
+# Variable: {{firstName}}.
+DEFAULT_WELCOME_MESSAGE = (
+    "Olá, {{firstName}}! 👋\n\n"
+    "Seja bem-vindo(a) ao Korus Fono! 🎉\n\n"
+    "Sua conta foi criada com sucesso e você já pode começar a usar a plataforma: "
+    "organize sua agenda, aplique protocolos e acompanhe a evolução dos seus pacientes.\n\n"
+    "Se tiver qualquer dúvida ou precisar de ajuda, nossa equipe está à disposição — "
+    "é só responder esta mensagem. 💬\n\n"
+    "Um abraço,\n"
+    "Equipe Korus Fono"
+)
+
+WELCOME_MESSAGE_MAX_LENGTH = 4000
 
 DEFAULT_EVENT_MESSAGE_TEMPLATES: dict[str, str] = {
     WHATSAPP_EVENT_CONFIRMATION: (

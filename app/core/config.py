@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     evolution_api_base_url: str = "http://localhost:8080"
     evolution_global_api_key: str = ""
     evolution_webhook_secret: str = ""
+    # Instância Evolution da plataforma usada para enviar a mensagem de boas-vindas
+    # após o cadastro (vazio = recurso desativado). Envia com a chave global.
+    evolution_welcome_instance_name: str = ""
     clinic_timezone: str = "America/Sao_Paulo"
     whatsapp_scheduler_interval_seconds: int = 900
     whatsapp_reminder_window_hours: int = 24

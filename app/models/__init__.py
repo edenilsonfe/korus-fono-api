@@ -23,6 +23,7 @@ from app.models.professional import Professional
 from app.models.session import Session
 from app.models.timeline import TimelineEvent
 from app.models.whatsapp_connection import WhatsAppConnection
+from app.models.platform_whatsapp_connection import PlatformWhatsAppConnection
 
 __all__ = [
     "Plan",
@@ -53,6 +54,7 @@ __all__ = [
     "ChatMessage",
     "AIJob",
     "WhatsAppConnection",
+    "PlatformWhatsAppConnection",
     "NotificationSettings",
     "NotificationMessageLog",
     "AppNotification",
