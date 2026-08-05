@@ -25,7 +25,7 @@ GLOBAL_RESOURCE_SEED: list[dict] = [
             "Conjunto de pranchas PECS imprimíveis com pictogramas de rotina, alimentação e emoções "
             "para crianças não verbais."
         ),
-        "categories": ["Comunicação Alternativa", "TEA", "Fonoaudiologia"],
+        "categories": ["Comunicação Alternativa", "TEA"],
         "format": "PDF",
         "filename": "pranchas-caa.pdf",
         "content_type": "application/pdf",
@@ -47,7 +47,7 @@ GLOBAL_RESOURCE_SEED: list[dict] = [
             "Atividades lúdicas para ampliação de vocabulário, consciência fonológica e "
             "estruturação de frases."
         ),
-        "categories": ["Linguagem", "Fonoaudiologia", "Jogos e Atividades"],
+        "categories": ["Linguagem", "Jogos e Atividades"],
         "format": "PDF",
         "filename": "caderno-linguagem-3-5.pdf",
         "content_type": "application/pdf",
@@ -68,7 +68,7 @@ GLOBAL_RESOURCE_SEED: list[dict] = [
         "description": (
             "Orientações para famílias sobre atividades de regulação sensorial no ambiente domiciliar."
         ),
-        "categories": ["Terapia Ocupacional", "Orientação aos Pais", "TEA"],
+        "categories": ["Orientação aos Pais", "TEA"],
         "format": "PDF",
         "filename": "guia-integracao-sensorial.pdf",
         "content_type": "application/pdf",
@@ -84,32 +84,12 @@ GLOBAL_RESOURCE_SEED: list[dict] = [
         "difficulty": "Intermediário",
     },
     {
-        "title": "Protocolo de Exercícios Motores Grossos",
-        "description": (
-            "Sequência ilustrada de exercícios de coordenação e equilíbrio para desenvolvimento motor."
-        ),
-        "categories": ["Fisioterapia", "Jogos e Atividades"],
-        "format": "PDF",
-        "filename": "exercicios-motores-grossos.pdf",
-        "content_type": "application/pdf",
-        "file_bytes": SEED_PDF_BYTES,
-        "pages": 18,
-        "author": "Fisio. Bruno Costa",
-        "downloads": 412,
-        "accent": "info",
-        "objective": "Desenvolver coordenação motora e equilíbrio",
-        "age_range": "3–9 anos",
-        "skill": "Coordenação motora grossa",
-        "related_protocol": "MABC-2",
-        "difficulty": "Intermediário",
-    },
-    {
         "title": "Cartões de Praxias Orofaciais",
         "description": (
             "Cartões ilustrados para treino de movimentos de lábios, língua e bochechas em terapia "
             "miofuncional."
         ),
-        "categories": ["Fonoaudiologia", "Linguagem", "Jogos e Atividades"],
+        "categories": ["Motricidade Orofacial", "Cartões e Figuras"],
         "format": "PDF",
         "filename": "cartoes-praxias-orofaciais.pdf",
         "content_type": "application/pdf",
@@ -129,7 +109,7 @@ GLOBAL_RESOURCE_SEED: list[dict] = [
         "description": (
             "Tabela de referência rápida de marcos de linguagem, motor, social e cognitivo para triagem."
         ),
-        "categories": ["Avaliação", "Psicopedagogia", "Orientação aos Pais"],
+        "categories": ["Avaliação", "Orientação aos Pais"],
         "format": "PDF",
         "filename": "checklist-marcos-desenvolvimento.pdf",
         "content_type": "application/pdf",
@@ -150,7 +130,7 @@ GLOBAL_RESOURCE_SEED: list[dict] = [
         "description": (
             "Material informativo para entregar às famílias sobre quando buscar avaliação especializada."
         ),
-        "categories": ["Orientação aos Pais", "Fonoaudiologia", "TEA"],
+        "categories": ["Orientação aos Pais", "TEA", "Guias e Orientações"],
         "format": "PDF",
         "filename": "folheto-sinais-alerta.pdf",
         "content_type": "application/pdf",
@@ -170,7 +150,7 @@ GLOBAL_RESOURCE_SEED: list[dict] = [
         "description": (
             "Imagens categorizadas (objetos, ações, lugares) para terapia de linguagem expressiva."
         ),
-        "categories": ["Linguagem", "Fonoaudiologia", "Comunicação Alternativa"],
+        "categories": ["Linguagem", "Comunicação Alternativa", "Cartões e Figuras"],
         "format": "Imagem",
         "filename": "banco-imagens-nomeacao.png",
         "content_type": "image/png",

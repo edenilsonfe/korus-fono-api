@@ -412,3 +412,14 @@ async def test_admin_gate_blocks_non_staff(resources_env):
 
     res = await client.get("/api/v1/admin/resources", headers=_headers(owner))
     assert res.status_code == 403
+
+
+def test_seed_categories_are_valid():
+    from app.core.resource_catalog import RESOURCE_CATEGORIES
+    from app.seeds import resources_data
+
+    assert resources_data.GLOBAL_RESOURCE_SEED, "seed deve ter recursos"
+    for resource in resources_data.GLOBAL_RESOURCE_SEED:
+        assert set(resource["categories"]) <= set(RESOURCE_CATEGORIES), (
+            f"categorias inválidas em {resource['filename']}: {resource['categories']}"
+        )

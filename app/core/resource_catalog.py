@@ -3,7 +3,7 @@
 RESOURCE_CATEGORIES: tuple[str, ...] = (
     # Área clínica
     "Linguagem", "Fala", "Voz", "Fluência", "Motricidade Orofacial",
-    "Leitura e Escrita", "Audição", "TEA", "Comunicação Alternativa",
+    "Leitura e Escrita", "Audição", "Comunicação Alternativa",
     # Tipo de material
     "Jogos e Atividades", "Cartões e Figuras", "Guias e Orientações",
     "Avaliação", "Quadros e Cartazes",
