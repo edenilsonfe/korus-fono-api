@@ -4,7 +4,10 @@ from uuid import uuid4
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.billing.stub_gateway import StubPaymentGateway
 from app.main import app
+from app.models.billing import Plan
+from app.services.plan_catalog_seed import COMMERCIAL_PLAN_SEEDS
 
 # JWT-shaped values (three base64url segments) must not appear in auth JSON.
 _JWT_RE = re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
@@ -55,7 +58,9 @@ async def test_register_and_login(client):
 
 
 @pytest.mark.asyncio
-async def test_register_without_cpf_creates_demo_patient(api_client, monkeypatch):
+async def test_register_can_checkout_before_verification_and_creates_demo_patient(
+    api_client, db_session, monkeypatch
+):
     # Avoid shared in-memory rate-limit state from other auth tests in the same run.
     monkeypatch.setattr("app.api.v1.auth.enforce_register_rate_limit", lambda *_a, **_k: None)
     captured: list[str] = []
@@ -64,6 +69,9 @@ async def test_register_without_cpf_creates_demo_patient(api_client, monkeypatch
         captured.append(raw_token)
 
     monkeypatch.setattr("app.api.v1.auth.send_email_verification_email_task", _capture_send)
+    monkeypatch.setattr("app.api.v1.billing.get_payment_gateway", lambda: StubPaymentGateway())
+    db_session.add(Plan(**COMMERCIAL_PLAN_SEEDS[0]))
+    await db_session.commit()
 
     email = f"nocpf-{uuid4().hex[:8]}@test.com"
     reg = await api_client.post(
@@ -78,10 +86,16 @@ async def test_register_without_cpf_creates_demo_patient(api_client, monkeypatch
     assert reg.status_code == 201
     _assert_auth_json_has_no_usable_jwt(reg.json())
     assert "korus_access" in reg.cookies
-    # Unverified session can read /me but not product routes until verify.
+    # A sessão recém-criada pode assinar antes da verificação, mas não acessar dados clínicos.
     me = await api_client.get("/api/v1/me")
     assert me.status_code == 200
     assert me.json()["emailVerified"] is False
+    checkout = await api_client.post(
+        "/api/v1/billing/checkout",
+        json={"planSlug": COMMERCIAL_PLAN_SEEDS[0]["slug"]},
+    )
+    assert checkout.status_code == 200
+    assert checkout.json()["sessionId"].startswith("stub_pay_")
     patients_blocked = await api_client.get("/api/v1/patients")
     assert patients_blocked.status_code == 403
     assert patients_blocked.json()["detail"] == "E-mail não verificado"
