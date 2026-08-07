@@ -30,6 +30,7 @@ from app.models.whatsapp_connection import (
     CONNECTION_STATUS_SETUP_INCOMPLETE,
 )
 from app.services.evolution_api_client import EvolutionApiClient, EvolutionApiError
+from app.services.evolution_webhook_auth import normalize_evolution_event
 from app.services.evolution_whatsapp_service import (
     mask_phone,
     whatsapp_number_candidates,
@@ -217,7 +218,84 @@ class PlatformWhatsAppService:
         connection.welcome_message = (message or "").strip() or None
         await self.db.commit()
 
+    async def handle_webhook_event(self, payload: dict[str, Any]) -> bool:
+        """Apply Evolution lifecycle events for the platform-owned instance.
+
+        Returns ``True`` when the event belongs to the platform instance so the
+        shared webhook dispatcher does not also route it as a professional event.
+        """
+        instance_name = payload.get("instance")
+        if not instance_name:
+            return False
+
+        result = await self.db.execute(
+            select(PlatformWhatsAppConnection).where(
+                PlatformWhatsAppConnection.evolution_instance_name == str(instance_name)
+            )
+        )
+        connection = result.scalars().first()
+        if connection is None:
+            return False
+
+        event = normalize_evolution_event(str(payload.get("event") or ""))
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+        if event in ("connection.update", "qrcode.updated"):
+            state = None
+            if isinstance(data, dict):
+                state = data.get("state") or data.get("status")
+            state = state or payload.get("state")
+            if state:
+                mapped = self._apply_evolution_state(connection, str(state))
+                if mapped == CONNECTION_STATUS_ACTIVE:
+                    connection.last_error = None
+
+            if isinstance(data, dict):
+                wuid = data.get("wuid") or data.get("ownerJid")
+                if wuid:
+                    connection.display_phone_number = str(wuid).split("@")[0]
+
+        await self.db.commit()
+        return True
+
     # ------------------------------------------------------------- lifecycle
+
+    async def _connect_existing_instance(
+        self,
+        connection: PlatformWhatsAppConnection,
+        *,
+        instance_name: str,
+        api_key: str,
+    ) -> PlatformConnectResult:
+        try:
+            state_payload = await self.client.connection_state(
+                instance_name, api_key=api_key
+            )
+            evolution_state = self.client.extract_connection_state(state_payload)
+            self._apply_evolution_state(connection, evolution_state)
+            qrcode_base64 = None
+            if evolution_state in (None, "close", "closed", "connecting"):
+                connect_payload = await self.client.connect_instance(
+                    instance_name, api_key=api_key
+                )
+                qrcode_base64 = self.client.extract_qrcode_base64(connect_payload)
+            await self._ensure_webhook(instance_name, api_key)
+            await self._sync_phone_from_instances(connection, api_key)
+            await self.db.commit()
+            await self.db.refresh(connection)
+            return PlatformConnectResult(
+                connection=connection,
+                qrcode_base64=qrcode_base64,
+                connection_state=evolution_state,
+            )
+        except HTTPException:
+            raise
+        except EvolutionApiError as exc:
+            connection.last_error = exc.message
+            await self.db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Falha ao conectar instância Evolution: {exc.message}",
+            ) from exc
 
     async def connect(self) -> PlatformConnectResult:
         connection = await self.get_connection()
@@ -229,42 +307,15 @@ class PlatformWhatsAppService:
                 api_key = self._api_key(connection)
             except HTTPException:
                 api_key = get_settings().evolution_global_api_key
-            try:
-                state_payload = await self.client.connection_state(
-                    instance_name, api_key=api_key
-                )
-                evolution_state = self.client.extract_connection_state(state_payload)
-                self._apply_evolution_state(connection, evolution_state)
-                qrcode_base64 = None
-                if evolution_state in (None, "close", "closed", "connecting"):
-                    connect_payload = await self.client.connect_instance(
-                        instance_name, api_key=api_key
-                    )
-                    qrcode_base64 = self.client.extract_qrcode_base64(
-                        connect_payload
-                    )
-                await self._ensure_webhook(instance_name, api_key)
-                await self._sync_phone_from_instances(connection, api_key)
-                await self.db.commit()
-                await self.db.refresh(connection)
-                return PlatformConnectResult(
-                    connection=connection,
-                    qrcode_base64=qrcode_base64,
-                    connection_state=evolution_state,
-                )
-            except HTTPException:
-                raise
-            except EvolutionApiError as exc:
-                connection.last_error = exc.message
-                await self.db.commit()
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"Falha ao conectar instância Evolution: {exc.message}",
-                ) from exc
+            return await self._connect_existing_instance(
+                connection,
+                instance_name=instance_name,
+                api_key=api_key,
+            )
 
         # New instance: name from env or generated; persisted for future reconnects.
         env_name = (get_settings().evolution_welcome_instance_name or "").strip()
-        instance_name = env_name or f"korus-welcome-{uuid.uuid4().hex[:8]}"
+        instance_name = env_name or "korus-welcome"
         settings = get_settings()
         webhook_url = settings.evolution_webhook_url
         try:
@@ -286,15 +337,14 @@ class PlatformWhatsAppService:
                             "ou limpe a instância no painel Evolution."
                         ),
                     ) from exc
-                try:
-                    await self.client.delete_instance(instance_name, api_key=global_key)
-                except EvolutionApiError:
-                    pass
-                created = await self.client.create_instance(
-                    instance_name,
-                    qrcode=True,
-                    webhook_url=webhook_url,
-                    webhook_secret=settings.evolution_webhook_secret or None,
+                connection.evolution_instance_name = instance_name
+                connection.encrypted_instance_api_key = encrypt_secret(global_key)
+                connection.last_error = None
+                await self.db.flush()
+                return await self._connect_existing_instance(
+                    connection,
+                    instance_name=instance_name,
+                    api_key=global_key,
                 )
             else:
                 raise HTTPException(
@@ -346,7 +396,7 @@ class PlatformWhatsAppService:
             connection_state=evolution_state,
         )
 
-    async def refresh_connection(self) -> PlatformWhatsAppConnection:
+    async def refresh_connection(self) -> PlatformConnectResult:
         connection = await self.get_connection()
         if not connection.evolution_instance_name:
             raise HTTPException(
@@ -355,6 +405,7 @@ class PlatformWhatsAppService:
             )
         api_key = self._api_key(connection)
         instance_name = self._instance_name(connection)
+        qrcode_base64 = None
         try:
             state_payload = await self.client.connection_state(
                 instance_name, api_key=api_key
@@ -365,7 +416,7 @@ class PlatformWhatsAppService:
                 connect_payload = await self.client.connect_instance(
                     instance_name, api_key=api_key
                 )
-                _ = self.client.extract_qrcode_base64(connect_payload)
+                qrcode_base64 = self.client.extract_qrcode_base64(connect_payload)
             await self._ensure_webhook(instance_name, api_key)
             await self._sync_phone_from_instances(connection, api_key)
         except HTTPException:
@@ -378,7 +429,11 @@ class PlatformWhatsAppService:
             ) from exc
         await self.db.commit()
         await self.db.refresh(connection)
-        return connection
+        return PlatformConnectResult(
+            connection=connection,
+            qrcode_base64=qrcode_base64,
+            connection_state=evolution_state,
+        )
 
     async def disconnect(self) -> PlatformWhatsAppConnection:
         connection = await self.get_connection()

@@ -23,7 +23,12 @@ from app.services.platform_whatsapp_service import PlatformWhatsAppService
 router = APIRouter(prefix="/admin/whatsapp/platform", tags=["admin-whatsapp"])
 
 
-def _connection_schema(connection) -> WhatsAppConnectionStatus:
+def _connection_schema(
+    connection,
+    *,
+    qrcode_base64: str | None = None,
+    connection_state: str | None = None,
+) -> WhatsAppConnectionStatus:
     if not connection:
         return WhatsAppConnectionStatus(status=CONNECTION_STATUS_NOT_CONNECTED)
     return WhatsAppConnectionStatus(
@@ -32,6 +37,8 @@ def _connection_schema(connection) -> WhatsAppConnectionStatus:
         last_error=connection.last_error,
         connected_at=connection.connected_at,
         evolution_instance_name=connection.evolution_instance_name,
+        qrcode_base64=qrcode_base64,
+        connection_state=connection_state,
     )
 
 
@@ -67,21 +74,35 @@ async def connect_platform_whatsapp(
     result = await service.connect()
     return WhatsAppConnectResponse(
         provider="evolution",
-        connection=_connection_schema(result.connection),
+        connection=_connection_schema(
+            result.connection,
+            qrcode_base64=result.qrcode_base64,
+            connection_state=result.connection_state,
+        ),
         qrcode_base64=result.qrcode_base64,
         connection_state=result.connection_state,
         can_send=result.connection.status == CONNECTION_STATUS_ACTIVE,
     )
 
 
-@router.post("/refresh-connection", response_model=WhatsAppStatusResponse)
+@router.post("/refresh-connection", response_model=WhatsAppConnectResponse)
 async def refresh_platform_whatsapp(
     _: Professional = Depends(require_staff),
     db: AsyncSession = Depends(get_db),
 ):
     service = PlatformWhatsAppService(db)
-    connection = await service.refresh_connection()
-    return _status_response(connection, await service.can_send(connection))
+    result = await service.refresh_connection()
+    return WhatsAppConnectResponse(
+        provider="evolution",
+        connection=_connection_schema(
+            result.connection,
+            qrcode_base64=result.qrcode_base64,
+            connection_state=result.connection_state,
+        ),
+        qrcode_base64=result.qrcode_base64,
+        connection_state=result.connection_state,
+        can_send=await service.can_send(result.connection),
+    )
 
 
 @router.post("/disconnect", response_model=WhatsAppStatusResponse)
