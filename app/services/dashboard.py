@@ -1,8 +1,11 @@
 from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
+from app.core.utils import calculate_age
 from app.models.appointment import Appointment
 from app.models.assessment import Assessment
 from app.models.patient import Patient
@@ -134,9 +137,34 @@ async def _patients_with_session_on_dates(
     }
 
 
+async def _get_today_birthdays(
+    db: AsyncSession,
+    professional_id,
+    today: date,
+) -> list[dict]:
+    result = await db.execute(
+        select(Patient.id, Patient.name, Patient.birth_date, Patient.avatar_color)
+        .where(
+            Patient.professional_id == professional_id,
+            func.extract("month", Patient.birth_date) == today.month,
+            func.extract("day", Patient.birth_date) == today.day,
+        )
+        .order_by(Patient.name.asc())
+    )
+    return [
+        {
+            "patientId": str(patient_id),
+            "patientName": patient_name,
+            "age": calculate_age(birth_date, today),
+            "avatarColor": avatar_color,
+        }
+        for patient_id, patient_name, birth_date, avatar_color in result.all()
+    ]
+
+
 async def build_dashboard(db: AsyncSession, professional_id) -> dict:
-    today = date.today()
-    now = datetime.now()
+    now = datetime.now(ZoneInfo(get_settings().clinic_timezone))
+    today = now.date()
     month_start = today.replace(day=1)
 
     active_patients = await db.scalar(
@@ -239,6 +267,8 @@ async def build_dashboard(db: AsyncSession, professional_id) -> dict:
                 "therapist": "",
             })
 
+    birthdays_today = await _get_today_birthdays(db, professional_id, today)
+
     # Pending evolutions: past appointments without session on that date
     past_appts_result = await db.execute(
         select(Appointment)
@@ -322,6 +352,7 @@ async def build_dashboard(db: AsyncSession, professional_id) -> dict:
         "upcomingAppointments": upcoming,
         "protocolsApplied": protocols_applied,
         "todayAgenda": today_agenda,
+        "birthdaysToday": birthdays_today,
         "pending": pending,
         "suggestions": suggestions,
     }

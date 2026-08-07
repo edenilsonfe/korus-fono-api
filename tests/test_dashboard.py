@@ -1,5 +1,12 @@
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time
+from zoneinfo import ZoneInfo
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import get_settings
+from app.core.security import hash_password
+from app.models.patient import Patient
+from app.models.professional import Professional
 from app.services.dashboard import build_suggestions, derive_agenda_status
 
 NOW = datetime(2026, 7, 9, 14, 0)
@@ -67,3 +74,58 @@ def test_suggestions_completa_com_ctas():
     assert "2 evoluções" in result[0]["text"]
     assert "4 avaliações em rascunho" in result[1]["text"]
     assert "1 relatório em rascunho" in result[3]["text"]
+
+
+async def test_dashboard_retorna_apenas_aniversariantes_do_profissional(
+    api_client,
+    auth_headers,
+    db_session: AsyncSession,
+    professional: Professional,
+):
+    clinic_today = datetime.now(ZoneInfo(get_settings().clinic_timezone)).date()
+    birthday_patient = Patient(
+        professional_id=professional.id,
+        name="Ana Aniversariante",
+        birth_date=clinic_today.replace(year=clinic_today.year - 4),
+        diagnosis_keys=["linguagem"],
+        status="ativo",
+        start_date=clinic_today,
+        avatar_color="oklch(0.58 0.12 205)",
+    )
+    db_session.add(birthday_patient)
+    other_professional = Professional(
+        email="other-dashboard@example.com",
+        password_hash=hash_password("testpass123"),
+        name="Dra. Outra",
+        specialty_key="fono",
+        specialty="Fonoaudiologia",
+        council="CRFa",
+        phone="11999990001",
+        email_verified_at=datetime.now(UTC),
+    )
+    db_session.add(other_professional)
+    await db_session.flush()
+    db_session.add(
+        Patient(
+            professional_id=other_professional.id,
+            name="Paciente de outra profissional",
+            birth_date=clinic_today.replace(year=clinic_today.year - 7),
+            diagnosis_keys=["linguagem"],
+            status="ativo",
+            start_date=clinic_today,
+            avatar_color="oklch(0.60 0.10 160)",
+        )
+    )
+    await db_session.commit()
+
+    response = await api_client.get("/api/v1/dashboard", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["birthdaysToday"] == [
+        {
+            "patientId": str(birthday_patient.id),
+            "patientName": birthday_patient.name,
+            "age": 4,
+            "avatarColor": birthday_patient.avatar_color,
+        }
+    ]
