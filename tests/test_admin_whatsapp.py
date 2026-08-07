@@ -92,6 +92,16 @@ class _ExistingPlatformEvolutionClient(_FakeEvolutionClient):
         raise EvolutionApiError("Instance already exists", status_code=403)
 
 
+class _MissingStoredInstanceEvolutionClient(_FakeEvolutionClient):
+    async def connection_state(self, instance_name, *, api_key):
+        if instance_name == "korus-welcome-ab5cea41":
+            raise EvolutionApiError(
+                'Not Found — [\'The "korus-welcome-ab5cea41" instance does not exist\']',
+                status_code=404,
+            )
+        return await super().connection_state(instance_name, api_key=api_key)
+
+
 @pytest.fixture
 def admin_evolution_env(monkeypatch):
     settings = get_settings()
@@ -281,6 +291,32 @@ async def test_admin_refresh_connection_returns_renewed_qr_while_connecting(
     assert body["qrcodeBase64"] == "qr-renovado"
     assert body["connectionState"] == "connecting"
     assert body["canSend"] is False
+
+
+@pytest.mark.asyncio
+async def test_admin_refresh_recreates_missing_stored_instance(
+    api_client, staff_headers, admin_evolution_env, db_session, monkeypatch
+):
+    db_session.add(
+        PlatformWhatsAppConnection(
+            status=CONNECTION_STATUS_CONNECTING,
+            evolution_instance_name="korus-welcome-ab5cea41",
+            encrypted_instance_api_key=encrypt_secret("stale-inst-key"),
+        )
+    )
+    await db_session.commit()
+    fake = _install_fake(monkeypatch, _MissingStoredInstanceEvolutionClient())
+
+    response = await api_client.post(
+        "/api/v1/admin/whatsapp/platform/refresh-connection", headers=staff_headers
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["connection"]["evolutionInstanceName"] == "korus-welcome"
+    assert body["connection"]["status"] == CONNECTION_STATUS_ACTIVE
+    assert body["qrcodeBase64"] == "qr-plataforma"
+    assert fake.created_instances == ["korus-welcome"]
 
 
 @pytest.mark.asyncio

@@ -27,6 +27,7 @@ from app.models.whatsapp_connection import (
     CONNECTION_STATUS_CONNECTING,
     CONNECTION_STATUS_DISCONNECTED,
     CONNECTION_STATUS_NEEDS_RECONNECT,
+    CONNECTION_STATUS_NOT_CONNECTED,
     CONNECTION_STATUS_SETUP_INCOMPLETE,
 )
 from app.services.evolution_api_client import EvolutionApiClient, EvolutionApiError
@@ -265,6 +266,7 @@ class PlatformWhatsAppService:
         *,
         instance_name: str,
         api_key: str,
+        recover_missing: bool = True,
     ) -> PlatformConnectResult:
         try:
             state_payload = await self.client.connection_state(
@@ -290,12 +292,45 @@ class PlatformWhatsAppService:
         except HTTPException:
             raise
         except EvolutionApiError as exc:
+            if recover_missing and self._is_missing_instance_error(exc):
+                return await self._recover_missing_instance(
+                    connection, missing_instance_name=instance_name
+                )
             connection.last_error = exc.message
             await self.db.commit()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Falha ao conectar instância Evolution: {exc.message}",
             ) from exc
+
+    @staticmethod
+    def _is_missing_instance_error(exc: EvolutionApiError) -> bool:
+        message = exc.message.lower()
+        return exc.status_code == 404 or (
+            "instance" in message
+            and ("does not exist" in message or "not found" in message)
+        )
+
+    async def _recover_missing_instance(
+        self,
+        connection: PlatformWhatsAppConnection,
+        *,
+        missing_instance_name: str,
+    ) -> PlatformConnectResult:
+        """Replace a stale local binding when Evolution no longer has it."""
+        logger.warning(
+            "Platform Evolution instance %s no longer exists; recreating stable instance",
+            missing_instance_name,
+        )
+        connection.evolution_instance_name = None
+        connection.encrypted_instance_api_key = None
+        connection.display_phone_number = None
+        connection.status = CONNECTION_STATUS_NOT_CONNECTED
+        connection.connected_at = None
+        connection.disconnected_at = None
+        connection.last_error = None
+        await self.db.flush()
+        return await self.connect()
 
     async def connect(self) -> PlatformConnectResult:
         connection = await self.get_connection()
@@ -345,6 +380,7 @@ class PlatformWhatsAppService:
                     connection,
                     instance_name=instance_name,
                     api_key=global_key,
+                    recover_missing=False,
                 )
             else:
                 raise HTTPException(
@@ -422,6 +458,10 @@ class PlatformWhatsAppService:
         except HTTPException:
             raise
         except EvolutionApiError as exc:
+            if self._is_missing_instance_error(exc):
+                return await self._recover_missing_instance(
+                    connection, missing_instance_name=instance_name
+                )
             connection.last_error = exc.message
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
