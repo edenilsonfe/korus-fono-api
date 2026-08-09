@@ -202,6 +202,7 @@ async def register(
         subscription_status="trialing",
         trial_started_at=now,
         trial_ends_at=now + timedelta(days=trial_days),
+        onboarding_started_at=now,
     )
     db.add(professional)
     await db.flush()
@@ -214,6 +215,7 @@ async def register(
             status="avaliacao",
             start_date=date.today(),
             avatar_color=DEMO_AVATAR_COLOR,
+            is_demo=True,
         )
     )
     access_token, refresh_token = await _issue_tokens(db, professional)

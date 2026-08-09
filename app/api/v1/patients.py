@@ -100,6 +100,7 @@ def _summary_from_aggregates(
         goals_achieved=aggregates["goals_achieved"],
         total_goals=aggregates["total_goals"],
         avatar_color=patient.avatar_color,
+        is_demo=patient.is_demo,
         therapy_plan_content=patient.therapy_plan_content,
         therapy_plan_updated_at=patient.therapy_plan_updated_at.isoformat()
         if patient.therapy_plan_updated_at
@@ -208,6 +209,8 @@ async def create_patient(
         description="Início do acompanhamento na clínica",
     )
     await db.flush()
+    if professional.onboarding_completed_at is None:
+        professional.onboarding_completed_at = utcnow()
     return await _build_summary(db, patient, professional)
 
 

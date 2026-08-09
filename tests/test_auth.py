@@ -107,5 +107,5 @@ async def test_register_can_checkout_before_verification_and_creates_demo_patien
     # Session via HttpOnly cookie — not Authorization Bearer from JSON.
     patients = await api_client.get("/api/v1/patients")
     assert patients.status_code == 200
-    names = [p["name"] for p in patients.json()["items"]]
-    assert "Paciente demonstração" in names
+    demo = next(p for p in patients.json()["items"] if p["name"] == "Paciente demonstração")
+    assert demo["isDemo"] is True

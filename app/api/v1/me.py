@@ -6,6 +6,8 @@ from app.core.specialty_catalog import specialty_label
 from app.db.session import get_db
 from app.models.professional import Professional
 from app.schemas.professional import ProfessionalResponse, ProfessionalUpdate
+from app.schemas.onboarding import OnboardingResponse, OnboardingUpdate
+from app.services.onboarding_service import build_onboarding_response, update_onboarding
 
 router = APIRouter(prefix="/me", tags=["me"])
 
@@ -45,3 +47,20 @@ async def update_me(
         setattr(professional, field, value)
     await db.flush()
     return _to_response(professional)
+
+
+@router.get("/activation", response_model=OnboardingResponse)
+async def get_activation(
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    return await build_onboarding_response(db, professional)
+
+
+@router.patch("/activation", response_model=OnboardingResponse)
+async def patch_activation(
+    body: OnboardingUpdate,
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    return await update_onboarding(db, professional, body.action)

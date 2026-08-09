@@ -194,6 +194,7 @@ class PatientSummary(CamelModel):
     goals_achieved: int
     total_goals: int
     avatar_color: str
+    is_demo: bool = False
     therapy_plan_content: str | None = None
     therapy_plan_updated_at: str | None = None
 

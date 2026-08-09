@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -21,6 +21,7 @@ class Patient(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="avaliacao")
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     avatar_color: Mapped[str] = mapped_column(String(64), nullable=False)
+    is_demo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     therapy_plan_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     therapy_plan_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     anamnese_status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")

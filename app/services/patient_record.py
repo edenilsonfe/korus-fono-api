@@ -92,6 +92,7 @@ def _summary_from_aggregates(
         goals_achieved=aggregates["goals_achieved"],
         total_goals=aggregates["total_goals"],
         avatar_color=patient.avatar_color,
+        is_demo=patient.is_demo,
         therapy_plan_content=patient.therapy_plan_content,
         therapy_plan_updated_at=patient.therapy_plan_updated_at.isoformat()
         if patient.therapy_plan_updated_at
