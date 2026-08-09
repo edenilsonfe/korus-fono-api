@@ -212,7 +212,7 @@ API: `http://localhost:8000/api/v1/...`
 - `Dockerfile` + `railway.toml` (release: `alembic upgrade head`)
 - Plugins: Postgres + Redis; storage AWS S3 (`S3_ENDPOINT` vazio)
 - Worker: mesmo image, start `arq worker.WorkerSettings`
-- Vars: bloco Railway em `.env.example`; ponte web `API_ORIGIN` no Cloudflare
+- Vars: bloco Railway em `.env.example`; em produção `OPENCODE_API_KEY` é obrigatória e áudio exige `AUDIO_TRANSCRIPTION_API_KEY`; ponte web `API_ORIGIN` no Cloudflare
 
 ---
 

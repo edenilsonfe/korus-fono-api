@@ -2,7 +2,7 @@ import json
 from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,12 +10,14 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.deps import get_patient_for_professional, require_verified_professional
+from app.core.config import get_settings
 from app.core.utils import utcnow
 from app.db.session import get_db
 from app.models.ai import AIJob, AIReport, ChatMessage, Conversation
 from app.models.professional import Professional
 from app.schemas.ai import (
     AIJobResponse,
+    AICapabilitiesResponse,
     AIReportCreate,
     AIReportResponse,
     AIReportUpdate,
@@ -31,11 +33,23 @@ from app.services.ai_prompts import AI_TOOL_SPECS, build_request_prompt, build_t
 from app.services.assistant.assistant_service import AssistantService
 from app.services.assistant.conversation_patient import bind_conversation_patient
 from app.services.assistant.rate_limit import enforce_assistant_rate_limit
+from app.services.audio_transcription_service import transcribe_audio
 from app.services.report_export import export_report
 from app.services.timeline import create_timeline_event
 from app.schemas.assistant import ChatResponse
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+
+
+@router.get("/capabilities", response_model=AICapabilitiesResponse)
+async def get_ai_capabilities(
+    _professional: Professional = Depends(require_verified_professional),
+):
+    settings = get_settings()
+    return AICapabilitiesResponse(
+        llm_enabled=bool(settings.opencode_api_key.strip()),
+        audio_transcription_enabled=bool(settings.audio_transcription_api_key.strip()),
+    )
 
 
 def _conversation_response(
@@ -410,14 +424,33 @@ async def _run_tool_job(
 
 
 @router.post("/transcribe", status_code=status.HTTP_202_ACCEPTED)
-async def transcribe(body: AIToolRequest, professional: Professional = Depends(require_verified_professional), db: AsyncSession = Depends(get_db)):
-    return await _run_tool_job(
+async def transcribe(
+    patient_id: str = Form(alias="patientId"),
+    file: UploadFile = File(...),
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    enforce_assistant_rate_limit(str(professional.id))
+    parsed_patient_id = UUID(patient_id)
+    await get_patient_for_professional(parsed_patient_id, professional, db)
+    transcription = await transcribe_audio(file)
+    job = await create_ai_job(
         db,
-        professional,
-        "transcribe",
-        body,
-        prompt_builder=lambda b, c: f"Transcreva o seguinte áudio (simulado):\n{b.text or ''}",
+        professional_id=professional.id,
+        patient_id=parsed_patient_id,
+        job_type="transcribe",
+        input_data={
+            "filename": transcription.filename,
+            "contentType": transcription.content_type,
+            "sizeBytes": transcription.size_bytes,
+            "audioSha256": transcription.sha256,
+        },
     )
+    job.status = "completed"
+    job.result = transcription.text
+    job.completed_at = utcnow()
+    await db.flush()
+    return {"jobId": str(job.id), "status": "completed", "result": transcription.text}
 
 @router.post("/speech-analysis", status_code=status.HTTP_202_ACCEPTED)
 async def speech_analysis(body: AIToolRequest, professional: Professional = Depends(require_verified_professional), db: AsyncSession = Depends(get_db)):
@@ -426,8 +459,54 @@ async def speech_analysis(body: AIToolRequest, professional: Professional = Depe
         professional,
         "speech-analysis",
         body,
-        prompt_builder=lambda b, c: f"Analise fonologicamente:\n{b.text or ''}\nContexto:\n{c}",
+        prompt_builder=lambda b, c: (
+            "Produza uma análise preliminar e conservadora do texto transcrito. "
+            "Não invente características acústicas ou articulações ausentes e recomende revisão "
+            f"fonoaudiológica.\nAmostra:\n{b.text or ''}\nContexto:\n{c}"
+        ),
     )
+
+
+@router.post("/speech-analysis/audio", status_code=status.HTTP_202_ACCEPTED)
+async def speech_analysis_audio(
+    patient_id: str = Form(alias="patientId"),
+    file: UploadFile = File(...),
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    enforce_assistant_rate_limit(str(professional.id))
+    if not get_settings().opencode_api_key.strip():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Ferramentas de IA não configuradas.",
+        )
+    parsed_patient_id = UUID(patient_id)
+    await get_patient_for_professional(parsed_patient_id, professional, db)
+    transcription = await transcribe_audio(file)
+    context = await build_patient_context(db, parsed_patient_id)
+    result = await run_llm(
+        "Produza uma análise preliminar e conservadora da amostra transcrita abaixo. "
+        "Não invente características acústicas, articulações ou fonemas que não estejam explícitos "
+        "no texto. Informe as limitações da transcrição automática e recomende revisão "
+        f"fonoaudiológica.\nAmostra transcrita:\n{transcription.text}\nContexto:\n{context}"
+    )
+    job = await create_ai_job(
+        db,
+        professional_id=professional.id,
+        patient_id=parsed_patient_id,
+        job_type="speech-analysis",
+        input_data={
+            "filename": transcription.filename,
+            "contentType": transcription.content_type,
+            "sizeBytes": transcription.size_bytes,
+            "audioSha256": transcription.sha256,
+        },
+    )
+    job.status = "completed"
+    job.result = result
+    job.completed_at = utcnow()
+    await db.flush()
+    return {"jobId": str(job.id), "status": "completed", "result": result}
 
 @router.post("/clinical-trends", status_code=status.HTTP_202_ACCEPTED)
 async def clinical_trends(body: AIToolRequest, professional: Professional = Depends(require_verified_professional), db: AsyncSession = Depends(get_db)):

@@ -41,6 +41,24 @@ class AssessmentCreate(CamelModel):
     metadata: dict | None = None
 
 
+class AssessmentDraftUpsert(CamelModel):
+    answers: dict = Field(default_factory=dict)
+    informant: str | None = None
+    metadata: dict | None = None
+
+
+class AssessmentFinalize(CamelModel):
+    date: str | None = None
+    result: str = ""
+    percentage: int = 0
+    interpretation: str = ""
+    fields: list[AssessmentFieldInput] = Field(default_factory=list)
+    answers: dict = Field(default_factory=dict)
+    scores: dict | None = None
+    informant: str | None = None
+    metadata: dict | None = None
+
+
 class AssessmentStatusCounts(CamelModel):
     all: int = 0
     draft: int = 0

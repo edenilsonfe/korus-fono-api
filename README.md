@@ -102,6 +102,14 @@ uv run arq worker.WorkerSettings
 
 Configure `OPENCODE_API_KEY` no `.env` (chave em [opencode.ai/auth](https://opencode.ai/auth)). Modelos disponíveis: [OpenCode Zen](https://opencode.ai/docs/zen/).
 
+Transcrição de áudio usa um provedor separado compatível com `/v1/audio/transcriptions`:
+
+- `AUDIO_TRANSCRIPTION_API_KEY`
+- `AUDIO_TRANSCRIPTION_BASE_URL` (default `https://api.openai.com/v1`)
+- `AUDIO_TRANSCRIPTION_MODEL` (default `gpt-4o-mini-transcribe`)
+
+Sem essa configuração, `GET /api/v1/ai/capabilities` informa que áudio está indisponível e as telas não geram conteúdo simulado.
+
 ## Testes
 
 ```bash

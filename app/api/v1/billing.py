@@ -175,7 +175,6 @@ async def _attach_checkout_to_subscription(
 @router.get("/plans", response_model=list[PlanPublicResponse])
 async def list_billing_plans(
     db: AsyncSession = Depends(get_db),
-    _professional: Professional = Depends(get_current_professional),
 ):
     result = await db.execute(
         select(Plan)

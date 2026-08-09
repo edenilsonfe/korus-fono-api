@@ -15,6 +15,8 @@ from app.models.professional import Professional
 from app.schemas.clinical import (
     AssessmentCancelResponse,
     AssessmentCreate,
+    AssessmentDraftUpsert,
+    AssessmentFinalize,
     AssessmentStatusCounts,
     AssessmentsPage,
     GoalCreate,
@@ -27,9 +29,13 @@ from app.schemas.patient import (
     GoalResponse,
 )
 from app.services.assessment_scoring import get_protocol_scoring_mode
+from app.services.assessment_service import (
+    complete_assessment_draft,
+    create_assessment_record,
+    get_assessment_draft,
+    upsert_assessment_draft,
+)
 from app.services.patient import build_clinical_domains, build_development_analytics
-from app.services.scoring_session import ScoreError, ScoringSession
-from app.services.clinical_activity import record_assessment
 from app.services.timeline import create_timeline_event
 
 ANALYTICS_PERIODS = frozenset({"30d", "90d", "6m", "1y"})
@@ -59,6 +65,7 @@ def _assessment_response(
         scores=assessment.scores,
         status=assessment.status,
         informant=assessment.informant,
+        metadata=assessment.assessment_metadata,
     )
 
 
@@ -313,6 +320,70 @@ async def list_patient_assessments(
     ]
 
 
+@patient_router.get(
+    "/assessments/drafts/{protocol_id}",
+    response_model=AssessmentResponse | None,
+)
+async def get_patient_assessment_draft(
+    patient_id: UUID,
+    protocol_id: str,
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    await get_patient_for_professional(patient_id, professional, db)
+    assessment = await get_assessment_draft(db, patient_id, protocol_id)
+    if assessment is None:
+        return None
+    protocol = await db.get(ProtocolCatalog, assessment.protocol_id)
+    if protocol is None:
+        raise HTTPException(status_code=404, detail="Protocolo não encontrado")
+    return _assessment_response(assessment, protocol.name, professional.name)
+
+
+@patient_router.put(
+    "/assessments/drafts/{protocol_id}",
+    response_model=AssessmentResponse,
+)
+async def save_patient_assessment_draft(
+    patient_id: UUID,
+    protocol_id: str,
+    body: AssessmentDraftUpsert,
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    patient = await get_patient_for_professional(patient_id, professional, db)
+    assessment, protocol = await upsert_assessment_draft(
+        db,
+        patient,
+        professional,
+        protocol_id,
+        body,
+    )
+    return _assessment_response(assessment, protocol.name, professional.name)
+
+
+@patient_router.post(
+    "/assessments/drafts/{protocol_id}/complete",
+    response_model=AssessmentResponse,
+)
+async def finalize_patient_assessment_draft(
+    patient_id: UUID,
+    protocol_id: str,
+    body: AssessmentFinalize,
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    patient = await get_patient_for_professional(patient_id, professional, db)
+    assessment, protocol = await complete_assessment_draft(
+        db,
+        patient,
+        professional,
+        protocol_id,
+        body,
+    )
+    return _assessment_response(assessment, protocol.name, professional.name)
+
+
 @patient_router.post("/assessments", response_model=AssessmentResponse, status_code=status.HTTP_201_CREATED)
 async def create_assessment(
     patient_id: UUID,
@@ -320,73 +391,14 @@ async def create_assessment(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_patient_for_professional(patient_id, professional, db)
-    proto = await db.get(ProtocolCatalog, body.protocol_id.lower())
-    if not proto or not proto.is_active:
-        raise HTTPException(status_code=404, detail="Protocolo não encontrado")
-
-    answers = body.answers or {}
-    scores = body.scores
-    result_text = body.result
-    percentage = body.percentage
-    interpretation = body.interpretation
-    fields = [f.model_dump() for f in body.fields]
-
-    mode = get_protocol_scoring_mode(proto.id)
-    if answers and mode == "manifest" and scores is None:
-        try:
-            normalized = ScoringSession.from_protocol(proto.id, "manifest").score(answers)
-            scores = normalized.raw_scores
-            if not result_text:
-                result_text = normalized.result
-            if not percentage:
-                percentage = normalized.percentage
-            if not interpretation:
-                interpretation = normalized.interpretation
-            if not fields:
-                fields = normalized.to_assessment_fields()
-        except ScoreError as exc:
-            detail = str(exc)
-            code = 404 if "não encontrado" in detail.lower() or "não possui pacote" in detail.lower() else 400
-            raise HTTPException(status_code=code, detail=detail) from exc
-    elif scores:
-        normalized = ScoringSession.from_scores(scores).score({})
-        if not result_text:
-            result_text = normalized.result
-        if not percentage:
-            percentage = normalized.percentage
-        if not interpretation:
-            interpretation = normalized.interpretation
-        if not fields:
-            fields = normalized.to_assessment_fields()
-
-    if not result_text:
-        raise HTTPException(status_code=400, detail="Resultado da avaliação é obrigatório")
-
-    assessment = Assessment(
-        patient_id=patient_id,
-        professional_id=professional.id,
-        protocol_id=proto.id,
-        date=date.fromisoformat(body.date) if body.date else date.today(),
-        result=result_text,
-        percentage=percentage,
-        interpretation=interpretation,
-        fields=fields,
-        answers=answers,
-        scores=scores,
-        status=body.status,
-        informant=body.informant,
-        assessment_metadata=body.metadata,
-    )
-    db.add(assessment)
-    await db.flush()
-    await record_assessment(
+    patient = await get_patient_for_professional(patient_id, professional, db)
+    assessment, protocol = await create_assessment_record(
         db,
-        assessment=assessment,
-        protocol_name=proto.name,
-        professional=professional,
+        patient,
+        professional,
+        body,
     )
-    return _assessment_response(assessment, proto.name, professional.name)
+    return _assessment_response(assessment, protocol.name, professional.name)
 
 
 @patient_router.get("/goals", response_model=list[GoalResponse])

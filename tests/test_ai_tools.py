@@ -99,6 +99,20 @@ async def test_run_llm_output_modes():
             assert "Bold" in plain
 
 
+@pytest.mark.asyncio
+async def test_run_llm_rejects_unconfigured_provider_instead_of_simulating():
+    from app.services.ai_service import run_llm
+
+    with patch("app.services.ai_service.get_settings") as mock_settings:
+        mock_settings.return_value.opencode_api_key = ""
+
+        with pytest.raises(HTTPException) as exc_info:
+            await run_llm("dados clínicos reais")
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "Ferramentas de IA não configuradas."
+
+
 def _force_memory_rate_limit_fallback(*_args, **_kwargs):
     raise ConnectionError("Redis unavailable in tests")
 

@@ -21,6 +21,7 @@ def _prod_asaas(**kwargs) -> Settings:
         "jwt_secret": TEST_SECRET,
         "billing_provider": "asaas",
         "asaas_api_key": ASAAS_KEY,
+        "opencode_api_key": "opencode-test-key",
         **EVOLUTION_KW,
     }
     base.update(kwargs)
@@ -67,6 +68,12 @@ def test_production_refuses_asaas_without_key_as_stub():
 
 def test_production_allows_asaas():
     validate_settings(_prod_asaas())
+
+
+def test_production_refuses_unconfigured_ai_provider():
+    settings = _prod_asaas(opencode_api_key="")
+    with pytest.raises(RuntimeError, match="OPENCODE_API_KEY"):
+        validate_settings(settings)
 
 
 def test_local_stub_billing_still_allowed():

@@ -144,6 +144,7 @@ class AssessmentResponse(CamelModel):
     scores: dict | None = None
     status: str = "completed"
     informant: str | None = None
+    metadata: dict | None = None
 
 
 class SessionResponse(CamelModel):

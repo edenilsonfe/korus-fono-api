@@ -1,10 +1,10 @@
 from datetime import UTC, date, datetime, time
-from zoneinfo import ZoneInfo
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.core.security import hash_password
+from app.models.ai import AIReport
+from app.models.assessment import Assessment
+from app.models.goal import ClinicalDomainSnapshot
 from app.models.patient import Patient
 from app.models.professional import Professional
 from app.services.dashboard import build_suggestions, derive_agenda_status
@@ -81,8 +81,10 @@ async def test_dashboard_retorna_apenas_aniversariantes_do_profissional(
     auth_headers,
     db_session: AsyncSession,
     professional: Professional,
+    monkeypatch,
 ):
-    clinic_today = datetime.now(ZoneInfo(get_settings().clinic_timezone)).date()
+    monkeypatch.setattr("app.services.dashboard.ZoneInfo", lambda _key: UTC)
+    clinic_today = datetime.now(UTC).date()
     birthday_patient = Patient(
         professional_id=professional.id,
         name="Ana Aniversariante",
@@ -129,3 +131,135 @@ async def test_dashboard_retorna_apenas_aniversariantes_do_profissional(
             "avatarColor": birthday_patient.avatar_color,
         }
     ]
+
+
+async def test_dashboard_exclui_dados_demonstrativos_e_usa_evolucao_real(
+    api_client,
+    auth_headers,
+    db_session: AsyncSession,
+    professional: Professional,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.services.dashboard.ZoneInfo", lambda _key: UTC)
+    clinic_today = datetime.now(UTC).date()
+    real_patient = Patient(
+        professional_id=professional.id,
+        name="Paciente real do dashboard",
+        birth_date=clinic_today.replace(year=clinic_today.year - 4),
+        diagnosis_keys=["linguagem"],
+        status="ativo",
+        start_date=clinic_today,
+        avatar_color="oklch(0.58 0.12 205)",
+        is_demo=False,
+    )
+    demo_patient = Patient(
+        professional_id=professional.id,
+        name="Paciente demonstração",
+        birth_date=clinic_today.replace(year=clinic_today.year - 2),
+        diagnosis_keys=[],
+        status="ativo",
+        start_date=clinic_today,
+        avatar_color="oklch(0.60 0.10 160)",
+        is_demo=True,
+    )
+    db_session.add_all([real_patient, demo_patient])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            Assessment(
+                patient_id=real_patient.id,
+                professional_id=professional.id,
+                protocol_id="mchat",
+                date=clinic_today,
+                result="Concluído",
+                percentage=50,
+                interpretation="",
+                fields=[],
+                answers={},
+                status="completed",
+            ),
+            Assessment(
+                patient_id=demo_patient.id,
+                professional_id=professional.id,
+                protocol_id="mchat",
+                date=clinic_today,
+                result="Rascunho",
+                percentage=0,
+                interpretation="",
+                fields=[],
+                answers={"1": "sim"},
+                status="draft",
+            ),
+            AIReport(
+                professional_id=real_patient.professional_id,
+                patient_id=real_patient.id,
+                type="clinical",
+                date=clinic_today,
+                preview="Real",
+                content="Real",
+                status="final",
+            ),
+            AIReport(
+                professional_id=demo_patient.professional_id,
+                patient_id=demo_patient.id,
+                type="clinical",
+                date=clinic_today,
+                preview="Demo",
+                content="Demo",
+                status="draft",
+            ),
+            ClinicalDomainSnapshot(
+                patient_id=real_patient.id,
+                key="vocabulario",
+                label="Vocabulário",
+                score=42,
+                recorded_at=clinic_today,
+            ),
+            ClinicalDomainSnapshot(
+                patient_id=real_patient.id,
+                key="pragmatica",
+                label="Pragmática",
+                score=57,
+                recorded_at=clinic_today,
+            ),
+            ClinicalDomainSnapshot(
+                patient_id=demo_patient.id,
+                key="vocabulario",
+                label="Vocabulário",
+                score=99,
+                recorded_at=clinic_today,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    response = await api_client.get("/api/v1/dashboard", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kpis"]["activePatients"] == 1
+    assert payload["kpis"]["aiReports"] == 1
+    assert payload["pending"]["assessmentDrafts"] == 0
+    assert payload["pending"]["reports"] == 0
+    assert payload["protocolsApplied"] == [{"name": "MCHAT", "value": 1}]
+    assert [birthday["patientName"] for birthday in payload["birthdaysToday"]] == [
+        real_patient.name
+    ]
+    month_label = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"][
+        clinic_today.month - 1
+    ]
+    assert payload["patientEvolution"] == [
+        {"month": month_label, "vocabulario": 42, "pragmatica": 57}
+    ]
+
+
+async def test_dashboard_sem_snapshots_reais_nao_exibe_evolucao_ficticia(
+    api_client,
+    auth_headers,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.services.dashboard.ZoneInfo", lambda _key: UTC)
+    response = await api_client.get("/api/v1/dashboard", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["patientEvolution"] == []

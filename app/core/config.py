@@ -74,6 +74,12 @@ class Settings(BaseSettings):
     opencode_base_url: str = "https://opencode.ai/zen/v1"
     opencode_model: str = "deepseek-v4-flash"
 
+    # Speech-to-text usa um provedor dedicado; OpenCode Zen expõe apenas modelos de texto.
+    audio_transcription_api_key: str = ""
+    audio_transcription_base_url: str = "https://api.openai.com/v1"
+    audio_transcription_model: str = "gpt-4o-mini-transcribe"
+    audio_transcription_max_bytes: int = 25 * 1024 * 1024
+
     # Assistente de IA unificado (clínico + gestão) com tool-calling.
     assistant_rate_limit_per_hour: int = 30
     assistant_llm_timeout_seconds: int = 120
@@ -184,6 +190,11 @@ def validate_settings(settings: Settings) -> None:
                 "Billing stub não é permitido em produção "
                 "(SENTRY_ENVIRONMENT=production|prod); use BILLING_PROVIDER=asaas "
                 "com ASAAS_API_KEY"
+            )
+        if not settings.opencode_api_key.strip():
+            raise RuntimeError(
+                "OPENCODE_API_KEY é obrigatória em produção para impedir respostas simuladas "
+                "nas ferramentas de IA"
             )
     elif settings.debug and not settings.allow_debug:
         raise RuntimeError(

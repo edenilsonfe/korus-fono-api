@@ -8,9 +8,12 @@ from app.core.config import get_settings
 from app.core.utils import calculate_age
 from app.models.appointment import Appointment
 from app.models.assessment import Assessment
+from app.models.goal import ClinicalDomainSnapshot
 from app.models.patient import Patient
 from app.models.session import Session
 from app.models.ai import AIReport
+
+MONTH_NAMES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
 
 
 def is_appointment_past(appt_date: date, appt_time: time, now: datetime | None = None) -> bool:
@@ -146,6 +149,7 @@ async def _get_today_birthdays(
         select(Patient.id, Patient.name, Patient.birth_date, Patient.avatar_color)
         .where(
             Patient.professional_id == professional_id,
+            Patient.is_demo.is_(False),
             func.extract("month", Patient.birth_date) == today.month,
             func.extract("day", Patient.birth_date) == today.day,
         )
@@ -162,6 +166,66 @@ async def _get_today_birthdays(
     ]
 
 
+def _month_start_offset(base: date, offset: int) -> date:
+    month_index = base.year * 12 + (base.month - 1) + offset
+    return date(month_index // 12, month_index % 12 + 1, 1)
+
+
+async def _get_patient_evolution(
+    db: AsyncSession,
+    professional_id,
+    today: date,
+) -> list[dict]:
+    first_month = _month_start_offset(today.replace(day=1), -5)
+    rows = (
+        await db.execute(
+            select(
+                ClinicalDomainSnapshot.recorded_at,
+                ClinicalDomainSnapshot.key,
+                ClinicalDomainSnapshot.score,
+            )
+            .join(Patient, ClinicalDomainSnapshot.patient_id == Patient.id)
+            .where(
+                Patient.professional_id == professional_id,
+                Patient.is_demo.is_(False),
+                ClinicalDomainSnapshot.recorded_at >= first_month,
+                ClinicalDomainSnapshot.key.in_(["vocabulario", "pragmatica"]),
+            )
+            .order_by(ClinicalDomainSnapshot.recorded_at.asc())
+        )
+    ).all()
+    buckets: dict[tuple[int, int], dict[str, list[int]]] = {}
+    for recorded_at, key, score in rows:
+        bucket = buckets.setdefault(
+            (recorded_at.year, recorded_at.month),
+            {"vocabulario": [], "pragmatica": []},
+        )
+        bucket[key].append(score)
+
+    evolution: list[dict] = []
+    for offset in range(6):
+        month = _month_start_offset(first_month, offset)
+        values = buckets.get((month.year, month.month))
+        if values is None:
+            continue
+        evolution.append(
+            {
+                "month": MONTH_NAMES[month.month - 1],
+                "vocabulario": (
+                    round(sum(values["vocabulario"]) / len(values["vocabulario"]))
+                    if values["vocabulario"]
+                    else None
+                ),
+                "pragmatica": (
+                    round(sum(values["pragmatica"]) / len(values["pragmatica"]))
+                    if values["pragmatica"]
+                    else None
+                ),
+            }
+        )
+    return evolution
+
+
 async def build_dashboard(db: AsyncSession, professional_id) -> dict:
     now = datetime.now(ZoneInfo(get_settings().clinic_timezone))
     today = now.date()
@@ -169,33 +233,48 @@ async def build_dashboard(db: AsyncSession, professional_id) -> dict:
 
     active_patients = await db.scalar(
         select(func.count()).select_from(Patient).where(
-            Patient.professional_id == professional_id, Patient.status == "ativo"
+            Patient.professional_id == professional_id,
+            Patient.is_demo.is_(False),
+            Patient.status == "ativo",
         )
     )
     new_this_month = await db.scalar(
         select(func.count()).select_from(Patient).where(
-            Patient.professional_id == professional_id, Patient.start_date >= month_start
+            Patient.professional_id == professional_id,
+            Patient.is_demo.is_(False),
+            Patient.start_date >= month_start,
         )
     )
     sessions_done = await db.scalar(
         select(func.count())
         .select_from(Session)
         .join(Patient, Session.patient_id == Patient.id)
-        .where(Patient.professional_id == professional_id)
+        .where(
+            Patient.professional_id == professional_id,
+            Patient.is_demo.is_(False),
+        )
     )
     sessions_pending = await db.scalar(
-        select(func.count()).select_from(Appointment).where(
+        select(func.count()).select_from(Appointment).join(Patient).where(
             Appointment.professional_id == professional_id,
+            Patient.is_demo.is_(False),
             Appointment.status.in_(["pendente", "confirmado"]),
             Appointment.date >= today,
         )
     )
     ai_reports = await db.scalar(
-        select(func.count()).select_from(AIReport).where(AIReport.professional_id == professional_id)
+        select(func.count())
+        .select_from(AIReport)
+        .join(Patient)
+        .where(
+            AIReport.professional_id == professional_id,
+            Patient.is_demo.is_(False),
+        )
     )
     reports_draft = await db.scalar(
-        select(func.count()).select_from(AIReport).where(
+        select(func.count()).select_from(AIReport).join(Patient).where(
             AIReport.professional_id == professional_id,
+            Patient.is_demo.is_(False),
             AIReport.status == "draft",
         )
     )
@@ -212,18 +291,22 @@ async def build_dashboard(db: AsyncSession, professional_id) -> dict:
         count = await db.scalar(
             select(func.count()).select_from(Patient).where(
                 Patient.professional_id == professional_id,
+                Patient.is_demo.is_(False),
                 Patient.start_date >= month_start_i,
                 Patient.start_date < month_end,
             )
         )
-        month_names = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
-        monthly_growth.append({"month": month_names[month_start_i.month - 1], "pacientes": count or 0})
+        monthly_growth.append({"month": MONTH_NAMES[month_start_i.month - 1], "pacientes": count or 0})
 
     # Protocols applied
     protocols_result = await db.execute(
         select(Assessment.protocol_id, func.count())
         .join(Patient, Assessment.patient_id == Patient.id)
-        .where(Patient.professional_id == professional_id)
+        .where(
+            Patient.professional_id == professional_id,
+            Patient.is_demo.is_(False),
+            Assessment.status == "completed",
+        )
         .group_by(Assessment.protocol_id)
         .order_by(func.count().desc())
         .limit(10)
@@ -236,6 +319,7 @@ async def build_dashboard(db: AsyncSession, professional_id) -> dict:
         .join(Patient, Appointment.patient_id == Patient.id)
         .where(
             Appointment.professional_id == professional_id,
+            Patient.is_demo.is_(False),
             Appointment.date == today,
         )
         .order_by(Appointment.time.asc())
@@ -272,8 +356,10 @@ async def build_dashboard(db: AsyncSession, professional_id) -> dict:
     # Pending evolutions: past appointments without session on that date
     past_appts_result = await db.execute(
         select(Appointment)
+        .join(Patient, Appointment.patient_id == Patient.id)
         .where(
             Appointment.professional_id == professional_id,
+            Patient.is_demo.is_(False),
             Appointment.status.in_(["pendente", "confirmado"]),
             Appointment.date <= today,
         )
@@ -314,7 +400,10 @@ async def build_dashboard(db: AsyncSession, professional_id) -> dict:
             )
             .select_from(Assessment)
             .join(Patient, Assessment.patient_id == Patient.id)
-            .where(Patient.professional_id == professional_id)
+            .where(
+                Patient.professional_id == professional_id,
+                Patient.is_demo.is_(False),
+            )
         )
     ).one()
     assessment_drafts = int(assessment_counts[0] or 0)
@@ -329,15 +418,7 @@ async def build_dashboard(db: AsyncSession, professional_id) -> dict:
     }
     suggestions = build_suggestions(pending)
 
-    # Patient evolution placeholder from domain snapshots avg
-    patient_evolution = [
-        {"month": "Jan", "vocabulario": 42, "pragmatica": 30},
-        {"month": "Fev", "vocabulario": 48, "pragmatica": 35},
-        {"month": "Mar", "vocabulario": 55, "pragmatica": 41},
-        {"month": "Abr", "vocabulario": 61, "pragmatica": 50},
-        {"month": "Mai", "vocabulario": 68, "pragmatica": 58},
-        {"month": "Jun", "vocabulario": 74, "pragmatica": 65},
-    ]
+    patient_evolution = await _get_patient_evolution(db, professional_id, today)
 
     return {
         "kpis": {

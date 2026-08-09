@@ -2,6 +2,7 @@ import hashlib
 import json
 from uuid import UUID
 
+from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -88,7 +89,10 @@ async def build_patient_context(db: AsyncSession, patient_id: UUID) -> str:
 async def run_llm(prompt: str, system: str = "", output: str = "plain") -> str:
     settings = get_settings()
     if not settings.opencode_api_key:
-        return "[Resposta simulada — configure OPENCODE_API_KEY para respostas reais]\n\n" + prompt[:500]
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Ferramentas de IA não configuradas.",
+        )
     from openai import AsyncOpenAI
 
     client = AsyncOpenAI(

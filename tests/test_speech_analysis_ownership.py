@@ -10,7 +10,8 @@ opens its own session directly from `AsyncSessionLocal` (not the FastAPI `get_db
 override), so it is monkeypatched to the same in-memory engine too.
 """
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -78,6 +79,7 @@ async def _make_professional(db, *, email):
         specialty="Fonoaudiologia",
         council="CRFa",
         phone="11999990000",
+        email_verified_at=datetime.now(UTC),
     )
     db.add(pro)
     await db.commit()
@@ -166,5 +168,74 @@ async def test_speech_analysis_own_patient_happy_path(monkeypatch):
     body = resp.json()
     assert body["status"] == "completed"
     assert body["result"] == "análise simulada"
+    _clear_override()
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_transcription_upload_processes_the_selected_audio_file(monkeypatch):
+    engine = await _engine()
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as db:
+        professional = await _make_professional(db, email="audio@example.com")
+        patient = await _make_patient(db, professional, name="Paciente Áudio")
+
+    transcription = SimpleNamespace(
+        text="transcrição real da gravação",
+        filename="sessao.mp3",
+        content_type="audio/mpeg",
+        size_bytes=13,
+        sha256="a" * 64,
+    )
+    client = await _client(engine, monkeypatch)
+    async with client:
+        with patch(
+            "app.api.v1.ai.transcribe_audio", new=AsyncMock(return_value=transcription)
+        ) as transcribe_mock:
+            resp = await client.post(
+                "/api/v1/ai/transcribe",
+                data={"patientId": str(patient.id)},
+                files={"file": ("sessao.mp3", b"ID3-audio-real", "audio/mpeg")},
+                headers=_auth_headers(professional),
+            )
+
+    assert resp.status_code == 202
+    assert resp.json()["result"] == "transcrição real da gravação"
+    assert transcribe_mock.await_args.args[0].filename == "sessao.mp3"
+    _clear_override()
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_speech_analysis_audio_uses_transcription_instead_of_sample_text(monkeypatch):
+    engine = await _engine()
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as db:
+        professional = await _make_professional(db, email="speech-audio@example.com")
+        patient = await _make_patient(db, professional, name="Paciente Fala")
+
+    transcription = SimpleNamespace(
+        text="papato por sapato",
+        filename="fala.wav",
+        content_type="audio/wav",
+        size_bytes=12,
+        sha256="b" * 64,
+    )
+    client = await _client(engine, monkeypatch)
+    async with client:
+        with (
+            patch("app.api.v1.ai.transcribe_audio", new=AsyncMock(return_value=transcription)),
+            patch("app.api.v1.ai.run_llm", new=AsyncMock(return_value="processo fonológico")) as llm,
+        ):
+            resp = await client.post(
+                "/api/v1/ai/speech-analysis/audio",
+                data={"patientId": str(patient.id)},
+                files={"file": ("fala.wav", b"RIFF-audio", "audio/wav")},
+                headers=_auth_headers(professional),
+            )
+
+    assert resp.status_code == 202
+    assert resp.json()["result"] == "processo fonológico"
+    assert "papato por sapato" in llm.await_args.args[0]
     _clear_override()
     await engine.dispose()

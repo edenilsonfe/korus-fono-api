@@ -68,3 +68,8 @@ class AIToolRequest(CamelModel):
     text: str | None = None
     prompt: str | None = None
     session_notes: str | None = None
+
+
+class AICapabilitiesResponse(CamelModel):
+    llm_enabled: bool
+    audio_transcription_enabled: bool

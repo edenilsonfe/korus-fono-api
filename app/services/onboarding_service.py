@@ -10,6 +10,7 @@ from app.models.assessment import ASSESSMENT_STATUS_COMPLETED, Assessment
 from app.models.patient import Patient
 from app.models.professional import Professional
 from app.schemas.onboarding import OnboardingResponse, OnboardingSteps
+from app.services.demo_patient_service import ensure_demo_patient
 
 MCHAT_PROTOCOL_IDS = ("mchat", "m-chat-r", "m-chat")
 
@@ -21,6 +22,24 @@ async def _demo_patient(db: AsyncSession, professional_id) -> Patient | None:
         .order_by(Patient.created_at.asc())
         .limit(1)
     )
+
+
+async def _real_patient(db: AsyncSession, professional_id) -> Patient | None:
+    return await db.scalar(
+        select(Patient)
+        .where(Patient.professional_id == professional_id, Patient.is_demo.is_(False))
+        .order_by(Patient.created_at.asc())
+        .limit(1)
+    )
+
+
+async def _ensure_demo_while_onboarding(
+    db: AsyncSession, professional: Professional
+) -> Patient | None:
+    demo = await _demo_patient(db, professional.id)
+    if demo is not None or await _real_patient(db, professional.id) is not None:
+        return demo
+    return await ensure_demo_patient(db, professional)
 
 
 async def _has_completed_demo_assessment(db: AsyncSession, demo_patient_id) -> bool:
@@ -41,7 +60,8 @@ async def _has_completed_demo_assessment(db: AsyncSession, demo_patient_id) -> b
 async def build_onboarding_response(
     db: AsyncSession, professional: Professional
 ) -> OnboardingResponse:
-    demo = await _demo_patient(db, professional.id)
+    real_patient = await _real_patient(db, professional.id)
+    demo = await _ensure_demo_while_onboarding(db, professional)
     demo_id = demo.id if demo else None
     completed_assessment = await _has_completed_demo_assessment(db, demo_id)
     report_id = None
@@ -54,12 +74,6 @@ async def build_onboarding_response(
             )
             .limit(1)
         )
-    real_patient = await db.scalar(
-        select(Patient)
-        .where(Patient.professional_id == professional.id, Patient.is_demo.is_(False))
-        .order_by(Patient.created_at.asc())
-        .limit(1)
-    )
 
     steps = OnboardingSteps(
         viewed_demo_patient=(
@@ -108,7 +122,7 @@ async def update_onboarding(
         professional.onboarding_started_at = professional.created_at or now
 
     if action == "viewed_demo_patient":
-        demo = await _demo_patient(db, professional.id)
+        demo = await _ensure_demo_while_onboarding(db, professional)
         if demo is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -116,7 +130,7 @@ async def update_onboarding(
             )
         professional.onboarding_viewed_demo_patient_at = now
     elif action == "viewed_demo_result":
-        demo = await _demo_patient(db, professional.id)
+        demo = await _ensure_demo_while_onboarding(db, professional)
         if demo is None or not await _has_completed_demo_assessment(db, demo.id):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,

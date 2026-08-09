@@ -369,5 +369,22 @@ async def delete_patient(
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(patient_id, professional, db)
+    if patient.is_demo:
+        real_patient_id = await db.scalar(
+            select(Patient.id)
+            .where(
+                Patient.professional_id == professional.id,
+                Patient.is_demo.is_(False),
+            )
+            .limit(1)
+        )
+        if real_patient_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "O paciente demonstração faz parte dos primeiros passos "
+                    "e não pode ser removido agora"
+                ),
+            )
     await db.delete(patient)
     await db.flush()

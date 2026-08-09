@@ -11,8 +11,8 @@ class DashboardKpis(CamelModel):
 
 class DashboardPatientEvolution(CamelModel):
     month: str
-    vocabulario: int
-    pragmatica: int
+    vocabulario: int | None
+    pragmatica: int | None
 
 
 class DashboardMonthlyGrowth(CamelModel):

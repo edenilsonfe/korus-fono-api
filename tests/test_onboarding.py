@@ -1,6 +1,7 @@
 from datetime import UTC, date, datetime
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.ai import AIReport
@@ -55,6 +56,39 @@ async def test_activation_starts_with_server_derived_demo_state(
             "createdRealPatient": False,
         },
     }
+
+
+async def test_activation_recria_demo_ausente_de_forma_idempotente(
+    api_client, db_session, professional, auth_headers
+):
+    first = await api_client.get("/api/v1/me/activation", headers=auth_headers)
+    second = await api_client.get("/api/v1/me/activation", headers=auth_headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["demoPatientId"] == second.json()["demoPatientId"]
+    demo_rows = (
+        await db_session.execute(
+            select(Patient).where(
+                Patient.professional_id == professional.id,
+                Patient.is_demo.is_(True),
+            )
+        )
+    ).scalars().all()
+    assert len(demo_rows) == 1
+
+
+async def test_demo_nao_pode_ser_excluido_durante_onboarding(
+    api_client, db_session, professional, auth_headers
+):
+    demo = await _demo_patient(db_session, professional)
+
+    response = await api_client.delete(f"/api/v1/patients/{demo.id}", headers=auth_headers)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "O paciente demonstração faz parte dos primeiros passos e não pode ser removido agora"
+    )
 
 
 async def test_activation_persists_view_postpone_and_resume(

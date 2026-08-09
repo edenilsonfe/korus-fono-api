@@ -29,6 +29,7 @@ _SENSITIVE_EXTRA_KEYS = frozenset(
         "asaas_api_key",
         "resend_api_key",
         "opencode_api_key",
+        "audio_transcription_api_key",
         "evolution_global_api_key",
         "evolution_webhook_secret",
         "whatsapp_credential_encryption_key",
