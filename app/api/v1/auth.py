@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, date, datetime, timedelta
 
 from uuid import UUID
@@ -65,9 +66,13 @@ from app.services.refresh_token_service import (
 )
 from app.services.meta_pixel_service import MetaPixelService
 from app.services.new_account_notification import send_new_account_notification_sync
-from app.services.whatsapp_welcome_service import send_whatsapp_welcome_message
+from app.services.whatsapp_welcome_service import (
+    dispatch_whatsapp_welcome_message,
+    queue_whatsapp_welcome_message,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
 
 
 def _request_ip(request: Request) -> str:
@@ -139,8 +144,13 @@ def send_new_account_notification_task(
     )
 
 
-async def send_whatsapp_welcome_task(user_name: str, phone: str) -> None:
-    await send_whatsapp_welcome_message(user_name=user_name, phone=phone)
+async def send_whatsapp_welcome_task(log_id: UUID) -> None:
+    try:
+        await dispatch_whatsapp_welcome_message(log_id)
+    except Exception:
+        # The durable queued row lets the worker retry; never fail registration
+        # after the account transaction was already committed.
+        logger.exception("Background WhatsApp welcome dispatch failed for %s", log_id)
 
 
 async def _issue_tokens(
@@ -218,6 +228,7 @@ async def register(
             is_demo=True,
         )
     )
+    welcome_log = await queue_whatsapp_welcome_message(db, professional)
     access_token, refresh_token = await _issue_tokens(db, professional)
     raw_token = await request_email_verification(db, professional, force=True)
     if raw_token is not None:
@@ -239,8 +250,7 @@ async def register(
     )
     background_tasks.add_task(
         send_whatsapp_welcome_task,
-        professional.name,
-        professional.phone,
+        welcome_log.id,
     )
     background_tasks.add_task(
         track_registration_events_task,

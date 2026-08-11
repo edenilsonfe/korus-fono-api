@@ -1,5 +1,6 @@
 """Tests for the WhatsApp welcome message sent after registration."""
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -8,12 +9,20 @@ from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import get_settings
+from app.models.notification_message_log import (
+    MESSAGE_STATUS_FAILED,
+    MESSAGE_STATUS_SENT,
+    NotificationMessageLog,
+)
 from app.models.platform_whatsapp_connection import PlatformWhatsAppConnection
 from app.models.whatsapp_connection import CONNECTION_STATUS_ACTIVE, CONNECTION_STATUS_NOT_CONNECTED
 from app.services.evolution_api_client import EvolutionApiClient, EvolutionApiError
+from app.services.whatsapp_scheduler_service import WhatsAppSchedulerService
 from app.services.whatsapp_welcome_service import (
     WELCOME_MESSAGE,
     _render_welcome_message,
+    dispatch_whatsapp_welcome_message,
+    queue_whatsapp_welcome_message,
     send_whatsapp_welcome_message,
 )
 from app.utils import credential_encryption as cred
@@ -70,6 +79,7 @@ def welcome_env(monkeypatch):
     monkeypatch.setattr(settings, "evolution_welcome_instance_name", "korus-welcome")
     monkeypatch.setattr(settings, "app_public_url", "https://api.test")
     monkeypatch.setattr(settings, "evolution_webhook_secret", "evo-secret")
+    monkeypatch.setattr(settings, "clinic_timezone", "UTC")
     cred._get_fernet.cache_clear()
     yield settings
     cred._get_fernet.cache_clear()
@@ -112,6 +122,177 @@ def test_welcome_message_copy_mentions_user_and_help():
     assert "bem-vindo(a)" in rendered
     assert "dúvida" in rendered
     assert "ajuda" in rendered
+
+
+@pytest.mark.asyncio
+async def test_welcome_dispatch_persists_provider_acceptance(
+    welcome_env,
+    welcome_session_factory,
+    db_session,
+    professional,
+    monkeypatch,
+):
+    await _active_platform_connection(db_session)
+    fake = _install_fake(monkeypatch, _FakeEvolutionClient())
+    log = await queue_whatsapp_welcome_message(db_session, professional)
+    await db_session.commit()
+
+    accepted = await dispatch_whatsapp_welcome_message(log.id)
+
+    await db_session.refresh(log)
+    persisted = await db_session.get(NotificationMessageLog, log.id)
+    assert accepted is True
+    assert persisted is not None
+    assert persisted.status == MESSAGE_STATUS_SENT
+    assert persisted.provider_message_id == "welcome-msg-1"
+    assert persisted.attempt_count == 1
+    assert persisted.sent_at is not None
+    assert fake.sent
+
+
+@pytest.mark.asyncio
+async def test_welcome_queue_is_idempotent(db_session, professional):
+    first = await queue_whatsapp_welcome_message(db_session, professional)
+    second = await queue_whatsapp_welcome_message(db_session, professional)
+
+    assert second.id == first.id
+
+
+@pytest.mark.asyncio
+async def test_offline_platform_connection_does_not_consume_send_attempt(
+    welcome_env,
+    welcome_session_factory,
+    db_session,
+    professional,
+):
+    log = await queue_whatsapp_welcome_message(db_session, professional)
+    await db_session.commit()
+
+    accepted = await dispatch_whatsapp_welcome_message(log.id)
+
+    await db_session.refresh(log)
+    assert accepted is False
+    assert log.status == MESSAGE_STATUS_FAILED
+    assert log.error_code == "connection_not_active"
+    assert log.attempt_count == 0
+    assert log.next_retry_at is not None
+
+
+@pytest.mark.asyncio
+async def test_platform_webhook_marks_welcome_failed_and_schedules_retry(
+    api_client,
+    welcome_env,
+    db_session,
+    professional,
+):
+    await _active_platform_connection(db_session)
+    log = NotificationMessageLog(
+        professional_id=professional.id,
+        channel="whatsapp",
+        notification_type="registration_welcome",
+        provider="evolution",
+        provider_message_id="welcome-async-error",
+        deduplication_key=f"registration-welcome:{professional.id}",
+        status=MESSAGE_STATUS_SENT,
+        attempt_count=1,
+    )
+    db_session.add(log)
+    await db_session.commit()
+
+    response = await api_client.post(
+        "/api/v1/webhooks/evolution/whatsapp",
+        json={
+            "event": "MESSAGES_UPDATE",
+            "instance": "korus-welcome",
+            "data": {
+                "key": {"id": "welcome-async-error"},
+                "status": 0,
+            },
+        },
+        headers={"Authorization": "Bearer evo-secret"},
+    )
+
+    assert response.status_code == 200
+    await db_session.refresh(log)
+    assert log.status == MESSAGE_STATUS_FAILED
+    assert log.failed_at is not None
+    assert log.next_retry_at is not None
+
+
+@pytest.mark.asyncio
+async def test_platform_webhook_confirms_welcome_delivery(
+    api_client,
+    welcome_env,
+    db_session,
+    professional,
+):
+    await _active_platform_connection(db_session)
+    log = NotificationMessageLog(
+        professional_id=professional.id,
+        channel="whatsapp",
+        notification_type="registration_welcome",
+        provider="evolution",
+        provider_message_id="welcome-delivered",
+        deduplication_key=f"registration-welcome:{professional.id}",
+        status=MESSAGE_STATUS_SENT,
+        attempt_count=1,
+    )
+    db_session.add(log)
+    await db_session.commit()
+
+    response = await api_client.post(
+        "/api/v1/webhooks/evolution/whatsapp",
+        json={
+            "event": "MESSAGES_UPDATE",
+            "instance": "korus-welcome",
+            "data": {
+                "key": {"id": "welcome-delivered"},
+                "status": 3,
+            },
+        },
+        headers={"Authorization": "Bearer evo-secret"},
+    )
+
+    assert response.status_code == 200
+    await db_session.refresh(log)
+    assert log.status == "delivered"
+    assert log.delivered_at is not None
+    assert log.next_retry_at is None
+
+
+@pytest.mark.asyncio
+async def test_scheduler_retries_due_failed_welcome(
+    welcome_env,
+    welcome_session_factory,
+    db_session,
+    professional,
+    monkeypatch,
+):
+    await _active_platform_connection(db_session)
+    fake = _install_fake(monkeypatch, _FakeEvolutionClient())
+    log = await queue_whatsapp_welcome_message(db_session, professional)
+    log.status = MESSAGE_STATUS_FAILED
+    log.attempt_count = 1
+    log.provider_message_id = "failed-message"
+    log.failed_at = datetime.now(UTC) - timedelta(minutes=10)
+    log.next_retry_at = datetime.now(UTC) - timedelta(minutes=1)
+    await db_session.commit()
+    monkeypatch.setattr(
+        "app.services.whatsapp_scheduler_service.ZoneInfo", lambda _key: UTC
+    )
+
+    totals = await WhatsAppSchedulerService(db_session).run_all()
+
+    await db_session.refresh(log)
+    assert totals["welcome_messages"] == 1
+    assert log.status == MESSAGE_STATUS_SENT
+    assert log.attempt_count == 2
+    assert log.provider_message_id == "welcome-msg-1"
+    assert fake.sent
+
+    totals_again = await WhatsAppSchedulerService(db_session).run_all()
+    assert totals_again["welcome_messages"] == 0
+    assert len(fake.sent) == 1
 
 
 @pytest.mark.asyncio
@@ -262,7 +443,9 @@ async def test_send_welcome_falls_back_when_number_check_fails(
 
 
 @pytest.mark.asyncio
-async def test_http_register_queues_whatsapp_welcome_task(api_client, monkeypatch):
+async def test_http_register_persists_and_queues_whatsapp_welcome(
+    api_client, db_session, monkeypatch
+):
     monkeypatch.setattr(
         "app.api.v1.auth.enforce_register_rate_limit", lambda *_a, **_k: None
     )
@@ -285,8 +468,13 @@ async def test_http_register_queues_whatsapp_welcome_task(api_client, monkeypatc
     assert reg.status_code == 201
     assert task_mock.called
     args = task_mock.call_args.args
-    assert args[0] == "Welcome User"
-    assert args[1] == "(11) 97777-6666"
+    assert len(args) == 1
+    log = await db_session.get(NotificationMessageLog, args[0])
+    assert log is not None
+    assert log.notification_type == "registration_welcome"
+    assert log.status == "queued"
+    assert log.attempt_count == 0
+    assert log.deduplication_key == f"registration-welcome:{log.professional_id}"
 
 
 @pytest.mark.asyncio

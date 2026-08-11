@@ -111,9 +111,11 @@ Aplicam a `api` e `worker`, exceto onde indicado.
 | `EMAIL_SENDING_ENABLED` | não | `true` para envio real |
 | `PASSWORD_TOKEN_EXPIRE_MINUTES` | não | |
 | `PASSWORD_RESET_COOLDOWN_SECONDS` | não | |
-| `OPENCODE_API_KEY` | p/ IA | API + worker |
+| `OPENCODE_API_KEY` | produção | API + worker; boot fail-fast quando ausente em produção |
 | `OPENCODE_BASE_URL` | não | |
 | `OPENCODE_MODEL` | não | |
+| `AUDIO_TRANSCRIPTION_API_KEY` | p/ áudio | sem ela as telas de áudio ficam desabilitadas |
+| `AUDIO_TRANSCRIPTION_BASE_URL` / `AUDIO_TRANSCRIPTION_MODEL` | não | provider `/v1/audio/transcriptions` |
 | `BILLING_PROVIDER` | não | `stub` até Asaas |
 | `ASAAS_API_KEY` / `ASAAS_API_BASE_URL` / `ASAAS_WEBHOOK_TOKEN` | se Asaas | |
 | `TRIAL_DAYS` | não | |

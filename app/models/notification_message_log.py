@@ -54,6 +54,9 @@ class NotificationMessageLog(Base, TimestampMixin):
     notification_type: Mapped[str] = mapped_column(String(64), nullable=False)
     provider: Mapped[str] = mapped_column(String(32), nullable=False, default="evolution")
     provider_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    deduplication_key: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, unique=True, index=True
+    )
     to_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default=MESSAGE_STATUS_QUEUED)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)

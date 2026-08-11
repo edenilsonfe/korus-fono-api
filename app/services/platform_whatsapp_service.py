@@ -21,6 +21,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.constants.whatsapp_events import DEFAULT_WELCOME_MESSAGE
+from app.models.notification_message_log import (
+    MESSAGE_STATUS_DELIVERED,
+    MESSAGE_STATUS_FAILED,
+    MESSAGE_STATUS_READ,
+    MESSAGE_STATUS_SENT,
+    NotificationMessageLog,
+)
 from app.models.platform_whatsapp_connection import PlatformWhatsAppConnection
 from app.models.whatsapp_connection import (
     CONNECTION_STATUS_ACTIVE,
@@ -31,12 +38,20 @@ from app.models.whatsapp_connection import (
     CONNECTION_STATUS_SETUP_INCOMPLETE,
 )
 from app.services.evolution_api_client import EvolutionApiClient, EvolutionApiError
-from app.services.evolution_webhook_auth import normalize_evolution_event
+from app.services.evolution_webhook_auth import (
+    map_evolution_message_status,
+    normalize_evolution_event,
+)
 from app.services.evolution_whatsapp_service import (
     mask_phone,
     whatsapp_number_candidates,
 )
 from app.services.whatsapp_types import WhatsAppSendResult
+from app.services.whatsapp_welcome_policy import (
+    MAX_WELCOME_SEND_ATTEMPTS,
+    WELCOME_NOTIFICATION_TYPE,
+    welcome_retry_at,
+)
 from app.utils.credential_encryption import (
     CredentialEncryptionError,
     decrypt_secret,
@@ -293,6 +308,57 @@ class PlatformWhatsAppService:
                 wuid = data.get("wuid") or data.get("ownerJid")
                 if wuid:
                     connection.display_phone_number = str(wuid).split("@")[0]
+
+        if event in ("send.message", "messages.update"):
+            key = data.get("key") if isinstance(data.get("key"), dict) else {}
+            message_id = key.get("id") or data.get("messageId")
+            status_value = data.get("status")
+            if status_value is None and isinstance(data.get("update"), dict):
+                status_value = data["update"].get("status")
+            mapped_status = map_evolution_message_status(status_value)
+            if message_id and mapped_status:
+                log = await self.db.scalar(
+                    select(NotificationMessageLog).where(
+                        NotificationMessageLog.provider == "evolution",
+                        NotificationMessageLog.notification_type
+                        == WELCOME_NOTIFICATION_TYPE,
+                        NotificationMessageLog.provider_message_id == str(message_id),
+                    )
+                )
+                if log is not None:
+                    now = datetime.now(UTC)
+                    log.status = mapped_status
+                    log.payload = data
+                    if mapped_status in (
+                        MESSAGE_STATUS_SENT,
+                        MESSAGE_STATUS_DELIVERED,
+                        MESSAGE_STATUS_READ,
+                    ):
+                        log.sent_at = log.sent_at or now
+                        log.failed_at = None
+                        log.error_code = None
+                        log.last_error = None
+                        log.next_retry_at = None
+                    if mapped_status in (
+                        MESSAGE_STATUS_DELIVERED,
+                        MESSAGE_STATUS_READ,
+                    ):
+                        log.delivered_at = log.delivered_at or now
+                    if mapped_status == MESSAGE_STATUS_READ:
+                        log.read_at = log.read_at or now
+                    if mapped_status == MESSAGE_STATUS_FAILED:
+                        log.failed_at = now
+                        log.error_code = "provider_delivery_failed"
+                        log.last_error = str(
+                            data.get("error")
+                            or data.get("reason")
+                            or "Evolution informou falha na entrega."
+                        )
+                        log.next_retry_at = (
+                            welcome_retry_at(log.attempt_count, now=now)
+                            if log.attempt_count < MAX_WELCOME_SEND_ATTEMPTS
+                            else None
+                        )
 
         await self.db.commit()
         return True

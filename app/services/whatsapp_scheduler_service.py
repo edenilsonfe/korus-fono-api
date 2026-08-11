@@ -21,6 +21,9 @@ from app.services.whatsapp_notification_service import (
     MAX_SEND_ATTEMPTS,
     WhatsAppNotificationService,
 )
+from app.services.whatsapp_welcome_service import (
+    retry_due_whatsapp_welcome_messages,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +42,13 @@ class WhatsAppSchedulerService:
 
     async def run_all(self) -> dict[str, int]:
         reminders = await self.run_appointment_reminders_24h()
-        totals = {"appointment_reminders": reminders, "billing_reminders": 0, "billing_overdue": 0}
+        welcome_messages = await retry_due_whatsapp_welcome_messages()
+        totals = {
+            "appointment_reminders": reminders,
+            "welcome_messages": welcome_messages,
+            "billing_reminders": 0,
+            "billing_overdue": 0,
+        }
         if any(totals.values()):
             logger.info("WhatsApp scheduler run: %s", totals)
         return totals
