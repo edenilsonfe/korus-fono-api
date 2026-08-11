@@ -96,6 +96,7 @@ async def test_register_normalizes_email(api_client):
             "password": "securepass123",
             "name": "Mixed Case",
             "specialtyKey": "fono",
+            "phone": "(11) 98888-7777",
         },
     )
     assert response.status_code == 201

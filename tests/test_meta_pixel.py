@@ -211,6 +211,7 @@ async def test_register_schedules_tracking_tasks(api_client, monkeypatch):
             "name": "Nova Profissional",
             "specialtyKey": "fono",
             "council": "CREFITO-3",
+            "phone": "(11) 98888-7777",
         },
     )
     assert response.status_code == 201

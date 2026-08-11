@@ -45,6 +45,7 @@ async def test_register_and_login(client):
             "name": "Test User",
             "specialtyKey": "fono",
             "council": "CRFa",
+            "phone": "(11) 98888-7777",
             "cpf": "52998224725",
         },
     )
@@ -81,6 +82,7 @@ async def test_register_can_checkout_before_verification_and_creates_demo_patien
             "password": "securepass123",
             "name": "Sem Cpf",
             "specialtyKey": "fono",
+            "phone": "(11) 98888-7777",
         },
     )
     assert reg.status_code == 201

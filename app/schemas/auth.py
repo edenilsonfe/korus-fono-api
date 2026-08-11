@@ -15,7 +15,7 @@ class RegisterRequest(CamelModel):
     name: str
     specialty_key: str
     council: str = ""
-    phone: str = ""
+    phone: str
     cpf: str | None = None
 
     @field_validator("email")
@@ -29,6 +29,20 @@ class RegisterRequest(CamelModel):
         if not is_valid_specialty_key(value):
             raise ValueError("Especialidade inválida")
         return value
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, value: str) -> str:
+        phone = str(value or "").strip()
+        digits = "".join(ch for ch in phone if ch.isdigit()).lstrip("0")
+        national = digits[2:] if digits.startswith("55") else digits
+        if len(national) not in (10, 11):
+            raise ValueError("Telefone deve conter DDD + número")
+        if not 11 <= int(national[:2]) <= 99:
+            raise ValueError("DDD inválido")
+        if len(national) == 11 and not national[2:].startswith("9"):
+            raise ValueError("Celular inválido: o número deve começar com 9 após o DDD")
+        return phone
 
     @field_validator("cpf")
     @classmethod

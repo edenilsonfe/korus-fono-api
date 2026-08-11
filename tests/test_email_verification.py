@@ -228,6 +228,7 @@ async def test_http_register_me_gate_verify_flow(api_client, monkeypatch):
             "password": password,
             "name": "Verify User",
             "specialtyKey": "fono",
+            "phone": "(11) 98888-7777",
         },
     )
     assert reg.status_code == 201
@@ -283,6 +284,7 @@ async def test_http_resend_verification(api_client, monkeypatch):
             "password": "securepass123",
             "name": "Resend User",
             "specialtyKey": "fono",
+            "phone": "(11) 98888-7777",
         },
     )
     assert reg.status_code == 201
@@ -319,6 +321,7 @@ async def test_http_login_unverified_triggers_send(api_client, monkeypatch):
             "password": password,
             "name": "Login Unverified",
             "specialtyKey": "fono",
+            "phone": "(11) 98888-7777",
         },
     )
     assert reg.status_code == 201

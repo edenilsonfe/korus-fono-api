@@ -71,6 +71,9 @@ async def send_whatsapp_welcome_message(*, user_name: str, phone: str) -> bool:
                 select(PlatformWhatsAppConnection).limit(1)
             )
             connection = result.scalars().first()
+            service = PlatformWhatsAppService(db)
+            if connection is not None and connection.evolution_instance_name:
+                connection = await service.reconcile_status(connection)
             if (
                 connection is None
                 or connection.status != CONNECTION_STATUS_ACTIVE
@@ -82,7 +85,6 @@ async def send_whatsapp_welcome_message(*, user_name: str, phone: str) -> bool:
                 )
                 return False
 
-            service = PlatformWhatsAppService(db)
             number = await service.resolve_recipient_number(connection, phone)
             template = service.resolve_welcome_message(connection)
             text = _render_welcome_message(template, _first_name(user_name))

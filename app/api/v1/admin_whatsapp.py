@@ -57,6 +57,7 @@ async def get_platform_whatsapp_status(
 ):
     service = PlatformWhatsAppService(db)
     connection = await service.get_connection()
+    connection = await service.reconcile_status(connection)
     return _status_response(connection, await service.can_send(connection))
 
 

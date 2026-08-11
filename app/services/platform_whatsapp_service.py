@@ -89,6 +89,45 @@ class PlatformWhatsAppService:
             and connection.evolution_instance_name
         )
 
+    async def reconcile_status(
+        self, connection: PlatformWhatsAppConnection | None = None
+    ) -> PlatformWhatsAppConnection:
+        """Reconcile the persisted status with Evolution without raising.
+
+        Webhooks remain the fast path, but a missed lifecycle event must not
+        leave the admin panel or welcome sender trusting a stale ``active`` row.
+        """
+        if connection is None:
+            connection = await self.get_connection()
+        if (
+            get_settings().whatsapp_provider != "evolution"
+            or not connection.evolution_instance_name
+        ):
+            return connection
+
+        try:
+            api_key = self._api_key(connection)
+            state_payload = await self.client.connection_state(
+                connection.evolution_instance_name, api_key=api_key
+            )
+            evolution_state = self.client.extract_connection_state(state_payload)
+            mapped = self._apply_evolution_state(connection, evolution_state)
+            connection.last_error = (
+                None
+                if mapped == CONNECTION_STATUS_ACTIVE
+                else f"Conexão Evolution em estado {evolution_state or 'desconhecido'}."
+            )
+        except HTTPException as exc:
+            connection.status = CONNECTION_STATUS_NEEDS_RECONNECT
+            connection.last_error = str(exc.detail)
+        except EvolutionApiError as exc:
+            connection.status = CONNECTION_STATUS_NEEDS_RECONNECT
+            connection.last_error = exc.message
+
+        await self.db.commit()
+        await self.db.refresh(connection)
+        return connection
+
     def _instance_name(self, connection: PlatformWhatsAppConnection) -> str:
         stored = connection.evolution_instance_name
         if stored:

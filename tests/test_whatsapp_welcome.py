@@ -31,6 +31,9 @@ class _FakeEvolutionClient:
         self.timeout = timeout
         self.sent: list[tuple[str, str, str]] = []
 
+    async def connection_state(self, instance_name, *, api_key):
+        return {"instance": {"state": "open"}}
+
     async def check_whatsapp_numbers(self, instance_name, numbers, *, api_key):
         return [
             {"number": n, "exists": True, "jid": f"{n}@s.whatsapp.net"}
@@ -50,6 +53,11 @@ class _CheckFailsClient(_FakeEvolutionClient):
 class _NoWhatsAppClient(_FakeEvolutionClient):
     async def check_whatsapp_numbers(self, instance_name, numbers, *, api_key):
         return [{"number": n, "exists": False} for n in numbers]
+
+
+class _ClosedEvolutionClient(_FakeEvolutionClient):
+    async def connection_state(self, instance_name, *, api_key):
+        return {"instance": {"state": "close"}}
 
 
 @pytest.fixture
@@ -174,6 +182,21 @@ async def test_send_welcome_skips_when_connection_not_active(
 
 
 @pytest.mark.asyncio
+async def test_send_welcome_reconciles_stale_active_connection_before_sending(
+    welcome_env, welcome_session_factory, db_session, monkeypatch
+):
+    connection = await _active_platform_connection(db_session)
+    fake = _install_fake(monkeypatch, _ClosedEvolutionClient())
+
+    sent = await send_whatsapp_welcome_message(user_name="Ana", phone="11988887777")
+
+    await db_session.refresh(connection)
+    assert sent is False
+    assert fake.sent == []
+    assert connection.status == "needs_reconnect"
+
+
+@pytest.mark.asyncio
 async def test_send_welcome_skips_for_non_evolution_provider(
     welcome_env, welcome_session_factory, monkeypatch
 ):
@@ -264,3 +287,46 @@ async def test_http_register_queues_whatsapp_welcome_task(api_client, monkeypatc
     args = task_mock.call_args.args
     assert args[0] == "Welcome User"
     assert args[1] == "(11) 97777-6666"
+
+
+@pytest.mark.asyncio
+async def test_http_register_rejects_missing_phone_for_whatsapp_welcome(
+    api_client, monkeypatch
+):
+    monkeypatch.setattr(
+        "app.api.v1.auth.enforce_register_rate_limit", lambda *_a, **_k: None
+    )
+
+    reg = await api_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": f"welcome-no-phone-{uuid4().hex[:8]}@test.com",
+            "password": "securepass123",
+            "name": "Welcome User",
+            "specialtyKey": "fono",
+            "council": "CRFa 999",
+        },
+    )
+
+    assert reg.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_http_register_rejects_invalid_whatsapp_phone(api_client, monkeypatch):
+    monkeypatch.setattr(
+        "app.api.v1.auth.enforce_register_rate_limit", lambda *_a, **_k: None
+    )
+
+    reg = await api_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": f"welcome-invalid-phone-{uuid4().hex[:8]}@test.com",
+            "password": "securepass123",
+            "name": "Welcome User",
+            "specialtyKey": "fono",
+            "council": "CRFa 999",
+            "phone": "123",
+        },
+    )
+
+    assert reg.status_code == 422

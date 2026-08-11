@@ -85,6 +85,11 @@ class _ConnectingEvolutionClient(_FakeEvolutionClient):
         return {"qrcode": {"base64": "qr-renovado"}}
 
 
+class _ClosedEvolutionClient(_FakeEvolutionClient):
+    async def connection_state(self, instance_name, *, api_key):
+        return {"instance": {"state": "close"}}
+
+
 class _ExistingPlatformEvolutionClient(_FakeEvolutionClient):
     async def create_instance(
         self, instance_name, *, qrcode=True, webhook_url=None, webhook_secret=None
@@ -294,6 +299,30 @@ async def test_admin_refresh_connection_returns_renewed_qr_while_connecting(
 
 
 @pytest.mark.asyncio
+async def test_admin_status_reconciles_stale_active_connection_with_evolution(
+    api_client, staff_headers, admin_evolution_env, db_session, monkeypatch
+):
+    db_session.add(
+        PlatformWhatsAppConnection(
+            status=CONNECTION_STATUS_ACTIVE,
+            evolution_instance_name="korus-welcome",
+            encrypted_instance_api_key=encrypt_secret("inst-key"),
+        )
+    )
+    await db_session.commit()
+    _install_fake(monkeypatch, _ClosedEvolutionClient())
+
+    response = await api_client.get(
+        "/api/v1/admin/whatsapp/platform", headers=staff_headers
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["connection"]["status"] == "needs_reconnect"
+    assert body["canSend"] is False
+
+
+@pytest.mark.asyncio
 async def test_admin_refresh_recreates_missing_stored_instance(
     api_client, staff_headers, admin_evolution_env, db_session, monkeypatch
 ):
@@ -321,7 +350,7 @@ async def test_admin_refresh_recreates_missing_stored_instance(
 
 @pytest.mark.asyncio
 async def test_platform_connection_webhook_marks_admin_whatsapp_active(
-    api_client, staff_headers, admin_evolution_env, db_session
+    api_client, staff_headers, admin_evolution_env, db_session, monkeypatch
 ):
     db_session.add(
         PlatformWhatsAppConnection(
@@ -331,6 +360,7 @@ async def test_platform_connection_webhook_marks_admin_whatsapp_active(
         )
     )
     await db_session.commit()
+    _install_fake(monkeypatch, _FakeEvolutionClient())
 
     webhook_response = await api_client.post(
         "/api/v1/webhooks/evolution/whatsapp",
