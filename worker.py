@@ -14,6 +14,10 @@ from app.models.ai import AIJob
 from app.services.ai_service import run_llm
 from app.services.sentry_init import init_sentry
 from app.services.whatsapp_scheduler_service import WhatsAppSchedulerService
+from app.services.trial_email_campaign_service import (
+    mark_trial_email_campaign_failed,
+    process_trial_email_campaign,
+)
 
 # Init before ARQ picks up WorkerSettings (same process as worker entry).
 init_sentry(get_settings())
@@ -58,12 +62,21 @@ async def dispatch_whatsapp_appointment_event(
     )
 
 
+async def run_trial_email_campaign(ctx, campaign_id: str) -> None:
+    try:
+        await process_trial_email_campaign(campaign_id)
+    except Exception as exc:
+        await mark_trial_email_campaign_failed(campaign_id, exc)
+        raise
+
+
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     functions = [
         process_ai_job,
         run_whatsapp_scheduler,
         dispatch_whatsapp_appointment_event,
+        run_trial_email_campaign,
     ]
     cron_jobs = [
         cron(

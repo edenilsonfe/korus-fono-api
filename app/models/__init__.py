@@ -24,6 +24,7 @@ from app.models.session import Session
 from app.models.timeline import TimelineEvent
 from app.models.whatsapp_connection import WhatsAppConnection
 from app.models.platform_whatsapp_connection import PlatformWhatsAppConnection
+from app.models.trial_email_campaign import TrialEmailCampaign, TrialEmailDelivery
 
 __all__ = [
     "Plan",
@@ -64,4 +65,6 @@ __all__ = [
     "FeatureFlagOverride",
     "Coupon",
     "CouponRedemption",
+    "TrialEmailCampaign",
+    "TrialEmailDelivery",
 ]

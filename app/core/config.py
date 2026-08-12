@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     password_reset_cooldown_seconds: int = 60
     email_verification_expire_minutes: int = 1440
     email_verification_cooldown_seconds: int = 60
+    # Evita reenvio acidental da mesma régua de trial ao mesmo usuário.
+    trial_email_resend_cooldown_hours: int = 24
     # Destinatário do aviso interno de novo cadastro (vazio = desligado).
     new_account_notification_email: str = ""
     # Destinatário do canal de suporte (form de contato; vazio = desligado).

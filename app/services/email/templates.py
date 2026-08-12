@@ -93,6 +93,62 @@ def email_verification_email(
     return RenderedEmail(subject=subject, html=_layout("Confirme seu e-mail", inner), text=text)
 
 
+def trial_expiration_email(
+    user_name: str,
+    audience: str,
+    trial_ends_at: str,
+    plans_url: str,
+) -> RenderedEmail:
+    """Engagement email for a trial that expired or is close to expiring."""
+    safe_name = escape(user_name, quote=True)
+    safe_url = escape(plans_url, quote=True)
+    safe_date = escape(trial_ends_at, quote=True)
+
+    if audience == "expired":
+        subject = f"Seu período de teste terminou - {PRODUCT_NAME}"
+        title = "Seu trial terminou"
+        lead = (
+            f"Seu período de teste terminou em <strong>{safe_date}</strong>. "
+            "Se quiser continuar usando os protocolos, scoring e recursos clínicos, "
+            "escolha o plano que combina com sua rotina."
+        )
+        plain_lead = (
+            f"Seu período de teste terminou em {trial_ends_at}. "
+            "Para continuar usando os recursos do Korus Fono, escolha um plano."
+        )
+    else:
+        subject = f"Seu período de teste está terminando - {PRODUCT_NAME}"
+        title = "Seu trial está terminando"
+        lead = (
+            f"Seu período de teste vai até <strong>{safe_date}</strong>. "
+            "Escolha um plano para manter o acesso de escrita aos seus fluxos clínicos "
+            "sem interrupção."
+        )
+        plain_lead = (
+            f"Seu período de teste vai até {trial_ends_at}. "
+            "Escolha um plano para manter seus fluxos clínicos sem interrupção."
+        )
+
+    inner = f"""
+      <p>Olá {safe_name},</p>
+      <p>{lead}</p>
+      <p style="margin: 28px 0;">
+        <a href="{safe_url}"
+           style="background: #0ea5a4; color: #ffffff; text-decoration: none; padding: 12px 20px; border-radius: 9999px;">
+          Ver planos
+        </a>
+      </p>
+      <p>Se precisar de ajuda para escolher, fale com o suporte pela plataforma.</p>
+    """
+    text = (
+        f"Olá {user_name},\n\n"
+        f"{plain_lead}\n\n"
+        f"Veja os planos: {plans_url}\n\n"
+        f"Atenciosamente,\n{PRODUCT_NAME}"
+    )
+    return RenderedEmail(subject=subject, html=_layout(title, inner), text=text)
+
+
 def new_account_notification_email(
     user_name: str,
     user_email: str,

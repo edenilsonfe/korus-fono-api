@@ -62,6 +62,7 @@ Para o fluxo de recuperação de senha (`/auth/forgot-password` → `/auth/reset
 - `RESEND_API_KEY`: chave da conta Resend.
 - `EMAIL_FROM`: remetente aprovado no Resend.
 - `EMAIL_SENDING_ENABLED=true`: habilita envio real (em dev pode ficar `false`).
+- `TRIAL_EMAIL_RESEND_COOLDOWN_HOURS`: intervalo mínimo entre campanhas da mesma régua para o mesmo usuário (padrão: 24h).
 - `FRONTEND_URL`: base usada no link `.../reset-password?token=...`.
 - `PASSWORD_TOKEN_EXPIRE_MINUTES`: validade do token de reset.
 - `PASSWORD_RESET_COOLDOWN_SECONDS`: cooldown entre solicitações por usuário.
