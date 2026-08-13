@@ -375,10 +375,11 @@ class WhatsAppNotificationService:
         stored_templates = normalize_whatsapp_message_templates(
             settings.whatsapp_message_templates if settings else None
         )
+        custom_template = stored_templates.get(event_id)
 
         try:
             provider = get_active_whatsapp_provider(self.db)
-            if event_id == WHATSAPP_EVENT_REMINDER_24H:
+            if event_id == WHATSAPP_EVENT_REMINDER_24H and not custom_template:
                 variables = [
                     context["patient_name"],
                     context["professional_name"],
@@ -392,7 +393,10 @@ class WhatsAppNotificationService:
                 payload = send_result.payload
             else:
                 text = format_event_message(
-                    event_id, context, stored_templates=stored_templates
+                    event_id,
+                    context,
+                    custom_template=custom_template,
+                    stored_templates=stored_templates,
                 )
                 send_result = await provider.send_text_message(
                     appointment.professional_id, phone, text

@@ -427,3 +427,145 @@ async def test_dispatch_uses_claim_before_send(
     ok_again = await service._dispatch_appointment_event(appt.id, "appointment_confirmation")
     assert ok_again is False
     assert send_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_dispatch_reminder_uses_professional_custom_template(
+    evolution_env,
+    db_session: AsyncSession,
+    professional: Professional,
+    patient: Patient,
+    monkeypatch,
+):
+    caregiver = (
+        await db_session.execute(
+            __import__("sqlalchemy", fromlist=["select"]).select(Caregiver).where(
+                Caregiver.patient_id == patient.id
+            )
+        )
+    ).scalar_one()
+    caregiver.whatsapp_opt_in = True
+    caregiver.phone = "11988887777"
+
+    custom_template = (
+        "Oi, {{patientName}}! Lembrete com {{clinicianName}} em "
+        "{{appointmentDate}} às {{appointmentTime}}."
+    )
+    settings_row = NotificationSettings(
+        professional_id=professional.id,
+        whatsapp_enabled=True,
+        whatsapp_events={"appointment_reminder_24h": True},
+        whatsapp_message_templates={"appointment_reminder_24h": custom_template},
+    )
+    appt = Appointment(
+        professional_id=professional.id,
+        patient_id=patient.id,
+        date=date.today() + timedelta(days=1),
+        time=time(9, 0),
+        type="sessão",
+        duration=50,
+        status="agendado",
+    )
+    db_session.add_all([settings_row, appt])
+    await db_session.commit()
+    await db_session.refresh(appt)
+
+    send_text_mock = AsyncMock(
+        return_value=WhatsAppSendResult(
+            provider="evolution",
+            provider_message_id="custom-reminder-1",
+            status="sent",
+            payload={"ok": True},
+        )
+    )
+    send_default_reminder_mock = AsyncMock()
+    fake_provider = SimpleNamespace(
+        can_send=AsyncMock(return_value=True),
+        send_text_message=send_text_mock,
+        send_appointment_reminder=send_default_reminder_mock,
+    )
+    monkeypatch.setattr(
+        "app.services.whatsapp_notification_service.get_active_whatsapp_provider",
+        lambda _db: fake_provider,
+    )
+
+    ok = await WhatsAppNotificationService(db_session)._dispatch_appointment_event(
+        appt.id, "appointment_reminder_24h"
+    )
+
+    assert ok is True
+    send_text_mock.assert_awaited_once_with(
+        professional.id,
+        "11988887777",
+        f"Oi, João! Lembrete com Dra. em {appt.date.strftime('%d/%m/%Y')} às 09:00.",
+    )
+    send_default_reminder_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_reminder_without_custom_template_keeps_provider_default(
+    evolution_env,
+    db_session: AsyncSession,
+    professional: Professional,
+    patient: Patient,
+    monkeypatch,
+):
+    caregiver = (
+        await db_session.execute(
+            __import__("sqlalchemy", fromlist=["select"]).select(Caregiver).where(
+                Caregiver.patient_id == patient.id
+            )
+        )
+    ).scalar_one()
+    caregiver.whatsapp_opt_in = True
+    caregiver.phone = "11988887777"
+
+    settings_row = NotificationSettings(
+        professional_id=professional.id,
+        whatsapp_enabled=True,
+        whatsapp_events={"appointment_reminder_24h": True},
+        whatsapp_message_templates={},
+    )
+    appt = Appointment(
+        professional_id=professional.id,
+        patient_id=patient.id,
+        date=date.today() + timedelta(days=1),
+        time=time(9, 0),
+        type="sessão",
+        duration=50,
+        status="agendado",
+    )
+    db_session.add_all([settings_row, appt])
+    await db_session.commit()
+    await db_session.refresh(appt)
+
+    send_text_mock = AsyncMock()
+    send_default_reminder_mock = AsyncMock(
+        return_value=WhatsAppSendResult(
+            provider="evolution",
+            provider_message_id="default-reminder-1",
+            status="sent",
+            payload={"ok": True},
+        )
+    )
+    fake_provider = SimpleNamespace(
+        can_send=AsyncMock(return_value=True),
+        send_text_message=send_text_mock,
+        send_appointment_reminder=send_default_reminder_mock,
+    )
+    monkeypatch.setattr(
+        "app.services.whatsapp_notification_service.get_active_whatsapp_provider",
+        lambda _db: fake_provider,
+    )
+
+    ok = await WhatsAppNotificationService(db_session)._dispatch_appointment_event(
+        appt.id, "appointment_reminder_24h"
+    )
+
+    assert ok is True
+    send_default_reminder_mock.assert_awaited_once_with(
+        professional.id,
+        "11988887777",
+        ["João Silva", "Dra. Teste", appt.date.strftime("%d/%m/%Y"), "09:00", "Dra. Teste"],
+    )
+    send_text_mock.assert_not_awaited()

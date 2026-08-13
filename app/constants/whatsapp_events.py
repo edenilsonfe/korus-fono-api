@@ -30,13 +30,22 @@ APPOINTMENT_NOTIFICATION_EVENT_MAP: dict[str, str] = {
     "cancelled": WHATSAPP_EVENT_CANCELLED,
 }
 
-REMINDER_TEMPLATE_BODY = (
-    "Olá, {{1}}. Tudo bem?\n\n"
-    "Lembrando que sua sessão com {{2}} está marcada para:\n\n"
-    "🗓️ {{3}}\n"
-    "⏰ {{4}}\n"
-    "📍 {{5}}\n\n"
+DEFAULT_APPOINTMENT_REMINDER_MESSAGE = (
+    "Olá, {{patientName}}. Tudo bem?\n\n"
+    "Lembrando que sua sessão com {{clinicianName}} está marcada para:\n\n"
+    "🗓️ {{appointmentDate}}\n"
+    "⏰ {{appointmentTime}}\n"
+    "📍 {{clinicName}}\n\n"
     "Qualquer imprevisto, me avise com antecedência."
+)
+
+# Positional form retained for the provider's default reminder method.
+REMINDER_TEMPLATE_BODY = (
+    DEFAULT_APPOINTMENT_REMINDER_MESSAGE.replace("{{patientName}}", "{{1}}")
+    .replace("{{clinicianName}}", "{{2}}")
+    .replace("{{appointmentDate}}", "{{3}}")
+    .replace("{{appointmentTime}}", "{{4}}")
+    .replace("{{clinicName}}", "{{5}}")
 )
 
 # Welcome message sent by the platform's own number right after registration.
@@ -55,6 +64,7 @@ DEFAULT_WELCOME_MESSAGE = (
 WELCOME_MESSAGE_MAX_LENGTH = 4000
 
 DEFAULT_EVENT_MESSAGE_TEMPLATES: dict[str, str] = {
+    WHATSAPP_EVENT_REMINDER_24H: DEFAULT_APPOINTMENT_REMINDER_MESSAGE,
     WHATSAPP_EVENT_CONFIRMATION: (
         "Olá, {{patientName}}. Tudo bem?\n\n"
         "Sua sessão com {{clinicianName}} foi confirmada para:\n\n"
