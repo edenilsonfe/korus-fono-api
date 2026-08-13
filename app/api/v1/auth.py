@@ -70,6 +70,10 @@ from app.services.whatsapp_welcome_service import (
     dispatch_whatsapp_welcome_message,
     queue_whatsapp_welcome_message,
 )
+from app.services.financial_defaults import (
+    add_default_financial_categories,
+    add_default_payment_methods,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
@@ -216,6 +220,8 @@ async def register(
     )
     db.add(professional)
     await db.flush()
+    add_default_financial_categories(db, professional.id)
+    add_default_payment_methods(db, professional.id)
     db.add(
         Patient(
             professional_id=professional.id,

@@ -73,6 +73,21 @@ Para o fluxo de recuperação de senha (`/auth/forgot-password` → `/auth/reset
 - API: `GET /api/v1/...`
 - Docs: `GET /docs` (Swagger — debug local; contrato = `app/schemas/` + `app/api/v1/`)
 
+### Financeiro interno da clínica
+
+O domínio `/api/v1/finance/*` controla contas a receber/pagar, baixas parciais,
+pacotes, fluxo de caixa e comprovantes internos por profissional. Ele é separado
+de `/api/v1/billing/*`, que continua exclusivo para trial e assinatura do SaaS.
+
+- Não há PIX, cartão ou boleto do paciente pela plataforma.
+- Valores monetários são inteiros em centavos.
+- Toda conta começa com Cartão de crédito, Cartão de débito, Pix e Dinheiro como formas de pagamento.
+- Categorias iniciais de receita e despesa são criadas automaticamente e continuam editáveis pelo profissional.
+- Cancelamentos e estornos preservam a trilha; registros pagos não são apagados.
+- `POST /appointments/{id}/complete` cria a sessão uma única vez e exige a decisão
+  explícita entre cobrança individual, consumo de pacote ou cortesia.
+- O PDF é um comprovante de controle interno e não substitui Receita Saúde ou NFS-e.
+
 ## Migrations (Alembic)
 
 ```bash

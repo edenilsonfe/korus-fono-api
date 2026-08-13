@@ -3,10 +3,13 @@ from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from app.billing.stub_gateway import StubPaymentGateway
 from app.main import app
 from app.models.billing import Plan
+from app.models.finance import FinancialCategory
+from app.models.professional import Professional
 from app.services.plan_catalog_seed import COMMERCIAL_PLAN_SEEDS
 
 # JWT-shaped values (three base64url segments) must not appear in auth JSON.
@@ -88,6 +91,22 @@ async def test_register_can_checkout_before_verification_and_creates_demo_patien
     assert reg.status_code == 201
     _assert_auth_json_has_no_usable_jwt(reg.json())
     assert "korus_access" in reg.cookies
+    created_professional = (
+        await db_session.execute(select(Professional).where(Professional.email == email))
+    ).scalar_one()
+    configured_categories = await db_session.execute(
+        select(FinancialCategory.name).where(
+            FinancialCategory.professional_id == created_professional.id,
+            FinancialCategory.kind == "income",
+        )
+    )
+    assert set(configured_categories.scalars()) == {
+        "Atendimentos",
+        "Avaliações",
+        "Pacotes",
+        "Taxas de cancelamento",
+        "Outras receitas",
+    }
     # A sessão recém-criada pode assinar antes da verificação, mas não acessar dados clínicos.
     me = await api_client.get("/api/v1/me")
     assert me.status_code == 200

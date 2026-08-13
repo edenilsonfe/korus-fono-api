@@ -1,12 +1,14 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, literal_column, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_patient_for_professional, require_verified_professional
 from app.core.utils import utcnow
 from app.db.session import get_db
+from app.models.appointment import Appointment
 from app.models.evolution import Evolution
 from app.models.patient import Patient
 from app.models.professional import Professional
@@ -38,6 +40,7 @@ async def list_sessions_global(
     items = [
         SessionGlobalResponse(
             id=str(s.id),
+            appointment_id=str(s.appointment_id) if s.appointment_id else None,
             patient_id=str(p.id),
             patient_name=p.name,
             avatar_color=p.avatar_color,
@@ -69,6 +72,7 @@ async def list_patient_sessions(
     return [
         {
             "id": str(s.id),
+            "appointmentId": str(s.appointment_id) if s.appointment_id else None,
             "date": s.date.isoformat(),
             "duration": s.duration,
             "therapist": professional.name,
@@ -88,24 +92,63 @@ async def create_session(
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(patient_id, professional, db)
+    if body.appointment_id:
+        appointment_result = await db.execute(
+            select(Appointment)
+            .where(
+                Appointment.id == body.appointment_id,
+                Appointment.patient_id == patient.id,
+                Appointment.professional_id == professional.id,
+            )
+            .with_for_update()
+        )
+        appointment = appointment_result.scalar_one_or_none()
+        if not appointment:
+            raise HTTPException(status_code=404, detail="Agendamento não encontrado para este paciente")
+        if appointment.status == "cancelado":
+            raise HTTPException(
+                status_code=409,
+                detail="Não é possível registrar sessão em um atendimento cancelado",
+            )
+        linked_result = await db.execute(
+            select(Session.id).where(Session.appointment_id == appointment.id)
+        )
+        if linked_result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=409,
+                detail="Já existe uma sessão vinculada a este atendimento",
+            )
+
+    objectives = body.objectives
+    if not objectives and db.bind and db.bind.dialect.name == "sqlite":
+        objectives = literal_column("'[]'")
     session = Session(
         patient_id=patient.id,
         professional_id=professional.id,
+        appointment_id=body.appointment_id,
         date=body.date or utcnow(),
         duration=body.duration,
         type=body.type,
-        objectives=body.objectives,
+        objectives=objectives,
         notes=body.notes,
     )
     db.add(session)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Já existe uma sessão vinculada a este atendimento",
+        ) from exc
     await record_session(db, session=session, professional=professional)
     return {
         "id": str(session.id),
+        "appointmentId": str(session.appointment_id) if session.appointment_id else None,
         "date": session.date.isoformat(),
         "duration": session.duration,
         "therapist": professional.name,
-        "objectives": session.objectives,
+        "objectives": body.objectives,
         "notes": session.notes,
         "type": session.type,
     }

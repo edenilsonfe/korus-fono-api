@@ -13,6 +13,8 @@ from app.models.professional import Professional
 from app.schemas.appointment import (
     AppointmentCreate,
     AppointmentCreateResponse,
+    AppointmentCompleteRequest,
+    AppointmentCompleteResponse,
     AppointmentResponse,
     AppointmentUpdate,
     WeekdaySlot,
@@ -23,12 +25,23 @@ from app.services.appointment_series_slots import (
     iter_recurring_child_slots,
     validate_recurrent_range,
 )
+from app.services.appointment_completion_service import complete_appointment
 from app.services.appointment_whatsapp_events import (
     resolve_appointment_update_whatsapp_event,
 )
 from app.services.whatsapp_queue import enqueue_whatsapp_appointment_event
 
 router = APIRouter(prefix="/appointments", tags=["appointments"])
+
+
+@router.post("/{appointment_id}/complete", response_model=AppointmentCompleteResponse)
+async def complete_appointment_route(
+    appointment_id: UUID,
+    body: AppointmentCompleteRequest,
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    return await complete_appointment(db, professional, appointment_id, body)
 
 VALID_FREQUENCIES = {"semanal", "quinzenal", "mensal", "personalizado"}
 

@@ -1,6 +1,7 @@
 from datetime import date as DateType, time as TimeType
 
 from app.schemas.common import CamelModel
+from app.schemas.finance import AppointmentCompleteRequest, AppointmentCompleteResponse
 
 
 class WeekdaySlot(CamelModel):
