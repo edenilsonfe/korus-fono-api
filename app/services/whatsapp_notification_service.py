@@ -117,6 +117,7 @@ class WhatsAppNotificationService:
         provider: str,
         scheduled_date: date | None,
         scheduled_time: time | None,
+        dispatch_decision: dict | None = None,
     ) -> NotificationMessageLog | None:
         """Insert or reclaim a log row before calling the provider. None = skip send."""
         existing = await self._find_idempotent_log(
@@ -144,6 +145,8 @@ class WhatsAppNotificationService:
                 existing.last_error = None
                 existing.error_code = None
                 existing.to_phone = mask_phone(to_phone) if to_phone else existing.to_phone
+                if dispatch_decision is not None:
+                    existing.payload = {"dispatch_decision": dispatch_decision}
                 await self.db.commit()
                 await self.db.refresh(existing)
                 return existing
@@ -158,6 +161,8 @@ class WhatsAppNotificationService:
                 existing.error_code = None
                 existing.failed_at = None
                 existing.to_phone = mask_phone(to_phone) if to_phone else existing.to_phone
+                if dispatch_decision is not None:
+                    existing.payload = {"dispatch_decision": dispatch_decision}
                 await self.db.commit()
                 await self.db.refresh(existing)
                 return existing
@@ -176,6 +181,11 @@ class WhatsAppNotificationService:
             scheduled_date=scheduled_date,
             scheduled_time=scheduled_time,
             attempt_count=1,
+            payload=(
+                {"dispatch_decision": dispatch_decision}
+                if dispatch_decision is not None
+                else None
+            ),
         )
         self.db.add(log)
         try:
@@ -200,6 +210,7 @@ class WhatsAppNotificationService:
                     provider=provider,
                     scheduled_date=scheduled_date,
                     scheduled_time=scheduled_time,
+                    dispatch_decision=dispatch_decision,
                 )
             return None
 
@@ -210,11 +221,13 @@ class WhatsAppNotificationService:
         provider: str,
         provider_message_id: str | None,
         payload: dict | None,
+        dispatch_decision: dict,
     ) -> None:
         log.status = MESSAGE_STATUS_SENT
         log.provider = provider
         log.provider_message_id = provider_message_id
-        log.payload = payload
+        log.payload = dict(payload or {})
+        log.payload["dispatch_decision"] = dispatch_decision
         log.sent_at = datetime.now(UTC)
         log.failed_at = None
         log.last_error = None
@@ -227,11 +240,13 @@ class WhatsAppNotificationService:
         error_code: str | None = None,
         last_error: str | None = None,
         payload: dict | None = None,
+        dispatch_decision: dict,
     ) -> None:
         log.status = MESSAGE_STATUS_FAILED
         log.error_code = error_code
         log.last_error = last_error
-        log.payload = payload
+        log.payload = dict(payload or {})
+        log.payload["dispatch_decision"] = dispatch_decision
         log.failed_at = datetime.now(UTC)
         await self.db.commit()
 
@@ -244,6 +259,7 @@ class WhatsAppNotificationService:
         notification_type: str,
         scheduled_date: date | None,
         scheduled_time: time | None,
+        dispatch_decision: dict,
     ) -> None:
         existing = await self._find_idempotent_log(
             appointment_id=appointment_id,
@@ -269,6 +285,7 @@ class WhatsAppNotificationService:
             scheduled_time=scheduled_time,
             attempt_count=1,
             failed_at=datetime.now(UTC),
+            payload={"dispatch_decision": dispatch_decision},
         )
         self.db.add(log)
         try:
@@ -322,8 +339,17 @@ class WhatsAppNotificationService:
             return False
 
         allowed, settings = await self._event_allowed(appointment.professional_id, event_id)
-        if not allowed:
+        if not allowed or settings is None:
             return False
+
+        events_snapshot = normalize_whatsapp_events(settings.whatsapp_events)
+        dispatch_decision = {
+            "whatsapp_enabled": settings.whatsapp_enabled,
+            "whatsapp_events": events_snapshot,
+            "settings_updated_at": (
+                settings.updated_at.isoformat() if settings.updated_at is not None else None
+            ),
+        }
 
         patient: Patient = appointment.patient
         phone, opt_in = await _primary_caregiver_contact(self.db, patient.id)
@@ -346,6 +372,7 @@ class WhatsAppNotificationService:
                 notification_type=event_id,
                 scheduled_date=appointment.date,
                 scheduled_time=appointment.time,
+                dispatch_decision=dispatch_decision,
             )
             return False
 
@@ -358,9 +385,11 @@ class WhatsAppNotificationService:
             provider=get_settings().whatsapp_provider,
             scheduled_date=appointment.date,
             scheduled_time=appointment.time,
+            dispatch_decision=dispatch_decision,
         )
         if claim is None:
             return False
+        claim_id = claim.id
 
         context = {
             "patient_name": patient.name,
@@ -373,7 +402,7 @@ class WhatsAppNotificationService:
             "clinic_name": professional.name,
         }
         stored_templates = normalize_whatsapp_message_templates(
-            settings.whatsapp_message_templates if settings else None
+            settings.whatsapp_message_templates
         )
         custom_template = stored_templates.get(event_id)
 
@@ -408,6 +437,7 @@ class WhatsAppNotificationService:
                 provider=send_result.provider,
                 provider_message_id=send_result.provider_message_id,
                 payload=payload,
+                dispatch_decision=dispatch_decision,
             )
             return True
         except Exception as exc:
@@ -418,10 +448,14 @@ class WhatsAppNotificationService:
             )
             try:
                 await self.db.rollback()
+                failed_claim = await self.db.get(NotificationMessageLog, claim_id)
+                if failed_claim is None:
+                    return False
                 await self._mark_log_failed(
-                    claim,
+                    failed_claim,
                     last_error=str(getattr(exc, "detail", None) or exc),
                     payload={"error": str(exc)},
+                    dispatch_decision=dispatch_decision,
                 )
             except Exception:
                 logger.exception(

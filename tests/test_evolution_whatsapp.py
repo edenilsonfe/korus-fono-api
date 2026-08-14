@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from cryptography.fernet import Fernet
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -424,9 +425,91 @@ async def test_dispatch_uses_claim_before_send(
     assert ok is True
     assert send_mock.await_count == 1
 
+    log = (
+        await db_session.execute(
+            select(NotificationMessageLog).where(
+                NotificationMessageLog.appointment_id == appt.id,
+                NotificationMessageLog.notification_type == "appointment_confirmation",
+            )
+        )
+    ).scalar_one()
+    assert log.payload["dispatch_decision"] == {
+        "whatsapp_enabled": True,
+        "whatsapp_events": {
+            "appointment_reminder_24h": False,
+            "appointment_confirmation": True,
+            "appointment_cancelled": False,
+            "appointment_rescheduled": False,
+            "billing_reminder": False,
+            "billing_overdue": False,
+        },
+        "settings_updated_at": settings_row.updated_at.isoformat(),
+    }
+
     ok_again = await service._dispatch_appointment_event(appt.id, "appointment_confirmation")
     assert ok_again is False
     assert send_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_dispatch_preserves_decision_snapshot_after_rollback(
+    evolution_env,
+    db_session: AsyncSession,
+    professional: Professional,
+    patient: Patient,
+    monkeypatch,
+):
+    caregiver = (
+        await db_session.execute(select(Caregiver).where(Caregiver.patient_id == patient.id))
+    ).scalar_one()
+    caregiver.whatsapp_opt_in = True
+    caregiver.phone = "11988887777"
+
+    settings_row = NotificationSettings(
+        professional_id=professional.id,
+        whatsapp_enabled=True,
+        whatsapp_events={"appointment_confirmation": True},
+    )
+    appointment = Appointment(
+        professional_id=professional.id,
+        patient_id=patient.id,
+        date=date.today() + timedelta(days=4),
+        time=time(11, 0),
+        type="sessão",
+        duration=50,
+        status="agendado",
+    )
+    db_session.add_all([settings_row, appointment])
+    await db_session.commit()
+    appointment_id = appointment.id
+
+    fake_provider = SimpleNamespace(
+        can_send=AsyncMock(return_value=True),
+        send_text_message=AsyncMock(side_effect=RuntimeError("Evolution indisponível")),
+        send_appointment_reminder=AsyncMock(side_effect=RuntimeError("Evolution indisponível")),
+    )
+    monkeypatch.setattr(
+        "app.services.whatsapp_notification_service.get_active_whatsapp_provider",
+        lambda _db: fake_provider,
+    )
+
+    sent = await WhatsAppNotificationService(db_session)._dispatch_appointment_event(
+        appointment_id, "appointment_confirmation"
+    )
+
+    assert sent is False
+    log = (
+        await db_session.execute(
+            select(NotificationMessageLog).where(
+                NotificationMessageLog.appointment_id == appointment_id
+            )
+        )
+    ).scalar_one()
+    assert log.status == MESSAGE_STATUS_FAILED
+    assert log.last_error == "Evolution indisponível"
+    assert log.payload["dispatch_decision"]["whatsapp_events"][
+        "appointment_confirmation"
+    ] is True
 
 
 @pytest.mark.asyncio
