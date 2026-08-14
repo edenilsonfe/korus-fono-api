@@ -30,7 +30,7 @@ from app.models.whatsapp_connection import (
     CONNECTION_STATUS_NEEDS_RECONNECT,
     WhatsAppConnection,
 )
-from app.services.evolution_api_client import EvolutionApiError
+from app.services.evolution_api_client import EvolutionApiClient, EvolutionApiError
 from app.services.evolution_webhook_auth import (
     map_evolution_message_status,
     normalize_evolution_event,
@@ -66,6 +66,38 @@ def test_format_reminder_text():
     text = format_reminder_text(["Ana", "Dra. Silva", "10/07/2026", "14:00", "Clínica"])
     assert "Ana" in text
     assert "14:00" in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [None, 500, 503])
+async def test_send_text_does_not_retry_ambiguous_evolution_errors(status_code):
+    client = EvolutionApiClient()
+    client._request = AsyncMock(
+        side_effect=EvolutionApiError("resultado da entrega desconhecido", status_code=status_code)
+    )
+
+    with pytest.raises(EvolutionApiError):
+        await client.send_text("instance", "5511999999999", "mensagem", api_key="key")
+
+    assert client._request.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_send_text_keeps_legacy_payload_fallback_for_schema_error():
+    client = EvolutionApiClient()
+    client._request = AsyncMock(
+        side_effect=[
+            EvolutionApiError("payload inválido", status_code=422),
+            {"key": {"id": "legacy-shape"}},
+        ]
+    )
+
+    result = await client.send_text(
+        "instance", "5511999999999", "mensagem", api_key="key"
+    )
+
+    assert result["key"]["id"] == "legacy-shape"
+    assert client._request.await_count == 2
 
 
 def test_mask_phone():
@@ -234,6 +266,10 @@ async def test_webhook_updates_delivery_timestamps(
         provider_message_id="msg-1",
         status=MESSAGE_STATUS_SENT,
         sent_at=datetime.now(UTC),
+        payload={
+            "event_snapshot": {"appointment_status": "confirmado"},
+            "dispatch_decision": {"whatsapp_enabled": True},
+        },
     )
     db_session.add_all([connection, log])
     await db_session.commit()
@@ -249,6 +285,51 @@ async def test_webhook_updates_delivery_timestamps(
     await db_session.refresh(log)
     assert log.status == "delivered"
     assert log.delivered_at is not None
+    assert log.payload["event_snapshot"] == {"appointment_status": "confirmado"}
+    assert log.payload["dispatch_decision"] == {"whatsapp_enabled": True}
+    assert log.payload["provider_webhook"]["status"] == 3
+
+
+@pytest.mark.asyncio
+async def test_usage_counts_only_messages_accepted_by_provider(
+    evolution_env, db_session: AsyncSession, professional: Professional
+):
+    db_session.add_all(
+        [
+            NotificationMessageLog(
+                professional_id=professional.id,
+                channel="whatsapp",
+                notification_type="appointment_confirmation",
+                provider="evolution",
+                deduplication_key="usage-sent",
+                status="sent",
+                attempt_count=1,
+            ),
+            NotificationMessageLog(
+                professional_id=professional.id,
+                channel="whatsapp",
+                notification_type="appointment_confirmation",
+                provider="evolution",
+                deduplication_key="usage-queued",
+                status="queued",
+                attempt_count=0,
+            ),
+            NotificationMessageLog(
+                professional_id=professional.id,
+                channel="whatsapp",
+                notification_type="appointment_confirmation",
+                provider="evolution",
+                deduplication_key="usage-superseded",
+                status="superseded",
+                attempt_count=1,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    usage = await EvolutionWhatsAppService(db_session).get_usage(professional.id)
+
+    assert usage["used"] == 1
 
 
 @pytest.mark.asyncio
@@ -396,7 +477,7 @@ async def test_dispatch_uses_claim_before_send(
         time=time(9, 0),
         type="sessão",
         duration=50,
-        status="agendado",
+        status="confirmado",
     )
     db_session.add_all([settings_row, connection, appt])
     await db_session.commit()
@@ -477,7 +558,7 @@ async def test_failed_dispatch_preserves_decision_snapshot_after_rollback(
         time=time(11, 0),
         type="sessão",
         duration=50,
-        status="agendado",
+        status="confirmado",
     )
     db_session.add_all([settings_row, appointment])
     await db_session.commit()
@@ -547,7 +628,7 @@ async def test_dispatch_reminder_uses_professional_custom_template(
         time=time(9, 0),
         type="sessão",
         duration=50,
-        status="agendado",
+        status="confirmado",
     )
     db_session.add_all([settings_row, appt])
     await db_session.commit()
@@ -616,7 +697,7 @@ async def test_dispatch_reminder_without_custom_template_keeps_provider_default(
         time=time(9, 0),
         type="sessão",
         duration=50,
-        status="agendado",
+        status="confirmado",
     )
     db_session.add_all([settings_row, appt])
     await db_session.commit()

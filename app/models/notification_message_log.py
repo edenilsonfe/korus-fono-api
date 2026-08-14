@@ -1,31 +1,25 @@
 import uuid
 from datetime import date, datetime, time
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, Time, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, Time
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, new_uuid
 
 MESSAGE_STATUS_QUEUED = "queued"
+MESSAGE_STATUS_PROCESSING = "processing"
 MESSAGE_STATUS_SENT = "sent"
 MESSAGE_STATUS_DELIVERED = "delivered"
 MESSAGE_STATUS_READ = "read"
 MESSAGE_STATUS_FAILED = "failed"
+MESSAGE_STATUS_SKIPPED = "skipped"
+MESSAGE_STATUS_SUPERSEDED = "superseded"
 
 
 class NotificationMessageLog(Base, TimestampMixin):
     __tablename__ = "notification_message_logs"
     __table_args__ = (
-        UniqueConstraint(
-            "appointment_id",
-            "notification_type",
-            "channel",
-            "scheduled_date",
-            "scheduled_time",
-            "is_test",
-            name="uq_notification_message_idempotency",
-        ),
         Index(
             "ix_notification_message_logs_monthly",
             "professional_id",

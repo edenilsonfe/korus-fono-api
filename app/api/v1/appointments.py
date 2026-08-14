@@ -29,7 +29,8 @@ from app.services.appointment_completion_service import complete_appointment
 from app.services.appointment_whatsapp_events import (
     resolve_appointment_update_whatsapp_event,
 )
-from app.services.whatsapp_queue import enqueue_whatsapp_appointment_event
+from app.services.whatsapp_appointment_outbox import create_appointment_event_log
+from app.services.whatsapp_queue import enqueue_whatsapp_appointment_event_log
 
 router = APIRouter(prefix="/appointments", tags=["appointments"])
 
@@ -269,13 +270,21 @@ async def create_appointment(
             db.add(child)
             children_created += 1
 
+    event_log = None
+    if anchor.status == "confirmado":
+        event_log = await create_appointment_event_log(
+            db, anchor, "confirmation"
+        )
+
     await db.commit()
     await db.refresh(anchor)
 
-    # Após a response — não bloquear o modal da agenda na Evolution.
-    background_tasks.add_task(
-        enqueue_whatsapp_appointment_event, anchor.id, "confirmation"
-    )
+    # The event row is committed with the appointment. Background/ARQ only
+    # accelerates it; the scheduler recovers the durable row if this never runs.
+    if event_log:
+        background_tasks.add_task(
+            enqueue_whatsapp_appointment_event_log, event_log.id
+        )
 
     response = _to_response(anchor, patient.name, professional.name)
     return AppointmentCreateResponse(**response.model_dump(by_alias=False), children_created=children_created)
@@ -309,8 +318,7 @@ async def update_appointment(
         await _check_conflict(db, professional.id, new_date, new_time, new_duration, appt.id)
     for field, value in data.items():
         setattr(appt, field, value)
-    await db.commit()
-    await db.refresh(appt)
+    await db.flush()
 
     event = resolve_appointment_update_whatsapp_event(
         old_status=old_status,
@@ -318,8 +326,17 @@ async def update_appointment(
         status_changed="status" in data,
         date_or_time_changed=appt.date != old_date or appt.time != old_time,
     )
+    event_log = None
     if event:
-        background_tasks.add_task(enqueue_whatsapp_appointment_event, appt.id, event)
+        event_log = await create_appointment_event_log(db, appt, event)
+
+    await db.commit()
+    await db.refresh(appt)
+
+    if event_log:
+        background_tasks.add_task(
+            enqueue_whatsapp_appointment_event_log, event_log.id
+        )
 
     return _to_response(appt, patient.name, professional.name)
 

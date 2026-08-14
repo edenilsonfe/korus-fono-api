@@ -39,6 +39,11 @@ from app.utils.credential_encryption import (
 
 logger = logging.getLogger(__name__)
 
+
+class EvolutionDeliveryUnknownError(RuntimeError):
+    """Evolution may have accepted the message but no response was confirmed."""
+
+
 _EVOLUTION_STATE_TO_CONNECTION = {
     "open": CONNECTION_STATUS_ACTIVE,
     "connecting": CONNECTION_STATUS_CONNECTING,
@@ -542,6 +547,7 @@ class EvolutionWhatsAppService:
                     NotificationMessageLog.professional_id == professional_id,
                     NotificationMessageLog.channel == "whatsapp",
                     NotificationMessageLog.is_test.is_(False),
+                    NotificationMessageLog.status.in_(("sent", "delivered", "read")),
                     NotificationMessageLog.created_at >= month_start,
                 )
             )
@@ -683,6 +689,10 @@ class EvolutionWhatsAppService:
                 connection.status = CONNECTION_STATUS_NEEDS_RECONNECT
                 connection.last_error = exc.message
                 await self.db.commit()
+            if exc.status_code is None or exc.status_code >= 500:
+                raise EvolutionDeliveryUnknownError(
+                    f"Resultado do envio Evolution desconhecido: {exc.message}"
+                ) from exc
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Falha ao enviar mensagem Evolution: {exc.message}",
@@ -778,7 +788,11 @@ class EvolutionWhatsAppService:
                 log = log_result.scalars().first()
                 if log:
                     log.status = mapped_status
-                    log.payload = data if isinstance(data, dict) else payload
+                    persisted_payload = dict(log.payload or {})
+                    persisted_payload["provider_webhook"] = (
+                        data if isinstance(data, dict) else payload
+                    )
+                    log.payload = persisted_payload
                     now = datetime.now(UTC)
                     if mapped_status in ("delivered", "read") and not log.delivered_at:
                         log.delivered_at = now

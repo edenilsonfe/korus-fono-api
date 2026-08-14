@@ -25,10 +25,13 @@ EVENT_LABELS: dict[str, str] = {
 
 STATUS_LABELS: dict[str, str] = {
     "queued": "Na fila",
+    "processing": "Processando",
     "sent": "Enviada",
     "delivered": "Entregue",
     "read": "Lida",
     "failed": "Falhou",
+    "skipped": "Ignorada",
+    "superseded": "Substituída",
 }
 
 
@@ -85,13 +88,17 @@ class WhatsAppMessageLogService:
         )
         logs = result.scalars().all()
 
-        sent = delivered = failed = no_phone = 0
+        sent = delivered = queued = skipped = failed = no_phone = 0
         for log in logs:
             if _is_no_phone(log):
                 no_phone += 1
                 continue
-            if log.status in {"sent", "delivered", "read", "queued"}:
+            if log.status in {"sent", "delivered", "read"}:
                 sent += 1
+            if log.status in {"queued", "processing"}:
+                queued += 1
+            if log.status in {"skipped", "superseded"}:
+                skipped += 1
             if log.status in {"delivered", "read"}:
                 delivered += 1
             if log.status == "failed":
@@ -101,6 +108,8 @@ class WhatsAppMessageLogService:
             "period_days": days,
             "sent": sent,
             "delivered": delivered,
+            "queued": queued,
+            "skipped": skipped,
             "failed": failed,
             "no_phone": no_phone,
             "total": len(logs),
@@ -134,7 +143,16 @@ class WhatsAppMessageLogService:
                     )
                 )
             else:
-                filters.append(NotificationMessageLog.status == status)
+                if status == "queued":
+                    filters.append(
+                        NotificationMessageLog.status.in_(["queued", "processing"])
+                    )
+                elif status == "skipped":
+                    filters.append(
+                        NotificationMessageLog.status.in_(["skipped", "superseded"])
+                    )
+                else:
+                    filters.append(NotificationMessageLog.status == status)
 
         where_clause = and_(*filters)
 
@@ -156,9 +174,14 @@ class WhatsAppMessageLogService:
         items = []
         for log, patient_name in result.all():
             no_phone = _is_no_phone(log)
+            payload = log.payload if isinstance(log.payload, dict) else {}
+            dispatch_decision = payload.get("dispatch_decision")
             items.append(
                 {
                     "id": str(log.id),
+                    "appointment_id": (
+                        str(log.appointment_id) if log.appointment_id else None
+                    ),
                     "created_at": log.created_at,
                     "notification_type": log.notification_type,
                     "event_label": _event_label(log.notification_type),
@@ -168,6 +191,16 @@ class WhatsAppMessageLogService:
                     "status": log.status,
                     "status_label": _status_label(log.status, no_phone=no_phone),
                     "delivery_seconds": _delivery_seconds(log),
+                    "scheduled_date": log.scheduled_date,
+                    "scheduled_time": log.scheduled_time,
+                    "attempt_count": log.attempt_count,
+                    "provider_message_id": log.provider_message_id,
+                    "skip_reason": payload.get("skip_reason"),
+                    "dispatch_decision": (
+                        dispatch_decision
+                        if isinstance(dispatch_decision, dict)
+                        else None
+                    ),
                     "last_error": log.last_error,
                     "is_test": log.is_test,
                 }

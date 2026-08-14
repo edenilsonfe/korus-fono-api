@@ -10,11 +10,19 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.constants.whatsapp_events import ACTIVE_APPOINTMENT_STATUSES, WHATSAPP_EVENT_REMINDER_24H
+from app.constants.whatsapp_events import (
+    ACTIVE_APPOINTMENT_STATUSES,
+    WHATSAPP_EVENT_CANCELLED,
+    WHATSAPP_EVENT_CONFIRMATION,
+    WHATSAPP_EVENT_REMINDER_24H,
+    WHATSAPP_EVENT_RESCHEDULED,
+)
 from app.core.config import get_settings
 from app.models.appointment import Appointment
 from app.models.notification_message_log import (
     MESSAGE_STATUS_FAILED,
+    MESSAGE_STATUS_PROCESSING,
+    MESSAGE_STATUS_QUEUED,
     NotificationMessageLog,
 )
 from app.services.whatsapp_notification_service import (
@@ -26,6 +34,19 @@ from app.services.whatsapp_welcome_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+_APPOINTMENT_EVENT_TYPES = (
+    WHATSAPP_EVENT_REMINDER_24H,
+    WHATSAPP_EVENT_CONFIRMATION,
+    WHATSAPP_EVENT_CANCELLED,
+    WHATSAPP_EVENT_RESCHEDULED,
+)
+_NON_RETRYABLE_ERRORS = (
+    "no_phone",
+    "missing_phone",
+    "invalid_phone",
+    "delivery_unknown",
+)
 
 
 class WhatsAppSchedulerService:
@@ -41,9 +62,11 @@ class WhatsAppSchedulerService:
         return datetime.combine(appointment.date, appointment.time, tzinfo=self._tz)
 
     async def run_all(self) -> dict[str, int]:
+        appointment_events = await self.run_queued_appointment_events()
         reminders = await self.run_appointment_reminders_24h()
         welcome_messages = await retry_due_whatsapp_welcome_messages()
         totals = {
+            "appointment_events": appointment_events,
             "appointment_reminders": reminders,
             "welcome_messages": welcome_messages,
             "billing_reminders": 0,
@@ -52,6 +75,65 @@ class WhatsAppSchedulerService:
         if any(totals.values()):
             logger.info("WhatsApp scheduler run: %s", totals)
         return totals
+
+    async def run_queued_appointment_events(self) -> int:
+        """Recover durable outbox rows that background/ARQ did not finish."""
+        now = datetime.now(UTC)
+        stale_before = now - timedelta(minutes=5)
+        stale_result = await self.db.execute(
+            select(NotificationMessageLog).where(
+                NotificationMessageLog.notification_type.in_(_APPOINTMENT_EVENT_TYPES),
+                NotificationMessageLog.appointment_id.is_not(None),
+                NotificationMessageLog.status == MESSAGE_STATUS_PROCESSING,
+                NotificationMessageLog.updated_at < stale_before,
+            )
+        )
+        stale_logs = stale_result.scalars().all()
+        for log in stale_logs:
+            log.status = MESSAGE_STATUS_FAILED
+            log.error_code = "delivery_unknown"
+            log.last_error = (
+                "Processamento interrompido; entrega não repetida para evitar duplicidade."
+            )
+            log.failed_at = now
+            log.next_retry_at = None
+        if stale_logs:
+            await self.db.commit()
+
+        result = await self.db.execute(
+            select(NotificationMessageLog.id)
+            .where(
+                NotificationMessageLog.notification_type.in_(_APPOINTMENT_EVENT_TYPES),
+                NotificationMessageLog.appointment_id.is_not(None),
+                or_(
+                    and_(
+                        NotificationMessageLog.status == MESSAGE_STATUS_QUEUED,
+                        NotificationMessageLog.attempt_count == 0,
+                    ),
+                    and_(
+                        NotificationMessageLog.status == MESSAGE_STATUS_FAILED,
+                        NotificationMessageLog.attempt_count < MAX_SEND_ATTEMPTS,
+                        or_(
+                            NotificationMessageLog.error_code.is_(None),
+                            NotificationMessageLog.error_code.notin_(_NON_RETRYABLE_ERRORS),
+                        ),
+                        or_(
+                            NotificationMessageLog.next_retry_at.is_(None),
+                            NotificationMessageLog.next_retry_at <= now,
+                        ),
+                    ),
+                ),
+            )
+            .order_by(NotificationMessageLog.created_at.asc())
+            .limit(100)
+        )
+        log_ids = list(result.scalars().all())
+        notifier = WhatsAppNotificationService(self.db)
+        sent = 0
+        for log_id in log_ids:
+            if await notifier.dispatch_event_log(log_id):
+                sent += 1
+        return sent
 
     async def run_appointment_reminders_24h(self) -> int:
         settings = get_settings()
@@ -111,7 +193,15 @@ class WhatsAppSchedulerService:
                 NotificationMessageLog.is_test.is_(False),
                 or_(
                     NotificationMessageLog.status.in_(
-                        ("queued", "sent", "delivered", "read")
+                        (
+                            "queued",
+                            "processing",
+                            "sent",
+                            "delivered",
+                            "read",
+                            "skipped",
+                            "superseded",
+                        )
                     ),
                     and_(
                         NotificationMessageLog.status == MESSAGE_STATUS_FAILED,

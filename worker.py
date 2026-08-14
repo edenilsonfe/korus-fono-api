@@ -62,6 +62,13 @@ async def dispatch_whatsapp_appointment_event(
     )
 
 
+async def dispatch_whatsapp_appointment_event_log(ctx, event_log_id: str) -> None:
+    from app.services.whatsapp_notification_service import WhatsAppNotificationService
+
+    async with AsyncSessionLocal() as session:
+        await WhatsAppNotificationService(session).dispatch_event_log(UUID(event_log_id))
+
+
 async def run_trial_email_campaign(ctx, campaign_id: str) -> None:
     try:
         await process_trial_email_campaign(campaign_id)
@@ -76,6 +83,7 @@ class WorkerSettings:
         process_ai_job,
         run_whatsapp_scheduler,
         dispatch_whatsapp_appointment_event,
+        dispatch_whatsapp_appointment_event_log,
         run_trial_email_campaign,
     ]
     cron_jobs = [

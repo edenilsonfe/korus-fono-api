@@ -61,3 +61,40 @@ async def enqueue_whatsapp_appointment_event(
             appointment_id,
             notification_type,
         )
+
+
+async def enqueue_whatsapp_appointment_event_log(event_log_id: UUID) -> None:
+    """Dispatch an already-persisted appointment outbox row."""
+    if _use_arq_dispatch():
+        try:
+            from arq import create_pool
+            from arq.connections import RedisSettings
+
+            redis = await create_pool(RedisSettings.from_dsn(get_settings().redis_url))
+            try:
+                await redis.enqueue_job(
+                    "dispatch_whatsapp_appointment_event_log", str(event_log_id)
+                )
+                return
+            finally:
+                close = getattr(redis, "aclose", None) or getattr(redis, "close")
+                await close()
+        except Exception as exc:
+            logger.warning(
+                "WhatsApp outbox ARQ enqueue failed (%s); dispatching inline for %s",
+                exc,
+                event_log_id,
+            )
+
+    from app.services.whatsapp_notification_service import WhatsAppNotificationService
+
+    try:
+        from app.db.session import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as db:
+            await WhatsAppNotificationService(db).dispatch_event_log(event_log_id)
+    except Exception:
+        # The durable queued row remains available for the scheduler recovery pass.
+        logger.exception(
+            "Background WhatsApp outbox dispatch failed for %s", event_log_id
+        )

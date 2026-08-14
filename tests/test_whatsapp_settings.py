@@ -155,7 +155,7 @@ async def test_template_save_preserves_disabled_events_and_dispatches_only_enabl
             time=time(9, 0),
             type="sessão",
             duration=50,
-            status="agendado",
+            status="confirmado",
         )
         db_session.add(appointment)
         appointments.append(appointment)

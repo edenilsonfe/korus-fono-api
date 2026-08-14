@@ -244,6 +244,11 @@ class EvolutionApiClient:
                 )
             except EvolutionApiError as exc:
                 errors.append(exc.message)
+                # Only a deterministic schema rejection proves that Evolution did
+                # not accept the first message. Retrying after a timeout or 5xx can
+                # create a second WhatsApp delivery for one local log row.
+                if exc.status_code not in {400, 422}:
+                    raise
                 continue
 
         raise EvolutionApiError(

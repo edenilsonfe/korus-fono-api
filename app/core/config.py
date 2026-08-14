@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     whatsapp_scheduler_interval_seconds: int = 900
     whatsapp_reminder_window_hours: int = 24
     whatsapp_reminder_tolerance_minutes: int = 15
+    whatsapp_reminder_reschedule_cooldown_hours: int = 6
     whatsapp_billing_reminder_days_before: int = 3
 
     billing_provider: str = "stub"
