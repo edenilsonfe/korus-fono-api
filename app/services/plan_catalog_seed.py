@@ -13,7 +13,7 @@ COMMERCIAL_PLAN_SEEDS: list[dict[str, Any]] = [
         "name": "KorusFono Pro",
         "description": "Pacientes ilimitados, IA clínica e relatórios automáticos.",
         "limits": {},
-        "price_cents": 9700,
+        "price_cents": 9790,
         "currency": "BRL",
         "billing_interval": "monthly",
         "features": [

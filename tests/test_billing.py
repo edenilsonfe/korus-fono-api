@@ -138,7 +138,7 @@ async def test_get_session_asaas_exposes_invoice_url(db_session):
         return_value={
             "id": "pay_asaas_invoice",
             "status": "PENDING",
-            "value": 97.0,
+            "value": 97.9,
             "invoiceUrl": invoice,
         }
     )
@@ -154,7 +154,7 @@ async def test_get_session_asaas_exposes_invoice_url(db_session):
 
     assert session["invoice_url"] == invoice
     assert session["status"] == "pending"
-    assert session["charge_cents"] == 9700
+    assert session["charge_cents"] == 9790
 
 
 @pytest.mark.asyncio

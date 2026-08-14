@@ -36,5 +36,6 @@ async def test_seed_deactivates_non_canonical_plans(db_session):
     plans = {p.slug: p for p in rows.scalars().all()}
 
     assert plans["korusfono_pro_monthly"].is_active is True
+    assert plans["korusfono_pro_monthly"].price_cents == 9790
     assert plans["legacy_monthly"].is_active is False
     assert len(CANONICAL_PLAN_SLUGS) == 2
