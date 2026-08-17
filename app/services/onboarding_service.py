@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.utils import utcnow
 from app.models.ai import AIReport
 from app.models.assessment import ASSESSMENT_STATUS_COMPLETED, Assessment
+from app.models.finance import ServiceOffering
 from app.models.patient import Patient
 from app.models.professional import Professional
 from app.schemas.onboarding import OnboardingResponse, OnboardingSteps
@@ -29,6 +30,15 @@ async def _real_patient(db: AsyncSession, professional_id) -> Patient | None:
         select(Patient)
         .where(Patient.professional_id == professional_id, Patient.is_demo.is_(False))
         .order_by(Patient.created_at.asc())
+        .limit(1)
+    )
+
+
+async def _configured_service(db: AsyncSession, professional_id) -> ServiceOffering | None:
+    return await db.scalar(
+        select(ServiceOffering)
+        .where(ServiceOffering.professional_id == professional_id)
+        .order_by(ServiceOffering.created_at.asc())
         .limit(1)
     )
 
@@ -61,6 +71,7 @@ async def build_onboarding_response(
     db: AsyncSession, professional: Professional
 ) -> OnboardingResponse:
     real_patient = await _real_patient(db, professional.id)
+    configured_service = await _configured_service(db, professional.id)
     demo = await _ensure_demo_while_onboarding(db, professional)
     demo_id = demo.id if demo else None
     completed_assessment = await _has_completed_demo_assessment(db, demo_id)
@@ -77,17 +88,29 @@ async def build_onboarding_response(
 
     steps = OnboardingSteps(
         viewed_demo_patient=(
-            professional.onboarding_viewed_demo_patient_at is not None or completed_assessment
+            professional.onboarding_viewed_demo_patient_at is not None
+            or completed_assessment
+            or real_patient is not None
         ),
-        completed_demo_assessment=completed_assessment,
-        viewed_demo_result=professional.onboarding_viewed_demo_result_at is not None,
-        created_demo_report=report_id is not None,
+        completed_demo_assessment=completed_assessment or real_patient is not None,
+        viewed_demo_result=(
+            professional.onboarding_viewed_demo_result_at is not None or real_patient is not None
+        ),
+        created_demo_report=report_id is not None or real_patient is not None,
+        configured_service=configured_service is not None,
         created_real_patient=real_patient is not None,
     )
-    is_complete = steps.created_real_patient
-    completed_at = professional.onboarding_completed_at or (
-        real_patient.created_at if real_patient is not None else None
-    )
+    is_complete = steps.configured_service and steps.created_real_patient
+    completion_moments = [
+        moment
+        for moment in (
+            professional.onboarding_completed_at,
+            configured_service.created_at if configured_service is not None else None,
+            real_patient.created_at if real_patient is not None else None,
+        )
+        if moment is not None
+    ]
+    completed_at = max(completion_moments) if is_complete else None
 
     if is_complete:
         next_step = "completed"
@@ -99,6 +122,8 @@ async def build_onboarding_response(
         next_step = "view_demo_result"
     elif not steps.created_demo_report:
         next_step = "create_demo_report"
+    elif not steps.configured_service:
+        next_step = "configure_service"
     else:
         next_step = "create_real_patient"
 

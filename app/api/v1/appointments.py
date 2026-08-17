@@ -26,6 +26,10 @@ from app.services.appointment_series_slots import (
     validate_recurrent_range,
 )
 from app.services.appointment_completion_service import complete_appointment
+from app.services.appointment_finance_service import (
+    get_active_service_for_appointment,
+    service_snapshot,
+)
 from app.services.appointment_whatsapp_events import (
     resolve_appointment_update_whatsapp_event,
 )
@@ -58,6 +62,9 @@ def _to_response(appt: Appointment, patient_name: str, therapist: str) -> Appoin
         id=str(appt.id),
         patient_id=str(appt.patient_id),
         patient=patient_name,
+        service_id=str(appt.service_id) if appt.service_id else None,
+        service_name=appt.service_name_snapshot,
+        service_price_cents=appt.service_price_cents,
         date=appt.date.isoformat(),
         time=appt.time.strftime("%H:%M"),
         type=appt.type,
@@ -191,6 +198,14 @@ async def create_appointment(
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(UUID(body.patient_id), professional, db)
+    scheduled_service = None
+    if body.service_id:
+        scheduled_service = await get_active_service_for_appointment(
+            db, professional.id, body.service_id
+        )
+        body = body.model_copy(
+            update={"type": scheduled_service.name, "duration": scheduled_service.duration}
+        )
     appointment_type = body.appointment_type or "avulso"
 
     recurrence_weekdays: list[int] | None = None
@@ -223,6 +238,7 @@ async def create_appointment(
     anchor = Appointment(
         professional_id=professional.id,
         patient_id=patient.id,
+        **(service_snapshot(scheduled_service) if scheduled_service else {}),
         date=body.date,
         time=body.time,
         type=body.type,
@@ -255,6 +271,7 @@ async def create_appointment(
             child = Appointment(
                 professional_id=professional.id,
                 patient_id=patient.id,
+                **(service_snapshot(scheduled_service) if scheduled_service else {}),
                 date=slot.start_date,
                 time=slot.start_time,
                 type=body.type,
@@ -308,6 +325,22 @@ async def update_appointment(
         raise HTTPException(status_code=404, detail="Agendamento não encontrado")
     appt, patient = row
     data = body.model_dump(exclude_unset=True)
+    if "service_id" in data:
+        selected_service_id = data.get("service_id")
+        if selected_service_id:
+            selected_service = await get_active_service_for_appointment(
+                db, professional.id, selected_service_id
+            )
+            data.update(service_snapshot(selected_service))
+            data.update({"type": selected_service.name, "duration": selected_service.duration})
+        else:
+            data.update(
+                {
+                    "service_id": None,
+                    "service_name_snapshot": None,
+                    "service_price_cents": None,
+                }
+            )
     old_date = appt.date
     old_time = appt.time
     old_status = appt.status

@@ -86,6 +86,8 @@ de `/api/v1/billing/*`, que continua exclusivo para trial e assinatura do SaaS.
 - Cancelamentos e estornos preservam a trilha; registros pagos não são apagados.
 - `POST /appointments/{id}/complete` cria a sessão uma única vez e exige a decisão
   explícita entre cobrança individual, consumo de pacote ou cortesia.
+- Ao selecionar um serviço financeiro no agendamento, a agenda guarda nome e preço
+  em centavos como snapshot; reajustes posteriores não alteram a cobrança daquele atendimento.
 - O PDF é um comprovante de controle interno e não substitui Receita Saúde ou NFS-e.
 
 ## Migrations (Alembic)

@@ -86,23 +86,51 @@ async def complete_appointment(
         return await _existing_completion(db, appointment, existing_session)
 
     if body.billing_mode == "individual":
-        if not body.service_id or not body.due_date or not body.payer_name:
+        if not body.due_date or not body.payer_name:
             raise HTTPException(
                 status_code=422,
-                detail="Serviço, vencimento e pagador são obrigatórios na cobrança individual",
+                detail="Vencimento e pagador são obrigatórios na cobrança individual",
             )
-        service_result = await db.execute(
-            select(ServiceOffering).where(
-                ServiceOffering.id == body.service_id,
-                ServiceOffering.professional_id == professional.id,
-                ServiceOffering.active.is_(True),
+        if body.service_id:
+            service_result = await db.execute(
+                select(ServiceOffering).where(
+                    ServiceOffering.id == body.service_id,
+                    ServiceOffering.professional_id == professional.id,
+                    ServiceOffering.active.is_(True),
+                )
             )
-        )
-        service = service_result.scalar_one_or_none()
-        if not service:
-            raise HTTPException(status_code=404, detail="Serviço financeiro não encontrado")
+            service = service_result.scalar_one_or_none()
+            if not service:
+                raise HTTPException(status_code=404, detail="Serviço financeiro não encontrado")
+            service_id = service.id
+            service_name = service.name
+            service_price_cents = service.price_cents
+            service_category_id = service.category_id
+        elif appointment.service_name_snapshot and appointment.service_price_cents:
+            service_id = appointment.service_id
+            service_name = appointment.service_name_snapshot
+            service_price_cents = appointment.service_price_cents
+            service_category_id = None
+            if appointment.service_id:
+                scheduled_service_result = await db.execute(
+                    select(ServiceOffering).where(
+                        ServiceOffering.id == appointment.service_id,
+                        ServiceOffering.professional_id == professional.id,
+                    )
+                )
+                scheduled_service = scheduled_service_result.scalar_one_or_none()
+                if scheduled_service:
+                    service_category_id = scheduled_service.category_id
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail="Selecione o serviço financeiro deste atendimento",
+            )
     else:
-        service = None
+        service_id = None
+        service_name = None
+        service_price_cents = None
+        service_category_id = None
 
     if body.billing_mode == "package":
         if not body.patient_package_id:
@@ -148,7 +176,7 @@ async def complete_appointment(
     receivable_id = None
     usage_id = None
     if body.billing_mode == "individual":
-        assert service and body.due_date and body.payer_name
+        assert service_name and service_price_cents and body.due_date and body.payer_name
         receivable = await create_receivable_entity(
             db,
             professional.id,
@@ -156,19 +184,19 @@ async def complete_appointment(
                 patient_id=patient.id,
                 payer_name=body.payer_name,
                 payer_document=body.payer_document,
-                description=service.name,
+                description=service_name,
                 issue_date=appointment.date,
                 competence_date=appointment.date,
                 due_date=body.due_date,
-                category_id=service.category_id,
+                category_id=service_category_id,
                 origin="appointment",
                 notes=body.notes,
                 items=[
                     ReceivableItemCreate(
-                        service_id=service.id,
-                        description=service.name,
+                        service_id=service_id,
+                        description=service_name,
                         quantity=1,
-                        unit_cents=service.price_cents,
+                        unit_cents=service_price_cents,
                     )
                 ],
             ),

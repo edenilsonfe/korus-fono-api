@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.security import create_access_token, hash_password
 from app.models.appointment import Appointment
+from app.models.finance import ServiceOffering
 from app.models.patient import Patient
 from app.models.professional import Professional
 from app.models.session import Session
@@ -108,6 +109,232 @@ async def test_financial_categories_include_defaults_and_classify_new_services(
 
     assert service.status_code == 201, service.text
     assert service.json()["categoryId"] == assessment_category["id"]
+
+
+@pytest.mark.asyncio
+async def test_scheduling_a_service_snapshots_its_name_duration_and_price(
+    api_client, db_session, patient, auth_headers
+):
+    service = await api_client.post(
+        "/api/v1/finance/services",
+        headers=auth_headers,
+        json={"name": "Terapia de linguagem", "duration": 45, "priceCents": 18_500},
+    )
+    assert service.status_code == 201, service.text
+
+    appointment_date = date.today() + timedelta(days=1)
+    created = await api_client.post(
+        "/api/v1/appointments",
+        headers=auth_headers,
+        json={
+            "patientId": str(patient.id),
+            "date": str(appointment_date),
+            "time": "09:00",
+            "type": "Valor legado que deve ser substituído",
+            "duration": 30,
+            "status": "confirmado",
+            "serviceId": service.json()["id"],
+        },
+    )
+
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["serviceId"] == service.json()["id"]
+    assert body["serviceName"] == "Terapia de linguagem"
+    assert body["servicePriceCents"] == 18_500
+    assert body["type"] == "Terapia de linguagem"
+    assert body["duration"] == 45
+
+    stored = await db_session.get(Appointment, UUID(body["id"]))
+    assert stored is not None
+    assert stored.service_id == UUID(service.json()["id"])
+    assert stored.service_name_snapshot == "Terapia de linguagem"
+    assert stored.service_price_cents == 18_500
+
+    # Agendar registra o valor acordado, mas a dívida só nasce na conclusão.
+    receivables = await api_client.get("/api/v1/finance/receivables", headers=auth_headers)
+    assert receivables.status_code == 200
+    assert receivables.json()["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_recurring_series_children_keep_the_service_price_snapshot(
+    api_client, db_session, patient, auth_headers
+):
+    service = await api_client.post(
+        "/api/v1/finance/services",
+        headers=auth_headers,
+        json={"name": "Terapia de linguagem", "duration": 50, "priceCents": 17_000},
+    )
+    assert service.status_code == 201, service.text
+
+    created = await api_client.post(
+        "/api/v1/appointments",
+        headers=auth_headers,
+        json={
+            "patientId": str(patient.id),
+            "date": "2026-09-07",
+            "time": "10:00",
+            "type": "Terapia de linguagem",
+            "duration": 50,
+            "status": "confirmado",
+            "serviceId": service.json()["id"],
+            "appointmentType": "recorrente",
+            "frequency": "semanal",
+            "endDate": "2026-09-21",
+        },
+    )
+
+    assert created.status_code == 201, created.text
+    result = await db_session.execute(
+        select(Appointment).where(Appointment.patient_id == patient.id)
+    )
+    appointments = result.scalars().all()
+    assert len(appointments) >= 2
+    service_id = UUID(service.json()["id"])
+    assert all(item.service_id == service_id for item in appointments)
+    assert all(item.service_name_snapshot == "Terapia de linguagem" for item in appointments)
+    assert all(item.service_price_cents == 17_000 for item in appointments)
+
+
+@pytest.mark.asyncio
+async def test_appointment_rejects_a_financial_service_from_another_professional(
+    api_client, db_session, professional, patient, auth_headers
+):
+    other = Professional(
+        email="other-finance@example.com",
+        password_hash=hash_password("testpass123"),
+        name="Dra. Outra",
+        specialty_key="fono",
+        specialty="Fonoaudiologia",
+        council="CREFITO",
+        phone="11977776666",
+        email_verified_at=datetime.now(UTC),
+    )
+    db_session.add(other)
+    await db_session.flush()
+    foreign_service = ServiceOffering(
+        professional_id=other.id,
+        name="Serviço de outra conta",
+        duration=50,
+        price_cents=10_000,
+    )
+    db_session.add(foreign_service)
+    await db_session.commit()
+
+    response = await api_client.post(
+        "/api/v1/appointments",
+        headers=auth_headers,
+        json={
+            "patientId": str(patient.id),
+            "date": str(date.today() + timedelta(days=3)),
+            "time": "11:00",
+            "type": "Serviço de outra conta",
+            "duration": 50,
+            "serviceId": str(foreign_service.id),
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Serviço financeiro não encontrado"
+
+
+@pytest.mark.asyncio
+async def test_updating_the_appointment_service_refreshes_its_snapshot(
+    api_client, patient, auth_headers
+):
+    first = await api_client.post(
+        "/api/v1/finance/services",
+        headers=auth_headers,
+        json={"name": "Terapia", "duration": 50, "priceCents": 15_000},
+    )
+    second = await api_client.post(
+        "/api/v1/finance/services",
+        headers=auth_headers,
+        json={"name": "Avaliação", "duration": 60, "priceCents": 22_000},
+    )
+    created = await api_client.post(
+        "/api/v1/appointments",
+        headers=auth_headers,
+        json={
+            "patientId": str(patient.id),
+            "date": str(date.today() + timedelta(days=4)),
+            "time": "13:00",
+            "type": "Terapia",
+            "duration": 50,
+            "serviceId": first.json()["id"],
+        },
+    )
+
+    updated = await api_client.patch(
+        f"/api/v1/appointments/{created.json()['id']}",
+        headers=auth_headers,
+        json={"serviceId": second.json()["id"]},
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["serviceId"] == second.json()["id"]
+    assert updated.json()["serviceName"] == "Avaliação"
+    assert updated.json()["servicePriceCents"] == 22_000
+    assert updated.json()["type"] == "Avaliação"
+    assert updated.json()["duration"] == 60
+
+
+@pytest.mark.asyncio
+async def test_completion_uses_the_scheduled_price_snapshot_after_service_repricing(
+    api_client, patient, auth_headers
+):
+    service = await api_client.post(
+        "/api/v1/finance/services",
+        headers=auth_headers,
+        json={"name": "Avaliação inicial", "duration": 60, "priceCents": 20_000},
+    )
+    assert service.status_code == 201, service.text
+
+    appointment_date = date.today() + timedelta(days=2)
+    created = await api_client.post(
+        "/api/v1/appointments",
+        headers=auth_headers,
+        json={
+            "patientId": str(patient.id),
+            "date": str(appointment_date),
+            "time": "10:00",
+            "type": "Avaliação inicial",
+            "duration": 60,
+            "status": "confirmado",
+            "serviceId": service.json()["id"],
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    repriced = await api_client.patch(
+        f"/api/v1/finance/services/{service.json()['id']}",
+        headers=auth_headers,
+        json={"name": "Avaliação inicial reajustada", "priceCents": 25_000},
+    )
+    assert repriced.status_code == 200, repriced.text
+
+    completed = await api_client.post(
+        f"/api/v1/appointments/{created.json()['id']}/complete",
+        headers=auth_headers,
+        json={
+            "billingMode": "individual",
+            "dueDate": str(appointment_date),
+            "payerName": "Responsável financeiro",
+        },
+    )
+
+    assert completed.status_code == 200, completed.text
+    receivables = await api_client.get("/api/v1/finance/receivables", headers=auth_headers)
+    assert receivables.status_code == 200
+    receivable = receivables.json()["items"][0]
+    assert receivable["description"] == "Avaliação inicial"
+    assert receivable["totalCents"] == 20_000
+    detail = await api_client.get(
+        f"/api/v1/finance/receivables/{receivable['id']}", headers=auth_headers
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["items"][0]["unitCents"] == 20_000
 
 
 @pytest.mark.asyncio

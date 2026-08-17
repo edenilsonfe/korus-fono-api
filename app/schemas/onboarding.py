@@ -16,6 +16,7 @@ OnboardingNextStep = Literal[
     "complete_demo_assessment",
     "view_demo_result",
     "create_demo_report",
+    "configure_service",
     "create_real_patient",
     "completed",
 ]
@@ -26,6 +27,7 @@ class OnboardingSteps(CamelModel):
     completed_demo_assessment: bool
     viewed_demo_result: bool
     created_demo_report: bool
+    configured_service: bool
     created_real_patient: bool
 
 

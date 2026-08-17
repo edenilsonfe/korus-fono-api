@@ -41,7 +41,7 @@ async def test_activation_starts_with_server_derived_demo_state(
 
     assert response.status_code == 200
     assert response.json() == {
-        "version": 1,
+        "version": 2,
         "demoPatientId": str(demo.id),
         "startedAt": professional.created_at.isoformat().replace("+00:00", "Z"),
         "completedAt": None,
@@ -53,6 +53,7 @@ async def test_activation_starts_with_server_derived_demo_state(
             "completedDemoAssessment": False,
             "viewedDemoResult": False,
             "createdDemoReport": False,
+            "configuredService": False,
             "createdRealPatient": False,
         },
     }
@@ -137,7 +138,40 @@ async def test_result_view_requires_a_completed_demo_assessment(
     assert response.json()["detail"] == "Conclua a avaliação demonstrativa antes de ver o resultado"
 
 
-async def test_activation_derives_clinical_value_and_completes_with_real_patient(
+async def test_existing_professional_with_real_patient_resumes_at_service_configuration(
+    api_client, db_session, professional, auth_headers
+):
+    db_session.add(
+        Patient(
+            professional_id=professional.id,
+            name="Paciente já cadastrado",
+            birth_date=date(2021, 5, 20),
+            diagnosis_keys=[],
+            status="avaliacao",
+            start_date=date.today(),
+            avatar_color="oklch(0.58 0.12 205)",
+            is_demo=False,
+        )
+    )
+    await db_session.commit()
+
+    response = await api_client.get("/api/v1/me/activation", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["demoPatientId"] is None
+    assert response.json()["steps"] == {
+        "viewedDemoPatient": True,
+        "completedDemoAssessment": True,
+        "viewedDemoResult": True,
+        "createdDemoReport": True,
+        "configuredService": False,
+        "createdRealPatient": True,
+    }
+    assert response.json()["isComplete"] is False
+    assert response.json()["nextStep"] == "configure_service"
+
+
+async def test_activation_requires_a_configured_service_and_real_patient_to_complete(
     api_client, db_session, professional, auth_headers
 ):
     demo = await _demo_patient(db_session, professional)
@@ -178,7 +212,24 @@ async def test_activation_derives_clinical_value_and_completes_with_real_patient
     assert result_view.json()["steps"]["completedDemoAssessment"] is True
     assert result_view.json()["steps"]["viewedDemoResult"] is True
     assert result_view.json()["steps"]["createdDemoReport"] is True
-    assert result_view.json()["nextStep"] == "create_real_patient"
+    assert result_view.json()["steps"]["configuredService"] is False
+    assert result_view.json()["nextStep"] == "configure_service"
+
+    service = await api_client.post(
+        "/api/v1/finance/services",
+        headers=auth_headers,
+        json={
+            "name": "Terapia fonoaudiológica",
+            "duration": 50,
+            "priceCents": 18_000,
+        },
+    )
+    assert service.status_code == 201, service.text
+
+    configured = await api_client.get("/api/v1/me/activation", headers=auth_headers)
+    assert configured.status_code == 200
+    assert configured.json()["steps"]["configuredService"] is True
+    assert configured.json()["nextStep"] == "create_real_patient"
 
     created = await api_client.post(
         "/api/v1/patients",
@@ -196,6 +247,7 @@ async def test_activation_derives_clinical_value_and_completes_with_real_patient
 
     completed = await api_client.get("/api/v1/me/activation", headers=auth_headers)
     assert completed.status_code == 200
+    assert completed.json()["steps"]["configuredService"] is True
     assert completed.json()["steps"]["createdRealPatient"] is True
     assert completed.json()["isComplete"] is True
     assert completed.json()["nextStep"] == "completed"

@@ -19,6 +19,14 @@ class Appointment(Base, TimestampMixin):
     patient_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    service_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("financial_services.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    service_name_snapshot: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    service_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     time: Mapped[time] = mapped_column(Time, nullable=False)
     type: Mapped[str] = mapped_column(String(100), nullable=False)
