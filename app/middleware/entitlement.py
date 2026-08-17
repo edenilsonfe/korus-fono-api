@@ -16,6 +16,8 @@ from sqlalchemy import select
 
 EXEMPT_PATH_PREFIXES: tuple[str, ...] = (
     "/api/v1/auth",
+    # Public signed attendance response from the 24h WhatsApp reminder.
+    "/api/v1/appointment-responses",
     "/api/v1/billing/checkout",
     "/api/v1/billing/reconcile",
     "/api/v1/billing/webhooks",

@@ -28,6 +28,16 @@ def _fake_provider(send_mock: AsyncMock):
     )
 
 
+def _fake_provider_with_separate_methods(
+    *, send_text_message: AsyncMock, send_appointment_reminder: AsyncMock
+):
+    return SimpleNamespace(
+        can_send=AsyncMock(return_value=True),
+        send_text_message=send_text_message,
+        send_appointment_reminder=send_appointment_reminder,
+    )
+
+
 async def _enable_event(db: AsyncSession, professional_id, event_id: str) -> None:
     db.add(
         NotificationSettings(
@@ -175,6 +185,98 @@ async def test_reminder_rechecks_database_state_after_cron_capture(
     assert sent is False
     assert event_log.status == "superseded"
     send_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reminder_keeps_existing_provider_path_when_response_link_is_disabled(
+    db_session, professional, patient, monkeypatch
+):
+    await _enable_opt_in(db_session, patient.id)
+    await _enable_event(db_session, professional.id, "appointment_reminder_24h")
+    appointment = _appointment(professional.id, patient.id)
+    db_session.add(appointment)
+    await db_session.commit()
+
+    send_text = AsyncMock()
+    send_default = AsyncMock(
+        return_value=WhatsAppSendResult(
+            provider="evolution",
+            provider_message_id="default-reminder",
+            status="sent",
+            payload={},
+        )
+    )
+    monkeypatch.setattr(
+        "app.services.whatsapp_notification_service.get_active_whatsapp_provider",
+        lambda _db: _fake_provider_with_separate_methods(
+            send_text_message=send_text,
+            send_appointment_reminder=send_default,
+        ),
+    )
+
+    sent = await WhatsAppNotificationService(db_session).dispatch_appointment_reminder(
+        appointment
+    )
+
+    assert sent is True
+    send_default.assert_awaited_once()
+    send_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_opt_in_reminder_appends_signed_response_link_at_dispatch_time(
+    db_session, professional, patient, monkeypatch
+):
+    await _enable_opt_in(db_session, patient.id)
+    await _enable_event(db_session, professional.id, "appointment_reminder_24h")
+    notification_settings = (
+        await db_session.execute(
+            select(NotificationSettings).where(
+                NotificationSettings.professional_id == professional.id
+            )
+        )
+    ).scalar_one()
+    notification_settings.appointment_confirmation_link_enabled = True
+    notification_settings.whatsapp_message_templates = {
+        "appointment_reminder_24h": "Lembrete atualizado para {{appointmentTime}}."
+    }
+    appointment = _appointment(professional.id, patient.id)
+    db_session.add(appointment)
+    await db_session.commit()
+
+    monkeypatch.setattr(
+        get_settings(), "frontend_url", "https://app.korusfono.com.br", raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.appointment_response_service.ZoneInfo", lambda _key: UTC
+    )
+    send_text = AsyncMock(
+        return_value=WhatsAppSendResult(
+            provider="evolution",
+            provider_message_id="linked-reminder",
+            status="sent",
+            payload={},
+        )
+    )
+    send_default = AsyncMock()
+    monkeypatch.setattr(
+        "app.services.whatsapp_notification_service.get_active_whatsapp_provider",
+        lambda _db: _fake_provider_with_separate_methods(
+            send_text_message=send_text,
+            send_appointment_reminder=send_default,
+        ),
+    )
+
+    sent = await WhatsAppNotificationService(db_session).dispatch_appointment_reminder(
+        appointment
+    )
+
+    assert sent is True
+    send_default.assert_not_awaited()
+    sent_text = send_text.await_args.args[2]
+    assert sent_text.startswith("Lembrete atualizado para 10:00.")
+    assert "Confirme ou cancele sua presença:" in sent_text
+    assert "https://app.korusfono.com.br/confirmar-consulta#token=" in sent_text
 
 
 @pytest.mark.asyncio

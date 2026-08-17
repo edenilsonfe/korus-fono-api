@@ -516,6 +516,7 @@ async def test_dispatch_uses_claim_before_send(
     ).scalar_one()
     assert log.payload["dispatch_decision"] == {
         "whatsapp_enabled": True,
+        "appointment_confirmation_link_enabled": False,
         "whatsapp_events": {
             "appointment_reminder_24h": False,
             "appointment_confirmation": True,

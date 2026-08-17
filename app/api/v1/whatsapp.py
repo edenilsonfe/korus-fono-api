@@ -68,6 +68,9 @@ def _settings_response(settings) -> WhatsAppSettingsResponse:
     stored_templates = settings.whatsapp_message_templates or {}
     return WhatsAppSettingsResponse(
         whatsapp_enabled=settings.whatsapp_enabled,
+        appointment_confirmation_link_enabled=(
+            settings.appointment_confirmation_link_enabled
+        ),
         whatsapp_events=WhatsAppEventSettings.from_dict(settings.whatsapp_events),
         whatsapp_message_templates={
             key: stored_templates.get(key) for key in DEFAULT_EVENT_MESSAGE_TEMPLATES
@@ -176,6 +179,9 @@ async def update_whatsapp_settings(
     settings = await service.update(
         professional.id,
         whatsapp_enabled=body.whatsapp_enabled,
+        appointment_confirmation_link_enabled=(
+            body.appointment_confirmation_link_enabled
+        ),
         whatsapp_events=body.whatsapp_events.to_update_dict() if body.whatsapp_events else None,
         whatsapp_message_templates=(
             body.whatsapp_message_templates.to_update_dict()

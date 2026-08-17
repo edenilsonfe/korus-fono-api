@@ -86,6 +86,27 @@ async def test_reminder_template_can_be_restored_to_default(api_client, auth_hea
 
 
 @pytest.mark.asyncio
+async def test_appointment_response_link_is_opt_in_and_persists(api_client, auth_headers):
+    initial = await api_client.get("/api/v1/whatsapp/settings", headers=auth_headers)
+
+    assert initial.status_code == 200
+    assert initial.json()["appointmentConfirmationLinkEnabled"] is False
+
+    updated = await api_client.put(
+        "/api/v1/whatsapp/settings",
+        headers=auth_headers,
+        json={"appointmentConfirmationLinkEnabled": True},
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["appointmentConfirmationLinkEnabled"] is True
+
+    reloaded = await api_client.get("/api/v1/whatsapp/settings", headers=auth_headers)
+    assert reloaded.status_code == 200
+    assert reloaded.json()["appointmentConfirmationLinkEnabled"] is True
+
+
+@pytest.mark.asyncio
 async def test_template_save_preserves_disabled_events_and_dispatches_only_enabled_ones(
     api_client,
     auth_headers,

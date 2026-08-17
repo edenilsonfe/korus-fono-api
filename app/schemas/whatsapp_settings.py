@@ -67,6 +67,7 @@ class WhatsAppMessageTemplatesUpdate(CamelModel):
 
 class WhatsAppSettingsResponse(CamelModel):
     whatsapp_enabled: bool
+    appointment_confirmation_link_enabled: bool
     whatsapp_events: WhatsAppEventSettings
     whatsapp_message_templates: dict[str, str | None]
     template_defaults: dict[str, str]
@@ -74,5 +75,6 @@ class WhatsAppSettingsResponse(CamelModel):
 
 class WhatsAppSettingsUpdate(CamelModel):
     whatsapp_enabled: bool | None = None
+    appointment_confirmation_link_enabled: bool | None = None
     whatsapp_events: WhatsAppEventSettingsUpdate | None = None
     whatsapp_message_templates: WhatsAppMessageTemplatesUpdate | None = None

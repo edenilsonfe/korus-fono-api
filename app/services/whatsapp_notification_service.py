@@ -35,6 +35,7 @@ from app.models.notification_message_log import (
 from app.models.notification_settings import NotificationSettings
 from app.models.patient import Patient
 from app.models.professional import Professional
+from app.services.appointment_response_service import build_appointment_response_url
 from app.services.evolution_whatsapp_service import (
     EvolutionDeliveryUnknownError,
     mask_phone,
@@ -474,6 +475,9 @@ class WhatsAppNotificationService:
         events_snapshot = normalize_whatsapp_events(settings.whatsapp_events)
         dispatch_decision = {
             "whatsapp_enabled": settings.whatsapp_enabled,
+            "appointment_confirmation_link_enabled": (
+                settings.appointment_confirmation_link_enabled
+            ),
             "whatsapp_events": events_snapshot,
             "settings_updated_at": (
                 settings.updated_at.isoformat() if settings.updated_at is not None else None
@@ -522,12 +526,17 @@ class WhatsAppNotificationService:
             settings.whatsapp_message_templates
         )
         custom_template = stored_templates.get(log.notification_type)
+        include_response_link = (
+            log.notification_type == WHATSAPP_EVENT_REMINDER_24H
+            and settings.appointment_confirmation_link_enabled
+        )
 
         try:
             provider = get_active_whatsapp_provider(self.db)
             if (
                 log.notification_type == WHATSAPP_EVENT_REMINDER_24H
                 and not custom_template
+                and not include_response_link
             ):
                 variables = [
                     context["patient_name"],
@@ -547,6 +556,12 @@ class WhatsAppNotificationService:
                     custom_template=custom_template,
                     stored_templates=stored_templates,
                 )
+                if include_response_link:
+                    response_url = build_appointment_response_url(appointment)
+                    text = (
+                        f"{text}\n\nConfirme ou cancele sua presença:\n"
+                        f"{response_url}"
+                    )
                 send_result = await provider.send_text_message(
                     appointment.professional_id, phone, text
                 )

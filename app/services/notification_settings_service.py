@@ -29,6 +29,7 @@ class NotificationSettingsService:
         settings = NotificationSettings(
             professional_id=professional_id,
             whatsapp_enabled=False,
+            appointment_confirmation_link_enabled=False,
             whatsapp_events=normalize_whatsapp_events(None),
             whatsapp_message_templates=normalize_whatsapp_message_templates(None),
         )
@@ -41,6 +42,7 @@ class NotificationSettingsService:
         professional_id: UUID,
         *,
         whatsapp_enabled: bool | None = None,
+        appointment_confirmation_link_enabled: bool | None = None,
         whatsapp_events: dict[str, bool | None] | None = None,
         whatsapp_message_templates: dict[str, str | None] | None = None,
     ) -> NotificationSettings:
@@ -48,6 +50,11 @@ class NotificationSettingsService:
 
         if whatsapp_enabled is not None:
             settings.whatsapp_enabled = whatsapp_enabled
+
+        if appointment_confirmation_link_enabled is not None:
+            settings.appointment_confirmation_link_enabled = (
+                appointment_confirmation_link_enabled
+            )
 
         if whatsapp_events is not None:
             current = normalize_whatsapp_events(settings.whatsapp_events)
