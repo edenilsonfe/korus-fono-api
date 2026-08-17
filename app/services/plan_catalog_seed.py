@@ -49,6 +49,26 @@ COMMERCIAL_PLAN_SEEDS: list[dict[str, Any]] = [
         "display_order": 2,
         "is_active": True,
     },
+    {
+        "slug": "korusfono_pro_quarterly",
+        "name": "KorusFono Pro",
+        "description": "Pacientes ilimitados, IA clínica e relatórios automáticos — cobrança trimestral.",
+        "limits": {},
+        "price_cents": 27900,
+        "currency": "BRL",
+        "billing_interval": "quarterly",
+        "features": [
+            "Protocolos validados no catálogo",
+            "Scoring automático na aplicação",
+            "Histórico evolutivo por paciente",
+            "Rascunho de laudo com IA",
+            "Prontuário, agenda e WhatsApp",
+        ],
+        "badge": None,
+        "highlighted": False,
+        "display_order": 3,
+        "is_active": True,
+    },
 ]
 
 

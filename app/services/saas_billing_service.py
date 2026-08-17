@@ -63,6 +63,8 @@ def _next_period_end(value: datetime, billing_interval: str | None) -> datetime 
         return _add_months(value, 1)
     if interval in ("yearly", "annual", "year"):
         return _add_months(value, 12)
+    if interval in ("quarterly", "quarter"):
+        return _add_months(value, 3)
     return None
 
 
