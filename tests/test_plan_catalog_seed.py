@@ -38,4 +38,6 @@ async def test_seed_deactivates_non_canonical_plans(db_session):
     assert plans["korusfono_pro_monthly"].is_active is True
     assert plans["korusfono_pro_monthly"].price_cents == 9790
     assert plans["legacy_monthly"].is_active is False
-    assert len(CANONICAL_PLAN_SLUGS) == 2
+    assert len(CANONICAL_PLAN_SLUGS) == 3
+    assert "korusfono_pro_quarterly" in plans
+    assert plans["korusfono_pro_quarterly"].billing_interval == "quarterly"
