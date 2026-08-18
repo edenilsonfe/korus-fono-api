@@ -33,6 +33,9 @@ class StubPaymentGateway:
             "status": "pending",
         }
 
+    async def update_customer_document(self, *, customer_id: str, document: str) -> None:
+        return None
+
     async def get_pix_qr_code(self, payment_id: str) -> dict[str, Any]:
         return {
             "encoded_image": None,

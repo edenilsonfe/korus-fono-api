@@ -88,6 +88,46 @@ def _digits_only(value: str | None) -> str:
     return re.sub(r"\D", "", value or "")
 
 
+def _saved_billing_document(professional: Professional, document_type: str) -> str:
+    if document_type == "cnpj":
+        return _digits_only(professional.billing_cnpj)
+    return _digits_only(professional.cpf)
+
+
+def _resolve_billing_document(
+    payload: CheckoutRequest,
+    professional: Professional,
+) -> tuple[str, str, bool]:
+    """Return selected type, digits and whether this request supplied a new value."""
+    selected_type = payload.billing_document_type
+    supplied_document: str | None = None
+
+    if selected_type == "cnpj":
+        supplied_document = payload.cnpj
+    elif selected_type == "cpf":
+        supplied_document = payload.cpf
+    elif payload.cnpj:
+        selected_type = "cnpj"
+        supplied_document = payload.cnpj
+    elif payload.cpf:
+        selected_type = "cpf"
+        supplied_document = payload.cpf
+    elif payload.billing_document:
+        selected_type = "cnpj" if len(payload.billing_document) == 14 else "cpf"
+        supplied_document = payload.billing_document
+    else:
+        selected_type = (
+            professional.billing_document_type
+            if professional.billing_document_type in ("cpf", "cnpj")
+            else "cpf"
+        )
+
+    document = _digits_only(supplied_document) or _saved_billing_document(
+        professional, selected_type
+    )
+    return selected_type, document, bool(supplied_document)
+
+
 def _checkout_gateway_error() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_502_BAD_GATEWAY,
@@ -166,12 +206,14 @@ async def _attach_checkout_to_subscription(
     professional_id: UUID,
     provider: str,
     session: dict,
+    billing_document: str,
 ) -> None:
     sub = await _latest_subscription(db, professional_id)
     if not sub:
         return
 
     sub.provider = provider
+    sub.billing_document = billing_document
     external_sub_id = session.get("external_subscription_id")
     if external_sub_id:
         sub.external_subscription_id = str(external_sub_id)
@@ -240,6 +282,17 @@ async def get_billing_me(
 
     return BillingMeResponse(
         subscription_status=professional.subscription_status,
+        billing_cpf=professional.cpf,
+        billing_cnpj=professional.billing_cnpj,
+        billing_document_type=(
+            professional.billing_document_type
+            if professional.billing_document_type in ("cpf", "cnpj")
+            else "cpf"
+        ),
+        billing_document=_saved_billing_document(
+            professional,
+            professional.billing_document_type,
+        ),
         trial_started_at=_iso(professional.trial_started_at),
         trial_ends_at=_iso(professional.trial_ends_at),
         can_write=can_write,
@@ -290,18 +343,62 @@ async def create_billing_checkout(
     success_url, cancel_url = build_checkout_return_urls()
     professional_id = str(professional.id)
 
-    document = _digits_only(payload.cpf) or _digits_only(professional.cpf)
+    document_type, document, document_was_supplied = _resolve_billing_document(
+        payload,
+        professional,
+    )
     if provider == "asaas" and not document:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Informe seu CPF para continuar com o pagamento pelo Asaas.",
+            detail=(
+                f"Informe seu {document_type.upper()} para continuar com o pagamento pelo Asaas."
+            ),
         )
 
-    if payload.cpf and payload.cpf != professional.cpf:
-        professional.cpf = _digits_only(payload.cpf)
+    existing_sub = await _latest_subscription(db, professional.id)
+    reusable_sub = (
+        existing_sub
+        if existing_sub and existing_sub.status in ("incomplete", "trialing", "past_due")
+        else None
+    )
+    previous_checkout_document = ""
+    if reusable_sub:
+        previous_checkout_document = _digits_only(reusable_sub.billing_document)
+        if not previous_checkout_document:
+            previous_checkout_document = _saved_billing_document(
+                professional,
+                professional.billing_document_type,
+            )
+    replace_existing_checkout = bool(
+        reusable_sub
+        and reusable_sub.external_subscription_id
+        and previous_checkout_document
+        and previous_checkout_document != document
+    )
+    if replace_existing_checkout:
+        logger.info(
+            "Replacing pending billing subscription after document selection changed "
+            "provider=%s professional_id=%s",
+            provider,
+            professional_id,
+        )
+
+    profile_changed = False
+    if document_was_supplied:
+        if document_type == "cnpj":
+            if professional.billing_cnpj != document:
+                professional.billing_cnpj = document
+                profile_changed = True
+        else:
+            if professional.cpf != document:
+                professional.cpf = document
+                profile_changed = True
+    if professional.billing_document_type != document_type:
+        professional.billing_document_type = document_type
+        profile_changed = True
+    if profile_changed:
         await db.commit()
 
-    existing_sub = await _latest_subscription(db, professional.id)
     if (
         existing_sub
         and existing_sub.status == "active"
@@ -319,7 +416,12 @@ async def create_billing_checkout(
         )
         return CheckoutResponse(**change_result)
 
-    await _ensure_subscription(db, professional_id=professional.id, plan=plan, provider=provider)
+    await _ensure_subscription(
+        db,
+        professional_id=professional.id,
+        plan=plan,
+        provider=provider,
+    )
     existing_sub = await _latest_subscription(db, professional.id)
 
     charge_cents = plan.price_cents
@@ -359,6 +461,7 @@ async def create_billing_checkout(
         "provider": provider,
         "customer_email": professional.email,
         "customer_name": professional.name,
+        "customer_document_type": document_type,
     }
     if coupon_code_applied:
         metadata["coupon_code"] = coupon_code_applied
@@ -376,6 +479,7 @@ async def create_billing_checkout(
                 gateway=gateway,
                 document=document or None,
             )
+            metadata["customer_document_synced"] = bool(document)
         except PaymentGatewayError as exc:
             logger.warning(
                 "Billing checkout gateway failure provider=%s stage=%s professional_id=%s: %s",
@@ -390,6 +494,8 @@ async def create_billing_checkout(
             metadata["existing_external_subscription_id"] = existing_sub.external_subscription_id
             if existing_sub.external_checkout_id:
                 metadata["existing_external_checkout_id"] = existing_sub.external_checkout_id
+            if replace_existing_checkout:
+                metadata["replace_existing_checkout"] = True
 
     try:
         session = await gateway.create_checkout_session(
@@ -415,6 +521,7 @@ async def create_billing_checkout(
         professional_id=professional.id,
         provider=provider,
         session=session,
+        billing_document=document,
     )
 
     if session.get("status") == "completed":

@@ -94,6 +94,13 @@ class BillingCheckoutService:
             except (PaymentGatewayConfigError, PaymentGatewayError):
                 payment_status = "pending"
 
+        billing_document = "".join(
+            char for char in (sub.billing_document or "") if char.isdigit()
+        )
+        billing_document_type = (
+            "cnpj" if len(billing_document) == 14 else "cpf" if len(billing_document) == 11 else None
+        )
+
         return {
             "session_id": session_id,
             "provider": provider,
@@ -108,7 +115,9 @@ class BillingCheckoutService:
             },
             "customer_name": professional.name,
             "customer_email": professional.email,
-            "has_cpf": bool(professional.cpf),
+            "has_billing_document": bool(billing_document),
+            "has_cpf": len(billing_document) == 11,
+            "billing_document_type": billing_document_type,
             "charge_cents": charge_cents,
             "credit_cents": credit_cents,
             "change_type": change_type,

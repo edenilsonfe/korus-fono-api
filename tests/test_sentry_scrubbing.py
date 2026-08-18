@@ -50,6 +50,10 @@ def test_scrub_redacts_sensitive_extra_keys():
             "password": "x",
             "jwt_secret": "y",
             "asaas_api_key": "z",
+            "billing_document": "11222333000181",
+            "billingDocument": "52998224725",
+            "billing_cnpj": "11222333000181",
+            "billingCnpj": "11222333000181",
             "safe": "ok",
         }
     }
@@ -57,6 +61,10 @@ def test_scrub_redacts_sensitive_extra_keys():
     assert scrubbed["extra"]["password"] == "[Filtered]"
     assert scrubbed["extra"]["jwt_secret"] == "[Filtered]"
     assert scrubbed["extra"]["asaas_api_key"] == "[Filtered]"
+    assert scrubbed["extra"]["billing_document"] == "[Filtered]"
+    assert scrubbed["extra"]["billingDocument"] == "[Filtered]"
+    assert scrubbed["extra"]["billing_cnpj"] == "[Filtered]"
+    assert scrubbed["extra"]["billingCnpj"] == "[Filtered]"
     assert scrubbed["extra"]["safe"] == "ok"
 
 

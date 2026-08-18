@@ -36,6 +36,10 @@ _SENSITIVE_EXTRA_KEYS = frozenset(
         "authorization",
         "cookie",
         "cpf",
+        "billing_document",
+        "billingdocument",
+        "billing_cnpj",
+        "billingcnpj",
         "email",
         "phone",
     }

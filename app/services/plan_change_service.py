@@ -178,6 +178,7 @@ class PlanChangeService:
         await self.db.commit()
 
         if quote.charge_cents <= 0:
+            subscription.billing_document = document
             await self._apply_upgrade(subscription, target_plan, provider)
             return {
                 "checkout_url": None,
@@ -193,6 +194,7 @@ class PlanChangeService:
         if provider == "stub":
             payment_id = f"stub_upgrade_{subscription.id.hex[:12]}"
             subscription.external_checkout_id = payment_id
+            subscription.billing_document = document
             await self.db.commit()
             return {
                 "checkout_url": build_in_app_payment_url(payment_id),
@@ -233,6 +235,7 @@ class PlanChangeService:
 
         payment_id = str(payment.get("payment_id") or payment.get("id"))
         subscription.external_checkout_id = payment_id
+        subscription.billing_document = document
         await self.db.commit()
 
         return {

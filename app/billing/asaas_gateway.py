@@ -105,7 +105,7 @@ class AsaasPaymentGateway:
         if not document_digits:
             return
         await request_json(
-            "POST",
+            "PUT",
             f"{self._base_url}/customers/{customer_id}",
             headers=self._headers(),
             json_body={"cpfCnpj": document_digits},
@@ -219,10 +219,39 @@ class AsaasPaymentGateway:
                 metadata=meta,
             )
             customer_id = customer["external_customer_id"]
-        elif customer_document:
+        elif customer_document and not meta.get("customer_document_synced"):
             await self.update_customer_document(customer_id=str(customer_id), document=customer_document)
 
         existing_sub_id = meta.get("existing_external_subscription_id")
+        if existing_sub_id and meta.get("replace_existing_checkout"):
+            existing_payment = await self._get_reusable_checkout_payment(
+                payment_id=meta.get("existing_external_checkout_id"),
+                account_id=account_id,
+                plan_slug=plan_slug,
+            )
+            if (
+                existing_payment
+                and str(existing_payment.get("status", "")).upper()
+                in _PAYMENT_SUCCESS_STATUSES
+            ):
+                payment_id = str(existing_payment.get("id") or existing_sub_id)
+                return {
+                    "external_subscription_id": str(existing_sub_id),
+                    "external_checkout_id": payment_id,
+                    "session_id": payment_id,
+                    "checkout_url": success_url,
+                    "status": "completed",
+                    "external_customer_id": str(customer_id),
+                }
+            try:
+                await self.cancel_subscription(
+                    external_subscription_id=str(existing_sub_id),
+                )
+            except PaymentGatewayError as exc:
+                if exc.status_code != 404:
+                    raise
+            existing_sub_id = None
+
         if existing_sub_id:
             try:
                 await request_json(

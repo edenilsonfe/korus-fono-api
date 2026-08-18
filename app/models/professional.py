@@ -20,6 +20,10 @@ class Professional(Base, TimestampMixin):
     council: Mapped[str] = mapped_column(String(100), default="", nullable=False)
     phone: Mapped[str] = mapped_column(String(50), default="", nullable=False)
     cpf: Mapped[str] = mapped_column(String(14), default="", nullable=False)
+    billing_cnpj: Mapped[str] = mapped_column(String(14), default="", nullable=False)
+    billing_document_type: Mapped[str] = mapped_column(
+        String(4), default="cpf", server_default="cpf", nullable=False
+    )
     avatar_color: Mapped[str] = mapped_column(String(64), default="oklch(0.58 0.12 205)", nullable=False)
     is_staff: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     is_disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")

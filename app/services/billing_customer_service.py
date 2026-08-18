@@ -38,6 +38,11 @@ class BillingCustomerService:
             professional_id=professional_id, provider=provider
         )
         if existing:
+            if document:
+                await gateway.update_customer_document(
+                    customer_id=existing,
+                    document=document,
+                )
             return existing
 
         created = await gateway.create_customer(

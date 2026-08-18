@@ -4,8 +4,10 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import select
 
 from app.billing.errors import PaymentGatewayError
+from app.billing.asaas_gateway import AsaasPaymentGateway
 from app.billing.types import InternalBillingEventType
 from app.billing.webhook_normalizer import StubWebhookNormalizer
 from app.models.billing import Plan, Subscription
@@ -48,6 +50,301 @@ async def test_checkout_returns_bad_gateway_when_asaas_rejects_customer(
     assert response.json() == {
         "detail": "Não foi possível iniciar o pagamento. Tente novamente em instantes."
     }
+
+
+@pytest.mark.asyncio
+async def test_checkout_saves_cpf_and_cnpj_separately_and_uses_selected_cnpj(
+    db_session,
+    professional,
+    auth_headers,
+    api_client,
+    monkeypatch,
+):
+    professional.cpf = "24971563792"
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[0])
+    db_session.add(plan)
+    await db_session.commit()
+
+    gateway = AsyncMock()
+    gateway.provider_key = "asaas"
+    gateway.create_customer = AsyncMock(return_value={"external_customer_id": "cus_cnpj"})
+    gateway.create_checkout_session = AsyncMock(
+        return_value={
+            "checkout_url": "https://sandbox.asaas.com/i/pay_cnpj",
+            "session_id": "pay_cnpj",
+            "status": "pending",
+        }
+    )
+    monkeypatch.setattr("app.api.v1.billing.get_payment_gateway", lambda: gateway)
+
+    response = await api_client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={
+            "planSlug": plan.slug,
+            "billingDocumentType": "cnpj",
+            "cnpj": "11.222.333/0001-81",
+        },
+    )
+
+    assert response.status_code == 200
+    await db_session.refresh(professional)
+    assert professional.cpf == "24971563792"
+    assert professional.billing_cnpj == "11222333000181"
+    assert professional.billing_document_type == "cnpj"
+    assert gateway.create_customer.await_args.kwargs["metadata"]["customer_document"] == (
+        "11222333000181"
+    )
+    assert gateway.create_checkout_session.await_args.kwargs["metadata"][
+        "customer_document"
+    ] == "11222333000181"
+    billing_me = await api_client.get("/api/v1/billing/me", headers=auth_headers)
+    assert billing_me.status_code == 200
+    assert billing_me.json()["billingCpf"] == "24971563792"
+    assert billing_me.json()["billingCnpj"] == "11222333000181"
+    assert billing_me.json()["billingDocumentType"] == "cnpj"
+    assert billing_me.json()["billingDocument"] == "11222333000181"
+
+    subscription = await db_session.scalar(
+        select(Subscription).where(Subscription.professional_id == professional.id)
+    )
+    assert subscription is not None
+    assert subscription.billing_document == "11222333000181"
+
+    switch_to_cpf = await api_client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={
+            "planSlug": plan.slug,
+            "billingDocumentType": "cpf",
+            "cpf": "249.715.637-92",
+        },
+    )
+    assert switch_to_cpf.status_code == 200
+    await db_session.refresh(professional)
+    assert professional.cpf == "24971563792"
+    assert professional.billing_cnpj == "11222333000181"
+    assert professional.billing_document_type == "cpf"
+
+    billing_me_after_switch = await api_client.get("/api/v1/billing/me", headers=auth_headers)
+    assert billing_me_after_switch.json()["billingCpf"] == "24971563792"
+    assert billing_me_after_switch.json()["billingCnpj"] == "11222333000181"
+    assert billing_me_after_switch.json()["billingDocument"] == "24971563792"
+
+
+@pytest.mark.asyncio
+async def test_checkout_rejects_invalid_billing_document(
+    db_session,
+    professional,
+    auth_headers,
+    api_client,
+    monkeypatch,
+):
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[0])
+    db_session.add(plan)
+    await db_session.commit()
+
+    gateway = AsyncMock()
+    gateway.provider_key = "asaas"
+    monkeypatch.setattr("app.api.v1.billing.get_payment_gateway", lambda: gateway)
+
+    response = await api_client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={
+            "planSlug": plan.slug,
+            "billingDocumentType": "cnpj",
+            "cnpj": "11.222.333/0001-82",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "CNPJ inválido" in response.json()["detail"][0]["msg"]
+    gateway.create_customer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_checkout_marks_pending_charge_for_replacement_when_document_changes(
+    db_session,
+    professional,
+    auth_headers,
+    api_client,
+    monkeypatch,
+):
+    professional.cpf = "24971563792"
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[0])
+    db_session.add(plan)
+    await db_session.flush()
+    db_session.add(
+        Subscription(
+            professional_id=professional.id,
+            plan_id=plan.id,
+            status="incomplete",
+            provider="asaas",
+            external_subscription_id="sub_cpf_pending",
+            external_checkout_id="pay_cpf_pending",
+            billing_document="24971563792",
+        )
+    )
+    await db_session.commit()
+
+    gateway = AsyncMock()
+    gateway.provider_key = "asaas"
+    gateway.create_customer = AsyncMock(return_value={"external_customer_id": "cus_existing"})
+    gateway.create_checkout_session = AsyncMock(
+        return_value={
+            "checkout_url": "https://sandbox.asaas.com/i/pay_cnpj_new",
+            "session_id": "pay_cnpj_new",
+            "external_subscription_id": "sub_cnpj_new",
+            "status": "pending",
+        }
+    )
+    monkeypatch.setattr("app.api.v1.billing.get_payment_gateway", lambda: gateway)
+
+    response = await api_client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={
+            "planSlug": plan.slug,
+            "billingDocumentType": "cnpj",
+            "cnpj": "11.222.333/0001-81",
+        },
+    )
+
+    assert response.status_code == 200
+    metadata = gateway.create_checkout_session.await_args.kwargs["metadata"]
+    assert metadata["existing_external_subscription_id"] == "sub_cpf_pending"
+    assert metadata["existing_external_checkout_id"] == "pay_cpf_pending"
+    assert metadata["replace_existing_checkout"] is True
+
+    retry = await api_client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={
+            "planSlug": plan.slug,
+            "billingDocumentType": "cnpj",
+            "cnpj": "11.222.333/0001-81",
+        },
+    )
+    assert retry.status_code == 200
+    retry_metadata = gateway.create_checkout_session.await_args.kwargs["metadata"]
+    assert "replace_existing_checkout" not in retry_metadata
+
+
+@pytest.mark.asyncio
+async def test_asaas_replaces_pending_subscription_before_creating_charge_for_new_document(
+    monkeypatch,
+):
+    gateway = object.__new__(AsaasPaymentGateway)
+    gateway._api_key = "test-key"
+    gateway._base_url = "https://api-sandbox.asaas.com/v3"
+    calls: list[tuple[str, str]] = []
+
+    async def fake_request_json(method, url, **kwargs):
+        calls.append((method, url))
+        if method == "PUT" and url.endswith("/customers/cus_existing"):
+            return {"id": "cus_existing"}
+        if method == "GET" and url.endswith("/payments/pay_cpf_pending"):
+            return {
+                "id": "pay_cpf_pending",
+                "status": "PENDING",
+                "externalReference": "account-1:pro-mensal",
+            }
+        if method == "DELETE" and url.endswith("/subscriptions/sub_cpf_pending"):
+            return {"deleted": True}
+        if method == "POST" and url.endswith("/subscriptions"):
+            return {"id": "sub_cnpj_new"}
+        if method == "GET" and url.endswith("/subscriptions/sub_cnpj_new/payments"):
+            return {
+                "data": [
+                    {
+                        "id": "pay_cnpj_new",
+                        "status": "PENDING",
+                        "invoiceUrl": "https://sandbox.asaas.com/i/pay_cnpj_new",
+                    }
+                ]
+            }
+        if method == "POST" and url.endswith("/payments/pay_cnpj_new"):
+            return {"id": "pay_cnpj_new"}
+        raise AssertionError(f"Unexpected Asaas call: {method} {url}")
+
+    monkeypatch.setattr("app.billing.asaas_gateway.request_json", fake_request_json)
+
+    session = await gateway.create_checkout_session(
+        account_id="account-1",
+        plan_slug="pro-mensal",
+        success_url="https://app.test/retorno",
+        cancel_url="https://app.test/planos",
+        metadata={
+            "price_cents": 9790,
+            "plan_name": "KorusFono Pro",
+            "billing_interval": "monthly",
+            "customer_external_id": "cus_existing",
+            "customer_document": "11222333000181",
+            "existing_external_subscription_id": "sub_cpf_pending",
+            "existing_external_checkout_id": "pay_cpf_pending",
+            "replace_existing_checkout": True,
+        },
+    )
+
+    assert session["external_subscription_id"] == "sub_cnpj_new"
+    assert session["external_checkout_id"] == "pay_cnpj_new"
+    assert (
+        "DELETE",
+        "https://api-sandbox.asaas.com/v3/subscriptions/sub_cpf_pending",
+    ) in calls
+    assert not any(
+        method == "POST" and url.endswith("/subscriptions/sub_cpf_pending")
+        for method, url in calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_asaas_does_not_replace_charge_that_was_paid_during_document_change(
+    monkeypatch,
+):
+    gateway = object.__new__(AsaasPaymentGateway)
+    gateway._api_key = "test-key"
+    gateway._base_url = "https://api-sandbox.asaas.com/v3"
+    calls: list[tuple[str, str]] = []
+
+    async def fake_request_json(method, url, **kwargs):
+        calls.append((method, url))
+        if method == "PUT" and url.endswith("/customers/cus_existing"):
+            return {"id": "cus_existing"}
+        if method == "GET" and url.endswith("/payments/pay_cpf_pending"):
+            return {
+                "id": "pay_cpf_pending",
+                "status": "CONFIRMED",
+                "externalReference": "account-1:pro-mensal",
+            }
+        raise AssertionError(f"Unexpected Asaas call: {method} {url}")
+
+    monkeypatch.setattr("app.billing.asaas_gateway.request_json", fake_request_json)
+
+    session = await gateway.create_checkout_session(
+        account_id="account-1",
+        plan_slug="pro-mensal",
+        success_url="https://app.test/retorno",
+        cancel_url="https://app.test/planos",
+        metadata={
+            "price_cents": 9790,
+            "plan_name": "KorusFono Pro",
+            "billing_interval": "monthly",
+            "customer_external_id": "cus_existing",
+            "customer_document": "11222333000181",
+            "existing_external_subscription_id": "sub_cpf_pending",
+            "existing_external_checkout_id": "pay_cpf_pending",
+            "replace_existing_checkout": True,
+        },
+    )
+
+    assert session["status"] == "completed"
+    assert session["external_checkout_id"] == "pay_cpf_pending"
+    assert not any(method == "DELETE" for method, _url in calls)
+    assert not any(
+        method == "POST" and url.endswith("/subscriptions") for method, url in calls
+    )
 
 
 @pytest.mark.asyncio
@@ -129,6 +426,7 @@ async def test_get_session_stub_has_null_invoice_url(db_session):
         provider="stub",
         external_subscription_id="stub_sub_invoice",
         external_checkout_id="stub_pay_invoice",
+        billing_document="24971563792",
     )
     db_session.add(sub)
     await db_session.commit()
@@ -140,6 +438,44 @@ async def test_get_session_stub_has_null_invoice_url(db_session):
     assert session["provider"] == "stub"
     assert session["invoice_url"] is None
     assert session["status"] == "pending"
+    assert session["has_billing_document"] is True
+    assert session["has_cpf"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_session_recognizes_cnpj_as_billing_document(db_session):
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[0])
+    professional = Professional(
+        email="invoice-cnpj@test.com",
+        password_hash="hash",
+        name="CNPJ Invoice User",
+        billing_cnpj="11222333000181",
+        billing_document_type="cnpj",
+        subscription_status="trialing",
+        trial_started_at=datetime.now(UTC),
+        trial_ends_at=datetime.now(UTC),
+    )
+    db_session.add_all([plan, professional])
+    await db_session.flush()
+
+    sub = Subscription(
+        professional_id=professional.id,
+        plan_id=plan.id,
+        status="incomplete",
+        provider="stub",
+        external_checkout_id="stub_pay_cnpj",
+        billing_document="11222333000181",
+    )
+    db_session.add(sub)
+    await db_session.commit()
+
+    session = await BillingCheckoutService(db_session).get_session(
+        session_id="stub_pay_cnpj", professional=professional
+    )
+
+    assert session["has_billing_document"] is True
+    assert session["has_cpf"] is False
+    assert session["billing_document_type"] == "cnpj"
 
 
 @pytest.mark.asyncio
