@@ -8,6 +8,7 @@ from app.models.professional import Professional
 from app.schemas.professional import ProfessionalResponse, ProfessionalUpdate
 from app.schemas.onboarding import OnboardingResponse, OnboardingUpdate
 from app.services.onboarding_service import build_onboarding_response, update_onboarding
+from app.services.billing_profile_service import billing_profile_is_complete
 
 router = APIRouter(prefix="/me", tags=["me"])
 
@@ -22,6 +23,12 @@ def _to_response(p: Professional) -> ProfessionalResponse:
         email=p.email,
         phone=p.phone,
         cpf=p.cpf or "",
+        billing_address=p.billing_address,
+        billing_address_number=p.billing_address_number,
+        billing_address_complement=p.billing_address_complement,
+        billing_province=p.billing_province,
+        billing_postal_code=p.billing_postal_code,
+        billing_profile_complete=billing_profile_is_complete(p),
         avatar_color=p.avatar_color,
         is_staff=p.is_staff,
         email_verified=p.email_verified_at is not None,

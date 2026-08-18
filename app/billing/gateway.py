@@ -23,6 +23,10 @@ class PaymentGateway(Protocol):
 
     async def update_customer_document(self, *, customer_id: str, document: str) -> None: ...
 
+    async def update_customer_profile(
+        self, *, customer_id: str, metadata: dict[str, Any]
+    ) -> None: ...
+
     async def create_subscription(
         self,
         *,

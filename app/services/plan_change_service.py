@@ -17,6 +17,7 @@ from app.billing.errors import PaymentGatewayConfigError, PaymentGatewayError
 from app.models.billing import Plan, Subscription
 from app.models.professional import Professional
 from app.services.billing_customer_service import BillingCustomerService
+from app.services.billing_profile_service import asaas_customer_profile
 from app.services.plan_proration import (
     _add_months,
     calculate_monthly_to_yearly_upgrade,
@@ -217,14 +218,31 @@ class PlanChangeService:
         try:
             if provider == "asaas":
                 success_url, cancel_url = build_checkout_return_urls()
+                customer_profile = asaas_customer_profile(professional)
+                customer_id = None
+                if customer_profile:
+                    customer_id = await BillingCustomerService(self.db).ensure_customer(
+                        professional_id=str(professional.id),
+                        provider=provider,
+                        email=professional.email,
+                        name=professional.name,
+                        gateway=self.gateway,
+                        document=document or None,
+                        profile=customer_profile,
+                    )
+                checkout_kwargs = {
+                    "account_id": str(professional.id),
+                    "plan_slug": target_plan.slug,
+                    "plan_name": target_plan.name,
+                    "value_cents": quote.charge_cents,
+                    "success_url": success_url,
+                    "cancel_url": cancel_url,
+                    "external_reference": external_ref,
+                }
+                if customer_id:
+                    checkout_kwargs["customer_id"] = customer_id
                 payment = await self.gateway.create_hosted_annual_checkout(
-                    account_id=str(professional.id),
-                    plan_slug=target_plan.slug,
-                    plan_name=target_plan.name,
-                    value_cents=quote.charge_cents,
-                    success_url=success_url,
-                    cancel_url=cancel_url,
-                    external_reference=external_ref,
+                    **checkout_kwargs,
                 )
             else:
                 customer_svc = BillingCustomerService(self.db)

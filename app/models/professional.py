@@ -24,6 +24,13 @@ class Professional(Base, TimestampMixin):
     billing_document_type: Mapped[str] = mapped_column(
         String(4), default="cpf", server_default="cpf", nullable=False
     )
+    billing_address: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    billing_address_number: Mapped[str] = mapped_column(String(30), default="", nullable=False)
+    billing_address_complement: Mapped[str] = mapped_column(
+        String(100), default="", nullable=False
+    )
+    billing_province: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    billing_postal_code: Mapped[str] = mapped_column(String(8), default="", nullable=False)
     avatar_color: Mapped[str] = mapped_column(String(64), default="oklch(0.58 0.12 205)", nullable=False)
     is_staff: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     is_disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")

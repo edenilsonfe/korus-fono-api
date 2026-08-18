@@ -78,6 +78,43 @@ async def test_monthly_to_yearly_upgrade_uses_hosted_installment_checkout(db_ses
 
 
 @pytest.mark.asyncio
+async def test_monthly_to_yearly_upgrade_prefills_complete_billing_profile(db_session):
+    professional, _monthly, yearly, sub = await _monthly_subscription_with_annual_target(
+        db_session
+    )
+    professional.phone = "11999990000"
+    professional.billing_address = "Rua das Flores"
+    professional.billing_address_number = "123"
+    professional.billing_address_complement = "Sala 4"
+    professional.billing_province = "Centro"
+    professional.billing_postal_code = "01310100"
+    gateway = AsyncMock()
+    gateway.create_hosted_annual_checkout = AsyncMock(
+        return_value={"id": "chk_upgrade_complete", "status": "ACTIVE"}
+    )
+    ensure_customer = AsyncMock(return_value="cus_upgrade_complete")
+
+    with patch(
+        "app.services.plan_change_service.BillingCustomerService.ensure_customer",
+        new=ensure_customer,
+    ):
+        await PlanChangeService(db_session, gateway).initiate_change(
+            professional=professional,
+            subscription=sub,
+            target_plan=yearly,
+            document="24971563792",
+            provider="asaas",
+        )
+
+    ensure_customer.assert_awaited_once()
+    assert ensure_customer.await_args.kwargs["profile"]["customer_address"] == "Rua das Flores"
+    assert (
+        gateway.create_hosted_annual_checkout.await_args.kwargs["customer_id"]
+        == "cus_upgrade_complete"
+    )
+
+
+@pytest.mark.asyncio
 async def test_paid_annual_upgrade_cancels_monthly_renewal_and_grants_twelve_months(
     db_session,
 ):

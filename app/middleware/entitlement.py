@@ -28,8 +28,9 @@ EXEMPT_PATH_PREFIXES: tuple[str, ...] = (
     "/api/v1/announcements",
     # Tracking (Meta Pixel) não é mutação de dado clínico — telemetria best-effort.
     "/api/v1/tracking",
-    # Onboarding progress is account metadata, not a clinical write.
-    "/api/v1/me/activation",
+    # Profile/onboarding are account metadata and must remain editable so the
+    # professional can complete billing data even after a trial expires.
+    "/api/v1/me",
     # Platform staff console (accounts, future modules) — gated by require_staff.
     "/api/v1/admin",
 )

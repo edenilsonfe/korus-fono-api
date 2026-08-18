@@ -33,23 +33,34 @@ class BillingCustomerService:
         name: str,
         gateway: PaymentGateway,
         document: str | None = None,
+        profile: dict[str, str] | None = None,
     ) -> str:
         existing = await self.get_external_customer_id(
             professional_id=professional_id, provider=provider
         )
         if existing:
-            if document:
+            if profile:
+                await gateway.update_customer_profile(
+                    customer_id=existing,
+                    metadata={"customer_document": document, **profile},
+                )
+            elif document:
                 await gateway.update_customer_document(
                     customer_id=existing,
                     document=document,
                 )
             return existing
 
+        customer_metadata = {
+            "professional_id": professional_id,
+            "customer_document": document,
+            **(profile or {}),
+        }
         created = await gateway.create_customer(
             account_id=professional_id,
             email=email,
             name=name,
-            metadata={"professional_id": professional_id, "customer_document": document},
+            metadata=customer_metadata,
         )
         external_id = str(created["external_customer_id"])
 

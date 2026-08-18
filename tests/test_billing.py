@@ -94,6 +94,58 @@ async def test_annual_checkout_does_not_create_incomplete_asaas_customer(
 
 
 @pytest.mark.asyncio
+async def test_annual_checkout_prefills_complete_asaas_customer(
+    db_session,
+    professional,
+    auth_headers,
+    api_client,
+    monkeypatch,
+):
+    professional.cpf = "24971563792"
+    professional.billing_address = "Rua das Flores"
+    professional.billing_address_number = "123"
+    professional.billing_address_complement = "Sala 4"
+    professional.billing_province = "Centro"
+    professional.billing_postal_code = "01310100"
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[1])
+    db_session.add(plan)
+    await db_session.commit()
+
+    gateway = AsyncMock()
+    gateway.provider_key = "asaas"
+    gateway.create_customer = AsyncMock(return_value={"external_customer_id": "cus_complete"})
+    gateway.create_checkout_session = AsyncMock(
+        return_value={
+            "checkout_url": "/planos/pagamento?sessionId=chk_yearly_complete",
+            "session_id": "chk_yearly_complete",
+            "external_checkout_id": "chk_yearly_complete",
+            "external_subscription_id": None,
+            "status": "pending",
+        }
+    )
+    monkeypatch.setattr("app.api.v1.billing.get_payment_gateway", lambda: gateway)
+
+    response = await api_client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={"planSlug": plan.slug},
+    )
+
+    assert response.status_code == 200
+    customer_metadata = gateway.create_customer.await_args.kwargs["metadata"]
+    assert customer_metadata["customer_document"] == "24971563792"
+    assert customer_metadata["customer_phone"] == "11999990000"
+    assert customer_metadata["customer_address"] == "Rua das Flores"
+    assert customer_metadata["customer_address_number"] == "123"
+    assert customer_metadata["customer_complement"] == "Sala 4"
+    assert customer_metadata["customer_province"] == "Centro"
+    assert customer_metadata["customer_postal_code"] == "01310100"
+    checkout_metadata = gateway.create_checkout_session.await_args.kwargs["metadata"]
+    assert checkout_metadata["customer_external_id"] == "cus_complete"
+    assert checkout_metadata["customer_profile_synced"] is True
+
+
+@pytest.mark.asyncio
 async def test_checkout_saves_cpf_and_cnpj_separately_and_uses_selected_cnpj(
     db_session,
     professional,
@@ -445,6 +497,38 @@ async def test_asaas_yearly_checkout_is_single_purchase_with_up_to_twelve_instal
     assert session["session_id"] == "chk_yearly_12x"
     assert session["invoice_url"].endswith("id=chk_yearly_12x")
     assert session["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_asaas_yearly_checkout_uses_prefilled_customer_when_profile_is_complete(
+    monkeypatch,
+):
+    gateway = object.__new__(AsaasPaymentGateway)
+    gateway._api_key = "test-key"
+    gateway._base_url = "https://api-sandbox.asaas.com/v3"
+    captured: dict = {}
+
+    async def fake_request_json(method, url, **kwargs):
+        captured.update(kwargs["json_body"])
+        return {"id": "chk_prefilled", "status": "ACTIVE"}
+
+    monkeypatch.setattr("app.billing.asaas_gateway.request_json", fake_request_json)
+
+    await gateway.create_checkout_session(
+        account_id="account-1",
+        plan_slug="korusfono_pro_yearly",
+        success_url="https://app.test/retorno",
+        cancel_url="https://app.test/planos",
+        metadata={
+            "price_cents": 97000,
+            "plan_name": "KorusFono Pro",
+            "billing_interval": "yearly",
+            "customer_external_id": "cus_complete",
+            "customer_profile_synced": True,
+        },
+    )
+
+    assert captured["customer"] == "cus_complete"
 
 
 @pytest.mark.asyncio

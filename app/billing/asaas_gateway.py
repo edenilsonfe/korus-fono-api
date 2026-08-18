@@ -101,14 +101,12 @@ class AsaasPaymentGateway:
     async def create_customer(
         self, *, account_id: str, email: str, name: str, metadata: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        document = self._digits_only((metadata or {}).get("customer_document"))
-        payload = {
+        payload: dict[str, Any] = {
             "name": name or email,
             "email": email,
             "externalReference": account_id,
         }
-        if document:
-            payload["cpfCnpj"] = document
+        payload.update(self._customer_profile_payload(metadata or {}))
         data = await request_json(
             "POST",
             f"{self._base_url}/customers",
@@ -129,6 +127,40 @@ class AsaasPaymentGateway:
             f"{self._base_url}/customers/{customer_id}",
             headers=self._headers(),
             json_body={"cpfCnpj": document_digits},
+        )
+
+    def _customer_profile_payload(self, metadata: dict[str, Any]) -> dict[str, str]:
+        mapping = {
+            "customer_phone": "phone",
+            "customer_address": "address",
+            "customer_address_number": "addressNumber",
+            "customer_complement": "complement",
+            "customer_province": "province",
+            "customer_postal_code": "postalCode",
+        }
+        payload: dict[str, str] = {}
+        document = self._digits_only(metadata.get("customer_document"))
+        if document:
+            payload["cpfCnpj"] = document
+        for source, target in mapping.items():
+            value = str(metadata.get(source) or "").strip()
+            if source in {"customer_phone", "customer_postal_code"}:
+                value = self._digits_only(value)
+            if value:
+                payload[target] = value
+        return payload
+
+    async def update_customer_profile(
+        self, *, customer_id: str, metadata: dict[str, Any]
+    ) -> None:
+        payload = self._customer_profile_payload(metadata)
+        if not payload:
+            return
+        await request_json(
+            "PUT",
+            f"{self._base_url}/customers/{customer_id}",
+            headers=self._headers(),
+            json_body=payload,
         )
 
     async def list_subscription_payments(self, subscription_id: str) -> list[dict[str, Any]]:
@@ -186,6 +218,7 @@ class AsaasPaymentGateway:
         success_url: str,
         cancel_url: str,
         external_reference: str | None = None,
+        customer_id: str | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "billingTypes": ["PIX", "CREDIT_CARD"],
@@ -207,6 +240,8 @@ class AsaasPaymentGateway:
             ],
             "externalReference": external_reference or f"{account_id}:{plan_slug}",
         }
+        if customer_id:
+            payload["customer"] = customer_id
         data = await request_json(
             "POST",
             f"{self._base_url}/checkouts",
@@ -375,6 +410,11 @@ class AsaasPaymentGateway:
                 value_cents=price_cents,
                 success_url=success_url,
                 cancel_url=cancel_url,
+                customer_id=(
+                    str(meta["customer_external_id"])
+                    if meta.get("customer_profile_synced") and meta.get("customer_external_id")
+                    else None
+                ),
             )
             checkout_id = str(checkout["id"])
             from app.billing.checkout_urls import build_in_app_payment_url

@@ -37,6 +37,7 @@ from app.schemas.billing import (
 )
 from app.services.billing_checkout_service import BillingCheckoutService
 from app.services.billing_customer_service import BillingCustomerService
+from app.services.billing_profile_service import asaas_customer_profile
 from app.services.billing_reconciliation_service import BillingReconciliationService
 from app.services.coupon_service import CouponError, CouponService
 from app.services.entitlement_service import EntitlementService
@@ -474,7 +475,8 @@ async def create_billing_checkout(
             "annual",
             "year",
         }
-        if not hosted_asaas_annual:
+        customer_profile = asaas_customer_profile(professional) if provider == "asaas" else None
+        if not hosted_asaas_annual or customer_profile:
             customer_svc = BillingCustomerService(db)
             try:
                 metadata["customer_external_id"] = await customer_svc.ensure_customer(
@@ -484,8 +486,10 @@ async def create_billing_checkout(
                     name=professional.name,
                     gateway=gateway,
                     document=document or None,
+                    profile=customer_profile,
                 )
                 metadata["customer_document_synced"] = bool(document)
+                metadata["customer_profile_synced"] = bool(customer_profile)
             except PaymentGatewayError as exc:
                 logger.warning(
                     "Billing checkout gateway failure provider=%s stage=%s professional_id=%s: %s",
