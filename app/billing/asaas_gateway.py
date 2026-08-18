@@ -179,7 +179,6 @@ class AsaasPaymentGateway:
     async def create_hosted_annual_checkout(
         self,
         *,
-        customer_id: str,
         account_id: str,
         plan_slug: str,
         plan_name: str,
@@ -206,7 +205,6 @@ class AsaasPaymentGateway:
                     "value": round(value_cents / 100, 2),
                 }
             ],
-            "customer": customer_id,
             "externalReference": external_reference or f"{account_id}:{plan_slug}",
         }
         data = await request_json(
@@ -320,19 +318,6 @@ class AsaasPaymentGateway:
         plan_name = str(meta.get("plan_name") or plan_slug)
         billing_interval = meta.get("billing_interval")
 
-        customer_id = meta.get("customer_external_id")
-        customer_document = self._digits_only(meta.get("customer_document"))
-        if not customer_id:
-            customer = await self.create_customer(
-                account_id=account_id,
-                email=str(meta.get("customer_email") or ""),
-                name=str(meta.get("customer_name") or meta.get("customer_email") or "Cliente"),
-                metadata=meta,
-            )
-            customer_id = customer["external_customer_id"]
-        elif customer_document and not meta.get("customer_document_synced"):
-            await self.update_customer_document(customer_id=str(customer_id), document=customer_document)
-
         existing_sub_id = meta.get("existing_external_subscription_id")
         if self._is_yearly_interval(billing_interval):
             existing_checkout = None
@@ -353,7 +338,6 @@ class AsaasPaymentGateway:
                     "session_id": checkout_id,
                     "checkout_url": build_in_app_payment_url(checkout_id),
                     "status": "completed" if raw_status == "PAID" else "pending",
-                    "external_customer_id": str(customer_id),
                     "invoice_url": self._hosted_checkout_url(existing_checkout),
                 }
 
@@ -375,7 +359,6 @@ class AsaasPaymentGateway:
                         "session_id": payment_id,
                         "checkout_url": success_url,
                         "status": "completed",
-                        "external_customer_id": str(customer_id),
                     }
                 try:
                     await self.cancel_subscription(
@@ -386,7 +369,6 @@ class AsaasPaymentGateway:
                         raise
 
             checkout = await self.create_hosted_annual_checkout(
-                customer_id=str(customer_id),
                 account_id=account_id,
                 plan_slug=plan_slug,
                 plan_name=plan_name,
@@ -407,9 +389,21 @@ class AsaasPaymentGateway:
                     if str(checkout.get("status", "")).upper() == "PAID"
                     else "pending"
                 ),
-                "external_customer_id": str(customer_id),
                 "invoice_url": self._hosted_checkout_url(checkout),
             }
+
+        customer_id = meta.get("customer_external_id")
+        customer_document = self._digits_only(meta.get("customer_document"))
+        if not customer_id:
+            customer = await self.create_customer(
+                account_id=account_id,
+                email=str(meta.get("customer_email") or ""),
+                name=str(meta.get("customer_name") or meta.get("customer_email") or "Cliente"),
+                metadata=meta,
+            )
+            customer_id = customer["external_customer_id"]
+        elif customer_document and not meta.get("customer_document_synced"):
+            await self.update_customer_document(customer_id=str(customer_id), document=customer_document)
 
         if existing_sub_id and meta.get("replace_existing_checkout"):
             existing_payment = await self._get_reusable_checkout_payment(

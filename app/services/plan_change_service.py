@@ -213,21 +213,11 @@ class PlanChangeService:
         if not self.gateway:
             raise HTTPException(status_code=503, detail="Gateway de pagamento indisponível.")
 
-        customer_svc = BillingCustomerService(self.db)
-        customer_id = await customer_svc.ensure_customer(
-            professional_id=str(professional.id),
-            provider=provider,
-            email=professional.email,
-            name=professional.name,
-            gateway=self.gateway,
-            document=document or None,
-        )
         external_ref = f"{professional.id}:{target_plan.slug}:upgrade"
         try:
             if provider == "asaas":
                 success_url, cancel_url = build_checkout_return_urls()
                 payment = await self.gateway.create_hosted_annual_checkout(
-                    customer_id=customer_id,
                     account_id=str(professional.id),
                     plan_slug=target_plan.slug,
                     plan_name=target_plan.name,
@@ -237,6 +227,15 @@ class PlanChangeService:
                     external_reference=external_ref,
                 )
             else:
+                customer_svc = BillingCustomerService(self.db)
+                customer_id = await customer_svc.ensure_customer(
+                    professional_id=str(professional.id),
+                    provider=provider,
+                    email=professional.email,
+                    name=professional.name,
+                    gateway=self.gateway,
+                    document=document or None,
+                )
                 payment = await self.gateway.create_single_payment(
                     customer_id=customer_id,
                     value_cents=quote.charge_cents,

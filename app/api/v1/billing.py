@@ -469,27 +469,33 @@ async def create_billing_checkout(
     if provider != "stub":
         if document:
             metadata["customer_document"] = document
-        customer_svc = BillingCustomerService(db)
-        try:
-            metadata["customer_external_id"] = await customer_svc.ensure_customer(
-                professional_id=professional_id,
-                provider=provider,
-                email=professional.email,
-                name=professional.name,
-                gateway=gateway,
-                document=document or None,
-            )
-            metadata["customer_document_synced"] = bool(document)
-        except PaymentGatewayError as exc:
-            logger.warning(
-                "Billing checkout gateway failure provider=%s stage=%s professional_id=%s: %s",
-                provider,
-                "ensure_customer",
-                professional_id,
-                exc,
-                exc_info=True,
-            )
-            raise _checkout_gateway_error() from exc
+        hosted_asaas_annual = provider == "asaas" and str(plan.billing_interval).lower() in {
+            "yearly",
+            "annual",
+            "year",
+        }
+        if not hosted_asaas_annual:
+            customer_svc = BillingCustomerService(db)
+            try:
+                metadata["customer_external_id"] = await customer_svc.ensure_customer(
+                    professional_id=professional_id,
+                    provider=provider,
+                    email=professional.email,
+                    name=professional.name,
+                    gateway=gateway,
+                    document=document or None,
+                )
+                metadata["customer_document_synced"] = bool(document)
+            except PaymentGatewayError as exc:
+                logger.warning(
+                    "Billing checkout gateway failure provider=%s stage=%s professional_id=%s: %s",
+                    provider,
+                    "ensure_customer",
+                    professional_id,
+                    exc,
+                    exc_info=True,
+                )
+                raise _checkout_gateway_error() from exc
         if existing_sub:
             if existing_sub.external_subscription_id:
                 metadata["existing_external_subscription_id"] = existing_sub.external_subscription_id

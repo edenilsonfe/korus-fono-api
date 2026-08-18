@@ -53,9 +53,10 @@ async def test_monthly_to_yearly_upgrade_uses_hosted_installment_checkout(db_ses
         }
     )
 
+    ensure_customer = AsyncMock(return_value="cus_upgrade")
     with patch(
         "app.services.plan_change_service.BillingCustomerService.ensure_customer",
-        new=AsyncMock(return_value="cus_upgrade"),
+        new=ensure_customer,
     ):
         result = await PlanChangeService(db_session, gateway).initiate_change(
             professional=professional,
@@ -67,8 +68,9 @@ async def test_monthly_to_yearly_upgrade_uses_hosted_installment_checkout(db_ses
 
     assert result["session_id"] == "chk_upgrade_annual"
     assert result["status"] == "pending"
+    ensure_customer.assert_not_awaited()
     call = gateway.create_hosted_annual_checkout.await_args.kwargs
-    assert call["customer_id"] == "cus_upgrade"
+    assert "customer_id" not in call
     assert call["plan_slug"] == yearly.slug
     assert 0 < call["value_cents"] < yearly.price_cents
     assert call["external_reference"].endswith(":upgrade")

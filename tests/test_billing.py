@@ -53,6 +53,47 @@ async def test_checkout_returns_bad_gateway_when_asaas_rejects_customer(
 
 
 @pytest.mark.asyncio
+async def test_annual_checkout_does_not_create_incomplete_asaas_customer(
+    db_session,
+    professional,
+    auth_headers,
+    api_client,
+    monkeypatch,
+):
+    professional.cpf = "24971563792"
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[1])
+    db_session.add(plan)
+    await db_session.commit()
+
+    gateway = AsyncMock()
+    gateway.provider_key = "asaas"
+    gateway.create_customer = AsyncMock(
+        return_value={"external_customer_id": "cus_incomplete"}
+    )
+    gateway.create_checkout_session = AsyncMock(
+        return_value={
+            "checkout_url": "/planos/pagamento?sessionId=chk_yearly",
+            "session_id": "chk_yearly",
+            "external_checkout_id": "chk_yearly",
+            "external_subscription_id": None,
+            "status": "pending",
+        }
+    )
+    monkeypatch.setattr("app.api.v1.billing.get_payment_gateway", lambda: gateway)
+
+    response = await api_client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={"planSlug": plan.slug},
+    )
+
+    assert response.status_code == 200
+    gateway.create_customer.assert_not_awaited()
+    metadata = gateway.create_checkout_session.await_args.kwargs["metadata"]
+    assert "customer_external_id" not in metadata
+
+
+@pytest.mark.asyncio
 async def test_checkout_saves_cpf_and_cnpj_separately_and_uses_selected_cnpj(
     db_session,
     professional,
@@ -378,14 +419,13 @@ async def test_asaas_yearly_checkout_is_single_purchase_with_up_to_twelve_instal
             "charge_cents": 93000,
             "plan_name": "KorusFono Pro",
             "billing_interval": "yearly",
-            "customer_external_id": "cus_existing",
         },
     )
 
     assert captured["billingTypes"] == ["PIX", "CREDIT_CARD"]
     assert captured["chargeTypes"] == ["DETACHED", "INSTALLMENT"]
     assert captured["installment"] == {"maxInstallmentCount": 12}
-    assert captured["customer"] == "cus_existing"
+    assert "customer" not in captured
     assert captured["externalReference"] == "account-1:korusfono_pro_yearly"
     assert captured["items"] == [
         {
