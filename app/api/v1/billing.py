@@ -214,9 +214,9 @@ async def _attach_checkout_to_subscription(
 
     sub.provider = provider
     sub.billing_document = billing_document
-    external_sub_id = session.get("external_subscription_id")
-    if external_sub_id:
-        sub.external_subscription_id = str(external_sub_id)
+    if "external_subscription_id" in session:
+        external_sub_id = session.get("external_subscription_id")
+        sub.external_subscription_id = str(external_sub_id) if external_sub_id else None
 
     checkout_id = session.get("external_checkout_id") or session.get("session_id")
     if checkout_id:
@@ -490,8 +490,9 @@ async def create_billing_checkout(
                 exc_info=True,
             )
             raise _checkout_gateway_error() from exc
-        if existing_sub and existing_sub.external_subscription_id:
-            metadata["existing_external_subscription_id"] = existing_sub.external_subscription_id
+        if existing_sub:
+            if existing_sub.external_subscription_id:
+                metadata["existing_external_subscription_id"] = existing_sub.external_subscription_id
             if existing_sub.external_checkout_id:
                 metadata["existing_external_checkout_id"] = existing_sub.external_checkout_id
             if replace_existing_checkout:
@@ -576,7 +577,7 @@ async def prepare_card_invoice(
     db: AsyncSession = Depends(get_db),
     professional: Professional = Depends(get_current_professional),
 ):
-    """Garante billingType=CREDIT_CARD e devolve invoiceUrl (form de cartão/parcelas no Asaas)."""
+    """Devolve o checkout anual ou prepara a fatura mensal para cartão no Asaas."""
     service = BillingCheckoutService(db)
     return await service.prepare_card_invoice(
         session_id=session_id, professional=professional

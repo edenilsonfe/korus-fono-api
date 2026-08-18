@@ -129,10 +129,11 @@ class BillingReconciliationService:
         }
 
     async def _get_reconcilable_subscription(self, professional_id: str) -> Subscription | None:
+        pid = UUID(str(professional_id))
         result = await self.db.execute(
             select(Subscription)
             .options(joinedload(Subscription.plan))
-            .where(Subscription.professional_id == professional_id)
+            .where(Subscription.professional_id == pid)
             .order_by(Subscription.updated_at.desc())
         )
         subs = list(result.scalars().unique().all())
@@ -193,20 +194,28 @@ class BillingReconciliationService:
         }
 
     async def _reconcile_asaas(self, sub: Subscription) -> dict[str, Any]:
-        if not sub.external_subscription_id:
+        if not sub.external_subscription_id and not sub.external_checkout_id:
             return {
                 "applied": False,
-                "message": "Assinatura sem ID externo no Asaas.",
+                "message": "Cobrança sem ID externo no Asaas.",
                 "payments_checked": 0,
             }
 
         try:
             gateway = AsaasPaymentGateway()
-            payments = await gateway.list_subscription_payments(sub.external_subscription_id)
-            if sub.external_checkout_id and not any(
-                str(payment.get("id")) == str(sub.external_checkout_id) for payment in payments
-            ):
-                payments.append(await gateway.get_payment(str(sub.external_checkout_id)))
+            if sub.external_subscription_id:
+                payments = await gateway.list_subscription_payments(
+                    sub.external_subscription_id
+                )
+                if sub.external_checkout_id and not any(
+                    str(payment.get("id")) == str(sub.external_checkout_id)
+                    for payment in payments
+                ):
+                    payments.append(await gateway.get_payment(str(sub.external_checkout_id)))
+            else:
+                payments = await gateway.list_checkout_payments(
+                    str(sub.external_checkout_id)
+                )
         except (PaymentGatewayConfigError, PaymentGatewayError) as exc:
             logger.warning("Asaas reconciliation failed: %s", exc)
             return {"applied": False, "message": str(exc), "payments_checked": 0}
@@ -218,6 +227,13 @@ class BillingReconciliationService:
             status = str(payment.get("status", "")).upper()
             if status not in _ASAAS_SUCCESS:
                 continue
+            payment = {
+                **payment,
+                "checkoutSession": payment.get("checkoutSession")
+                or sub.external_checkout_id,
+                "externalReference": payment.get("externalReference")
+                or f"{sub.professional_id}:{sub.plan.slug}",
+            }
             events = normalizer.normalize(
                 {"event": "PAYMENT_RECEIVED", "payment": payment},
                 {},

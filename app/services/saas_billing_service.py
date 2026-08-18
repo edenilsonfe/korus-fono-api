@@ -137,6 +137,21 @@ class SaasBillingService:
             pid = result.scalar_one_or_none()
             if pid:
                 return str(pid)
+        external_checkout_id = (
+            payload.get("external_checkout_id")
+            or payload.get("checkout_session_id")
+            or payload.get("checkoutSession")
+        )
+        if external_checkout_id:
+            result = await self.db.execute(
+                select(Subscription.professional_id)
+                .where(Subscription.external_checkout_id == str(external_checkout_id))
+                .order_by(Subscription.updated_at.desc())
+                .limit(1)
+            )
+            pid = result.scalar_one_or_none()
+            if pid:
+                return str(pid)
         return None
 
     def _target_subscription_status(self, ev: NormalizedBillingEvent) -> str | None:
@@ -167,6 +182,7 @@ class SaasBillingService:
             if not professional_id:
                 logger.info("Skipping billing event %s: no professional_id", ev.external_event_id)
                 continue
+            professional_uuid = UUID(str(professional_id))
 
             sub_status = self._target_subscription_status(ev)
             if not sub_status:
@@ -182,7 +198,7 @@ class SaasBillingService:
 
             sub_result = await self.db.execute(
                 select(Subscription)
-                .where(Subscription.professional_id == professional_id)
+                .where(Subscription.professional_id == professional_uuid)
                 .order_by(Subscription.updated_at.desc())
             )
             subscriptions = list(sub_result.scalars().unique().all())
@@ -213,6 +229,8 @@ class SaasBillingService:
                 ).scalar_one_or_none()
                 if plan_row:
                     target.plan_id = plan_row.id
+            elif sub_status == "active" and target.plan_id:
+                plan_row = await self.db.get(Plan, target.plan_id)
 
             payment_at = _parse_billing_datetime(payload.get("last_payment_at"))
             if payment_at:
@@ -229,7 +247,7 @@ class SaasBillingService:
 
             professional = (
                 await self.db.execute(
-                    select(Professional).where(Professional.id == professional_id)
+                    select(Professional).where(Professional.id == professional_uuid)
                 )
             ).scalar_one_or_none()
             if professional:

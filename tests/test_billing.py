@@ -9,7 +9,7 @@ from sqlalchemy import select
 from app.billing.errors import PaymentGatewayError
 from app.billing.asaas_gateway import AsaasPaymentGateway
 from app.billing.types import InternalBillingEventType
-from app.billing.webhook_normalizer import StubWebhookNormalizer
+from app.billing.webhook_normalizer import AsaasWebhookNormalizer, StubWebhookNormalizer
 from app.models.billing import Plan, Subscription
 from app.models.professional import Professional
 from app.services.billing_checkout_service import BillingCheckoutService
@@ -348,6 +348,96 @@ async def test_asaas_does_not_replace_charge_that_was_paid_during_document_chang
 
 
 @pytest.mark.asyncio
+async def test_asaas_yearly_checkout_is_single_purchase_with_up_to_twelve_installments(
+    monkeypatch,
+):
+    gateway = object.__new__(AsaasPaymentGateway)
+    gateway._api_key = "test-key"
+    gateway._base_url = "https://api-sandbox.asaas.com/v3"
+    captured: dict = {}
+
+    async def fake_request_json(method, url, **kwargs):
+        assert method == "POST"
+        assert url == "https://api-sandbox.asaas.com/v3/checkouts"
+        captured.update(kwargs["json_body"])
+        return {
+            "id": "chk_yearly_12x",
+            "link": "https://sandbox.asaas.com/checkoutSession/show?id=chk_yearly_12x",
+            "status": "ACTIVE",
+        }
+
+    monkeypatch.setattr("app.billing.asaas_gateway.request_json", fake_request_json)
+
+    session = await gateway.create_checkout_session(
+        account_id="account-1",
+        plan_slug="korusfono_pro_yearly",
+        success_url="https://app.test/planos/retorno?status=pending",
+        cancel_url="https://app.test/planos?checkout=cancel",
+        metadata={
+            "price_cents": 97000,
+            "charge_cents": 93000,
+            "plan_name": "KorusFono Pro",
+            "billing_interval": "yearly",
+            "customer_external_id": "cus_existing",
+        },
+    )
+
+    assert captured["billingTypes"] == ["PIX", "CREDIT_CARD"]
+    assert captured["chargeTypes"] == ["DETACHED", "INSTALLMENT"]
+    assert captured["installment"] == {"maxInstallmentCount": 12}
+    assert captured["customer"] == "cus_existing"
+    assert captured["externalReference"] == "account-1:korusfono_pro_yearly"
+    assert captured["items"] == [
+        {
+            "name": "KorusFono Pro",
+            "description": "Acesso ao KorusFono por 12 meses",
+            "quantity": 1,
+            "value": 930.0,
+        }
+    ]
+    assert captured["callback"] == {
+        "successUrl": "https://app.test/planos/retorno?status=pending",
+        "cancelUrl": "https://app.test/planos?checkout=cancel",
+        "expiredUrl": "https://app.test/planos?checkout=cancel",
+    }
+    assert session["external_subscription_id"] is None
+    assert session["external_checkout_id"] == "chk_yearly_12x"
+    assert session["session_id"] == "chk_yearly_12x"
+    assert session["invoice_url"].endswith("id=chk_yearly_12x")
+    assert session["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_asaas_yearly_checkout_builds_sandbox_link_when_response_has_only_id(
+    monkeypatch,
+):
+    gateway = object.__new__(AsaasPaymentGateway)
+    gateway._api_key = "test-key"
+    gateway._base_url = "https://api-sandbox.asaas.com/v3"
+
+    async def fake_request_json(method, url, **kwargs):
+        return {"id": "chk_link_fallback", "status": "ACTIVE"}
+
+    monkeypatch.setattr("app.billing.asaas_gateway.request_json", fake_request_json)
+
+    session = await gateway.create_checkout_session(
+        account_id="account-1",
+        plan_slug="korusfono_pro_yearly",
+        success_url="https://app.test/success",
+        cancel_url="https://app.test/cancel",
+        metadata={
+            "price_cents": 97000,
+            "billing_interval": "yearly",
+            "customer_external_id": "cus_existing",
+        },
+    )
+
+    assert session["invoice_url"] == (
+        "https://sandbox.asaas.com/checkoutSession/show?id=chk_link_fallback"
+    )
+
+
+@pytest.mark.asyncio
 async def test_stub_webhook_activates_subscription(db_session):
     plan = Plan(**COMMERCIAL_PLAN_SEEDS[0])
     professional = Professional(
@@ -402,6 +492,71 @@ async def test_stub_webhook_activates_subscription(db_session):
     await db_session.refresh(sub)
     assert professional.subscription_status == "active"
     assert sub.status == "active"
+
+
+def test_asaas_payment_webhook_preserves_checkout_session_id():
+    events = AsaasWebhookNormalizer().normalize(
+        {
+            "event": "PAYMENT_CONFIRMED",
+            "payment": {
+                "id": "pay_installment_1",
+                "checkoutSession": "chk_annual_12x",
+                "externalReference": "account-1:korusfono_pro_yearly",
+                "status": "CONFIRMED",
+            },
+        },
+        {},
+    )
+
+    assert len(events) == 1
+    assert events[0].payload["external_checkout_id"] == "chk_annual_12x"
+    assert events[0].payload["checkout_session_id"] == "chk_annual_12x"
+
+
+@pytest.mark.asyncio
+async def test_asaas_checkout_webhook_without_external_reference_activates_annual_plan(
+    db_session,
+):
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[1])
+    professional = Professional(
+        email="annual-webhook@test.com",
+        password_hash="hash",
+        name="Annual Webhook",
+        subscription_status="trialing",
+        trial_started_at=datetime.now(UTC),
+        trial_ends_at=datetime.now(UTC),
+    )
+    db_session.add_all([plan, professional])
+    await db_session.flush()
+    subscription = Subscription(
+        professional_id=professional.id,
+        plan_id=plan.id,
+        status="incomplete",
+        provider="asaas",
+        external_checkout_id="chk_without_reference",
+    )
+    db_session.add(subscription)
+    await db_session.commit()
+
+    events = AsaasWebhookNormalizer().normalize(
+        {
+            "event": "PAYMENT_CONFIRMED",
+            "payment": {
+                "id": "pay_without_reference",
+                "checkoutSession": "chk_without_reference",
+                "paymentDate": "2026-08-18",
+                "status": "CONFIRMED",
+            },
+        },
+        {},
+    )
+    await SaasBillingService(db_session).apply_normalized_events(events)
+
+    await db_session.refresh(professional)
+    await db_session.refresh(subscription)
+    assert professional.subscription_status == "active"
+    assert subscription.status == "active"
+    assert subscription.current_period_end == datetime(2027, 8, 18)
 
 
 @pytest.mark.asyncio
@@ -530,6 +685,53 @@ async def test_get_session_asaas_exposes_invoice_url(db_session):
 
 
 @pytest.mark.asyncio
+async def test_get_session_annual_uses_hosted_checkout_instead_of_payment(db_session):
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[1])
+    professional = Professional(
+        email="annual-session@test.com",
+        password_hash="hash",
+        name="Annual Session User",
+        cpf="24971563792",
+        subscription_status="trialing",
+        trial_started_at=datetime.now(UTC),
+        trial_ends_at=datetime.now(UTC),
+    )
+    db_session.add_all([plan, professional])
+    await db_session.flush()
+    db_session.add(
+        Subscription(
+            professional_id=professional.id,
+            plan_id=plan.id,
+            status="incomplete",
+            provider="asaas",
+            external_subscription_id=None,
+            external_checkout_id="chk_annual_session",
+            billing_document="24971563792",
+        )
+    )
+    await db_session.commit()
+
+    invoice = "https://sandbox.asaas.com/checkoutSession/show?id=chk_annual_session"
+    gateway = AsyncMock()
+    gateway.get_checkout = AsyncMock(
+        return_value={"id": "chk_annual_session", "status": "ACTIVE", "link": invoice}
+    )
+
+    with patch(
+        "app.services.billing_checkout_service.AsaasPaymentGateway",
+        return_value=gateway,
+    ):
+        session = await BillingCheckoutService(db_session).get_session(
+            session_id="chk_annual_session", professional=professional
+        )
+
+    assert session["invoice_url"] == invoice
+    assert session["status"] == "pending"
+    gateway.get_checkout.assert_awaited_once_with("chk_annual_session")
+    gateway.get_payment.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_credit_card_pan_route_removed():
     from httpx import ASGITransport, AsyncClient
 
@@ -600,3 +802,50 @@ async def test_prepare_card_invoice_flips_pix_to_credit_card(db_session):
 
     assert result["invoice_url"] == invoice
     gateway.ensure_card_billing.assert_awaited_once_with("pay_prepare_card")
+
+
+@pytest.mark.asyncio
+async def test_prepare_annual_checkout_returns_hosted_link_without_locking_payment_method(
+    db_session,
+):
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[1])
+    professional = Professional(
+        email="prepare-annual@test.com",
+        password_hash="hash",
+        name="Prepare Annual User",
+        cpf="24971563792",
+        subscription_status="trialing",
+        trial_started_at=datetime.now(UTC),
+        trial_ends_at=datetime.now(UTC),
+    )
+    db_session.add_all([plan, professional])
+    await db_session.flush()
+    db_session.add(
+        Subscription(
+            professional_id=professional.id,
+            plan_id=plan.id,
+            status="incomplete",
+            provider="asaas",
+            external_subscription_id=None,
+            external_checkout_id="chk_prepare_annual",
+        )
+    )
+    await db_session.commit()
+
+    invoice = "https://sandbox.asaas.com/checkoutSession/show?id=chk_prepare_annual"
+    gateway = AsyncMock()
+    gateway.get_checkout = AsyncMock(
+        return_value={"id": "chk_prepare_annual", "status": "ACTIVE", "link": invoice}
+    )
+
+    with patch(
+        "app.services.billing_checkout_service.AsaasPaymentGateway",
+        return_value=gateway,
+    ):
+        result = await BillingCheckoutService(db_session).prepare_card_invoice(
+            session_id="chk_prepare_annual", professional=professional
+        )
+
+    assert result["invoice_url"] == invoice
+    gateway.get_checkout.assert_awaited_once_with("chk_prepare_annual")
+    gateway.ensure_card_billing.assert_not_awaited()

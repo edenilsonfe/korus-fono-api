@@ -163,12 +163,14 @@ class AsaasWebhookNormalizer(WebhookNormalizer):
 
         ext_ref = payment.get("externalReference")
         professional_id, plan_slug = _parse_external_reference(ext_ref)
+        checkout_session_id = payment.get("checkoutSession")
         payload = {
             **payment,
             "provider": "asaas",
             "external_reference": ext_ref,
             "plan_slug": plan_slug,
-            "external_checkout_id": payment_id,
+            "external_checkout_id": checkout_session_id or payment_id,
+            "checkout_session_id": checkout_session_id,
             "external_subscription_id": payment.get("subscription"),
             "last_payment_at": payment.get("paymentDate") or payment.get("clientPaymentDate"),
             "subscription_status": "active" if event_type == InternalBillingEventType.PAYMENT_SUCCEEDED else "past_due",

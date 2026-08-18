@@ -6,6 +6,7 @@ import asyncio
 import re
 from datetime import date, timedelta
 from typing import Any
+from urllib.parse import urlencode
 
 from app.billing.errors import PaymentGatewayConfigError, PaymentGatewayError
 from app.billing.http_client import request_json
@@ -64,6 +65,25 @@ class AsaasPaymentGateway:
         raise PaymentGatewayError(
             "Asaas não retornou URL de pagamento da primeira cobrança da assinatura"
         )
+
+    def _hosted_checkout_url(self, checkout: dict[str, Any]) -> str:
+        for key in ("link", "url", "checkoutUrl"):
+            value = checkout.get(key)
+            if value:
+                return str(value)
+        checkout_id = checkout.get("id")
+        if not checkout_id:
+            raise PaymentGatewayError("Asaas não retornou id do checkout")
+        host = (
+            "https://sandbox.asaas.com"
+            if "sandbox" in self._base_url.lower()
+            else "https://asaas.com"
+        )
+        return f"{host}/checkoutSession/show?id={checkout_id}"
+
+    @staticmethod
+    def _is_yearly_interval(interval: Any) -> bool:
+        return str(interval or "").lower().strip() in {"yearly", "annual", "year"}
 
     @staticmethod
     def _pick_payment(payments: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -132,6 +152,97 @@ class AsaasPaymentGateway:
         if not isinstance(data, dict) or not data.get("id"):
             raise PaymentGatewayError("Asaas não retornou a cobrança solicitada")
         return data
+
+    async def get_checkout(self, checkout_id: str) -> dict[str, Any]:
+        data = await request_json(
+            "GET",
+            f"{self._base_url}/checkouts/{checkout_id}",
+            headers=self._headers(),
+        )
+        if not isinstance(data, dict) or not data.get("id"):
+            raise PaymentGatewayError("Asaas não retornou o checkout solicitado")
+        return data
+
+    async def list_checkout_payments(self, checkout_id: str) -> list[dict[str, Any]]:
+        query = urlencode({"checkoutSession": checkout_id, "limit": 100})
+        data = await request_json(
+            "GET",
+            f"{self._base_url}/payments?{query}",
+            headers=self._headers(),
+        )
+        if isinstance(data, dict) and isinstance(data.get("data"), list):
+            return [payment for payment in data["data"] if isinstance(payment, dict)]
+        if isinstance(data, list):
+            return [payment for payment in data if isinstance(payment, dict)]
+        return []
+
+    async def create_hosted_annual_checkout(
+        self,
+        *,
+        customer_id: str,
+        account_id: str,
+        plan_slug: str,
+        plan_name: str,
+        value_cents: int,
+        success_url: str,
+        cancel_url: str,
+        external_reference: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "billingTypes": ["PIX", "CREDIT_CARD"],
+            "chargeTypes": ["DETACHED", "INSTALLMENT"],
+            "installment": {"maxInstallmentCount": 12},
+            "minutesToExpire": 1440,
+            "callback": {
+                "successUrl": success_url,
+                "cancelUrl": cancel_url,
+                "expiredUrl": cancel_url,
+            },
+            "items": [
+                {
+                    "name": plan_name,
+                    "description": "Acesso ao KorusFono por 12 meses",
+                    "quantity": 1,
+                    "value": round(value_cents / 100, 2),
+                }
+            ],
+            "customer": customer_id,
+            "externalReference": external_reference or f"{account_id}:{plan_slug}",
+        }
+        data = await request_json(
+            "POST",
+            f"{self._base_url}/checkouts",
+            headers=self._headers(),
+            json_body=payload,
+        )
+        checkout_id = data.get("id")
+        if not checkout_id:
+            raise PaymentGatewayError("Asaas não retornou id do checkout anual")
+        return data
+
+    async def _get_reusable_annual_checkout(
+        self,
+        *,
+        checkout_id: str | None,
+        account_id: str,
+        plan_slug: str,
+    ) -> dict[str, Any] | None:
+        if not checkout_id:
+            return None
+        try:
+            checkout = await self.get_checkout(str(checkout_id))
+        except PaymentGatewayError as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+        expected_ref = f"{account_id}:{plan_slug}"
+        external_ref = checkout.get("externalReference")
+        if external_ref and external_ref != expected_ref:
+            return None
+        status = str(checkout.get("status", "")).upper()
+        if status in {"ACTIVE", "PENDING", "PAID"}:
+            return checkout
+        return None
 
     async def _get_reusable_checkout_payment(
         self,
@@ -202,7 +313,7 @@ class AsaasPaymentGateway:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         meta = metadata or {}
-        price_cents = int(meta.get("price_cents") or 0)
+        price_cents = int(meta.get("charge_cents") or meta.get("price_cents") or 0)
         if price_cents <= 0:
             raise PaymentGatewayError("Valor do plano inválido para checkout Asaas")
 
@@ -223,6 +334,83 @@ class AsaasPaymentGateway:
             await self.update_customer_document(customer_id=str(customer_id), document=customer_document)
 
         existing_sub_id = meta.get("existing_external_subscription_id")
+        if self._is_yearly_interval(billing_interval):
+            existing_checkout = None
+            if not existing_sub_id:
+                existing_checkout = await self._get_reusable_annual_checkout(
+                    checkout_id=meta.get("existing_external_checkout_id"),
+                    account_id=account_id,
+                    plan_slug=plan_slug,
+                )
+            if existing_checkout:
+                checkout_id = str(existing_checkout["id"])
+                raw_status = str(existing_checkout.get("status", "")).upper()
+                from app.billing.checkout_urls import build_in_app_payment_url
+
+                return {
+                    "external_subscription_id": None,
+                    "external_checkout_id": checkout_id,
+                    "session_id": checkout_id,
+                    "checkout_url": build_in_app_payment_url(checkout_id),
+                    "status": "completed" if raw_status == "PAID" else "pending",
+                    "external_customer_id": str(customer_id),
+                    "invoice_url": self._hosted_checkout_url(existing_checkout),
+                }
+
+            if existing_sub_id:
+                existing_payment = await self._get_reusable_checkout_payment(
+                    payment_id=meta.get("existing_external_checkout_id"),
+                    account_id=account_id,
+                    plan_slug=plan_slug,
+                )
+                if (
+                    existing_payment
+                    and str(existing_payment.get("status", "")).upper()
+                    in _PAYMENT_SUCCESS_STATUSES
+                ):
+                    payment_id = str(existing_payment.get("id") or existing_sub_id)
+                    return {
+                        "external_subscription_id": str(existing_sub_id),
+                        "external_checkout_id": payment_id,
+                        "session_id": payment_id,
+                        "checkout_url": success_url,
+                        "status": "completed",
+                        "external_customer_id": str(customer_id),
+                    }
+                try:
+                    await self.cancel_subscription(
+                        external_subscription_id=str(existing_sub_id),
+                    )
+                except PaymentGatewayError as exc:
+                    if exc.status_code != 404:
+                        raise
+
+            checkout = await self.create_hosted_annual_checkout(
+                customer_id=str(customer_id),
+                account_id=account_id,
+                plan_slug=plan_slug,
+                plan_name=plan_name,
+                value_cents=price_cents,
+                success_url=success_url,
+                cancel_url=cancel_url,
+            )
+            checkout_id = str(checkout["id"])
+            from app.billing.checkout_urls import build_in_app_payment_url
+
+            return {
+                "external_subscription_id": None,
+                "external_checkout_id": checkout_id,
+                "session_id": checkout_id,
+                "checkout_url": build_in_app_payment_url(checkout_id),
+                "status": (
+                    "completed"
+                    if str(checkout.get("status", "")).upper() == "PAID"
+                    else "pending"
+                ),
+                "external_customer_id": str(customer_id),
+                "invoice_url": self._hosted_checkout_url(checkout),
+            }
+
         if existing_sub_id and meta.get("replace_existing_checkout"):
             existing_payment = await self._get_reusable_checkout_payment(
                 payment_id=meta.get("existing_external_checkout_id"),

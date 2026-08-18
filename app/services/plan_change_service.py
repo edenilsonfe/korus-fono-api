@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.billing.checkout_urls import build_in_app_payment_url
+from app.billing.checkout_urls import build_checkout_return_urls, build_in_app_payment_url
 from app.billing.errors import PaymentGatewayConfigError, PaymentGatewayError
 from app.models.billing import Plan, Subscription
 from app.models.professional import Professional
@@ -224,12 +224,25 @@ class PlanChangeService:
         )
         external_ref = f"{professional.id}:{target_plan.slug}:upgrade"
         try:
-            payment = await self.gateway.create_single_payment(
-                customer_id=customer_id,
-                value_cents=quote.charge_cents,
-                description=f"Upgrade {target_plan.name} — KorusFono",
-                external_reference=external_ref,
-            )
+            if provider == "asaas":
+                success_url, cancel_url = build_checkout_return_urls()
+                payment = await self.gateway.create_hosted_annual_checkout(
+                    customer_id=customer_id,
+                    account_id=str(professional.id),
+                    plan_slug=target_plan.slug,
+                    plan_name=target_plan.name,
+                    value_cents=quote.charge_cents,
+                    success_url=success_url,
+                    cancel_url=cancel_url,
+                    external_reference=external_ref,
+                )
+            else:
+                payment = await self.gateway.create_single_payment(
+                    customer_id=customer_id,
+                    value_cents=quote.charge_cents,
+                    description=f"Upgrade {target_plan.name} — KorusFono",
+                    external_reference=external_ref,
+                )
         except (PaymentGatewayConfigError, PaymentGatewayError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -266,6 +279,12 @@ class PlanChangeService:
         subscription.provider = provider
         await self.db.commit()
 
+        renewal_copy = (
+            " Ao fim do acesso anual, será necessário realizar uma nova compra do plano mensal."
+            if provider == "asaas" and not subscription.external_subscription_id
+            else ""
+        )
+
         return {
             "checkout_url": None,
             "session_id": None,
@@ -275,7 +294,7 @@ class PlanChangeService:
             "scheduled_at": effective_at.isoformat(),
             "message": (
                 f"Mudança para o plano mensal agendada para {_format_date(effective_at)}. "
-                f"Você mantém o plano anual até lá."
+                f"Você mantém o plano anual até lá.{renewal_copy}"
             ),
         }
 
@@ -304,6 +323,16 @@ class PlanChangeService:
 
         target = sub.pending_plan
         provider = (sub.provider or "stub").lower()
+
+        if provider == "asaas" and not sub.external_subscription_id:
+            sub.pending_plan_id = None
+            sub.pending_change_at = None
+            sub.status = "expired"
+            professional = await self.db.get(Professional, sub.professional_id)
+            if professional:
+                professional.subscription_status = "past_due"
+            await self.db.commit()
+            return True
 
         if provider == "asaas" and sub.external_subscription_id and self.gateway:
             try:
@@ -350,11 +379,24 @@ class PlanChangeService:
         provider = (sub.provider or "stub").lower()
         if provider == "asaas" and self.gateway:
             try:
-                payment = await self.gateway.get_payment(str(sub.external_checkout_id))
-                raw_status = str(payment.get("status", "")).upper()
-                if raw_status not in _PAYMENT_SUCCESS:
+                checkout = await self.gateway.get_checkout(
+                    str(sub.external_checkout_id)
+                )
+                if str(checkout.get("status", "")).upper() != "PAID":
                     return False
-            except (PaymentGatewayConfigError, PaymentGatewayError):
+            except PaymentGatewayError as exc:
+                if exc.status_code != 404:
+                    return False
+                try:
+                    payment = await self.gateway.get_payment(
+                        str(sub.external_checkout_id)
+                    )
+                    raw_status = str(payment.get("status", "")).upper()
+                    if raw_status not in _PAYMENT_SUCCESS:
+                        return False
+                except (PaymentGatewayConfigError, PaymentGatewayError):
+                    return False
+            except PaymentGatewayConfigError:
                 return False
 
         await self._apply_upgrade(sub, sub.pending_plan, provider)
@@ -368,17 +410,14 @@ class PlanChangeService:
 
         if provider_key == "asaas" and subscription.external_subscription_id and self.gateway:
             try:
-                await self.gateway.update_subscription_plan(
-                    subscription_id=str(subscription.external_subscription_id),
-                    value_cents=target_plan.price_cents,
-                    cycle="YEARLY",
-                    plan_slug=target_plan.slug,
-                    account_id=str(subscription.professional_id),
-                    next_due_date=now.date().isoformat(),
+                await self.gateway.cancel_subscription(
+                    external_subscription_id=str(subscription.external_subscription_id),
                 )
             except (PaymentGatewayConfigError, PaymentGatewayError) as exc:
-                logger.warning("Failed to upgrade subscription on Asaas: %s", exc)
-                raise
+                if not isinstance(exc, PaymentGatewayError) or exc.status_code != 404:
+                    logger.warning("Failed to cancel monthly renewal on Asaas: %s", exc)
+                    raise
+            subscription.external_subscription_id = None
 
         subscription.plan_id = target_plan.id
         subscription.pending_plan_id = None
