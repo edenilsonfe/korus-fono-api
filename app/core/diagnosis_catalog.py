@@ -6,6 +6,7 @@ DiagnosisEntry = dict[str, str]
 
 DIAGNOSIS_CATALOG: dict[str, dict[str, str]] = {
     "fono": {
+        "nao_informado": "Não informado na migração",
         "tea": "TEA — Transtorno do Espectro Autista",
         "linguagem": "Atraso de Linguagem",
         "atraso_de_fala": "Atraso de Fala",
@@ -19,6 +20,7 @@ DIAGNOSIS_CATALOG: dict[str, dict[str, str]] = {
         "outros": "Outros",
     },
     "to": {
+        "nao_informado": "Não informado na migração",
         "tea": "TEA — Transtorno do Espectro Autista",
         "tdah": "TDAH",
         "integracao_sensorial": "Integração Sensorial",
@@ -29,6 +31,7 @@ DIAGNOSIS_CATALOG: dict[str, dict[str, str]] = {
         "outros": "Outros",
     },
     "psicologia": {
+        "nao_informado": "Não informado na migração",
         "tea": "TEA — Transtorno do Espectro Autista",
         "tdah": "TDAH",
         "ansiedade": "Ansiedade",
@@ -38,6 +41,7 @@ DIAGNOSIS_CATALOG: dict[str, dict[str, str]] = {
         "outros": "Outros",
     },
     "fisioterapia": {
+        "nao_informado": "Não informado na migração",
         "atraso_motor": "Atraso Motor",
         "paralisia_cerebral": "Paralisia Cerebral",
         "torticolis": "Tortícolis",

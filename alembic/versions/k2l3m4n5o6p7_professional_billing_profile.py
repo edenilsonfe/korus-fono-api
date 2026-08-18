@@ -1,6 +1,6 @@
 """Add payer address fields to the professional billing profile.
 
-Revision ID: j1k2l3m4n5o6
+Revision ID: k2l3m4n5o6p7
 Revises: i0j1k2l3m4n5
 Create Date: 2026-08-18
 """
@@ -10,7 +10,7 @@ from typing import Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "j1k2l3m4n5o6"
+revision: str = "k2l3m4n5o6p7"
 down_revision: Union[str, None] = "i0j1k2l3m4n5"
 branch_labels: Union[str, None] = None
 depends_on: Union[str, None] = None

@@ -112,6 +112,14 @@ uv run alembic history               # histórico
 
 > **Importante:** revise sempre o arquivo gerado em `alembic/versions/` antes de commitar — o autogenerate pode omitir renomeações ou detectar falsos positivos.
 
+### Importação de clínica anterior
+
+Backups SQL do formato legado suportado devem passar pelo importador em
+`dry-run`; nunca execute o SQL diretamente no PostgreSQL. O procedimento,
+mapeamento de estados, trava de WhatsApp e aplicação idempotente com manifesto
+local — sem migration no banco de destino — estão em
+[`docs/legacy-clinic-import.md`](docs/legacy-clinic-import.md).
+
 ## Worker IA (opcional)
 
 ```bash

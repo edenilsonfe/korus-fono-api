@@ -532,6 +532,45 @@ async def test_asaas_yearly_checkout_uses_prefilled_customer_when_profile_is_com
 
 
 @pytest.mark.asyncio
+async def test_asaas_updates_existing_customer_with_complete_billing_profile(monkeypatch):
+    gateway = object.__new__(AsaasPaymentGateway)
+    gateway._api_key = "test-key"
+    gateway._base_url = "https://api-sandbox.asaas.com/v3"
+    captured: dict = {}
+
+    async def fake_request_json(method, url, **kwargs):
+        assert method == "PUT"
+        assert url.endswith("/customers/cus_existing")
+        captured.update(kwargs["json_body"])
+        return {"id": "cus_existing"}
+
+    monkeypatch.setattr("app.billing.asaas_gateway.request_json", fake_request_json)
+
+    await gateway.update_customer_profile(
+        customer_id="cus_existing",
+        metadata={
+            "customer_document": "249.715.637-92",
+            "customer_phone": "(11) 99999-0000",
+            "customer_address": "Rua das Flores",
+            "customer_address_number": "123",
+            "customer_complement": "Sala 4",
+            "customer_province": "Centro",
+            "customer_postal_code": "01310-100",
+        },
+    )
+
+    assert captured == {
+        "cpfCnpj": "24971563792",
+        "phone": "11999990000",
+        "address": "Rua das Flores",
+        "addressNumber": "123",
+        "complement": "Sala 4",
+        "province": "Centro",
+        "postalCode": "01310100",
+    }
+
+
+@pytest.mark.asyncio
 async def test_asaas_yearly_checkout_builds_sandbox_link_when_response_has_only_id(
     monkeypatch,
 ):

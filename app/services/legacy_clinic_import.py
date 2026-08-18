@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from html.parser import HTMLParser
 from pathlib import Path
 from uuid import NAMESPACE_URL, UUID, uuid5
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +21,7 @@ from app.models.appointment import Appointment
 from app.models.caregiver import Caregiver
 from app.models.evolution import Evolution
 from app.models.finance import ServiceOffering
+from app.models.notification_settings import NotificationSettings
 from app.models.patient import Patient
 from app.models.professional import Professional
 from app.models.session import Session
@@ -47,6 +48,9 @@ INFERRED_APPOINTMENT_STATE_MAP = {
 _INSERT_PATTERN = re.compile(
     r"^INSERT INTO `([^`]+)` \((.*)\) VALUES \((.*)\);$"
 )
+_CLINIC_TIMEZONE = timezone(timedelta(hours=-3), name="America/Sao_Paulo")
+_SOURCE_SYSTEM = "legacy_clinic_sql"
+_MANIFEST_SCHEMA_VERSION = 1
 
 
 class LegacyClinicImportError(ValueError):
@@ -57,6 +61,7 @@ class LegacyClinicImportError(ValueError):
 class LegacyClinicImportPreview:
     professional_id: UUID
     source_sha256: str
+    manifest_path: str
     source_counts: dict[str, int]
     projected_counts: dict[str, int]
     appointment_status_counts: dict[str, int]
@@ -67,7 +72,62 @@ class LegacyClinicImportPreview:
 class LegacyClinicImportResult:
     professional_id: UUID
     source_sha256: str
+    manifest_path: str
     created_counts: dict[str, int]
+    skipped_counts: dict[str, int]
+    verified_counts: dict[str, int]
+
+
+@dataclass(frozen=True)
+class _ManifestSpec:
+    source_table: str
+    source_id: str
+    target_table: str
+    target_id: UUID
+    payload_sha256: str
+    source_metadata: dict | None = None
+
+
+def default_legacy_import_manifest_path(source_path: Path) -> Path:
+    """Return the local, non-clinical audit manifest path for an export."""
+
+    path = Path(source_path)
+    return path.with_name(f"{path.name}.korus-import.json")
+
+
+def _pending_manifest_path(manifest_path: Path) -> Path:
+    return manifest_path.with_name(f"{manifest_path.name}.pending")
+
+
+def _read_manifest(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise LegacyClinicImportError(
+            "O manifesto local de importação não pôde ser lido com segurança"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise LegacyClinicImportError("O manifesto local de importação é inválido")
+    return payload
+
+
+def _write_manifest(path: Path, payload: dict) -> None:
+    temporary_path = path.with_name(f"{path.name}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary_path.replace(path)
+    except OSError as exc:
+        raise LegacyClinicImportError(
+            "Não foi possível gravar o manifesto local de importação"
+        ) from exc
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def _split_sql_values(raw: str) -> list[str | None]:
@@ -172,7 +232,7 @@ def _parse_datetime(value: str | None, field: str) -> datetime:
     except ValueError as exc:
         raise LegacyClinicImportError(f"Data inválida em {field}: {value}") from exc
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
+        parsed = parsed.replace(tzinfo=_CLINIC_TIMEZONE)
     return parsed
 
 
@@ -265,6 +325,113 @@ def _target_uuid(namespace: UUID, entity: str, source_id: str) -> UUID:
     return uuid5(namespace, f"{entity}:{source_id}")
 
 
+def _payload_sha256(payload: object) -> str:
+    serialized = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(serialized).hexdigest()
+
+
+def _manifest_payload(
+    *,
+    professional_id: UUID,
+    source_sha256: str,
+    specs: list[_ManifestSpec],
+    verified_counts: dict[str, int],
+) -> dict:
+    records = [
+        {
+            "payloadSha256": spec.payload_sha256,
+            "sourceId": spec.source_id,
+            "sourceMetadata": spec.source_metadata,
+            "sourceTable": spec.source_table,
+            "targetId": str(spec.target_id),
+            "targetTable": spec.target_table,
+        }
+        for spec in sorted(specs, key=lambda item: (item.source_table, item.source_id))
+    ]
+    return {
+        "professionalId": str(professional_id),
+        "records": records,
+        "schemaVersion": _MANIFEST_SCHEMA_VERSION,
+        "sourceFileSha256": source_sha256,
+        "sourceSystem": _SOURCE_SYSTEM,
+        "verifiedCounts": verified_counts,
+    }
+
+
+def _validate_manifest(
+    manifest: dict,
+    *,
+    professional_id: UUID,
+    source_sha256: str,
+    specs: list[_ManifestSpec],
+) -> None:
+    if (
+        manifest.get("schemaVersion") != _MANIFEST_SCHEMA_VERSION
+        or manifest.get("sourceSystem") != _SOURCE_SYSTEM
+        or manifest.get("professionalId") != str(professional_id)
+    ):
+        raise LegacyClinicImportError(
+            "O manifesto local não corresponde à profissional ou ao importador atual"
+        )
+    raw_records = manifest.get("records")
+    if not isinstance(raw_records, list):
+        raise LegacyClinicImportError("O manifesto local de importação é inválido")
+    records: dict[tuple[str, str], dict] = {}
+    for record in raw_records:
+        if not isinstance(record, dict):
+            raise LegacyClinicImportError("O manifesto local de importação é inválido")
+        key = (str(record.get("sourceTable")), str(record.get("sourceId")))
+        if key in records:
+            raise LegacyClinicImportError("O manifesto local contém registros duplicados")
+        records[key] = record
+
+    expected_keys = {(spec.source_table, spec.source_id) for spec in specs}
+    if set(records) != expected_keys:
+        raise LegacyClinicImportError(
+            "O conjunto de registros do arquivo mudou desde a importação anterior"
+        )
+    for spec in specs:
+        record = records[(spec.source_table, spec.source_id)]
+        if (
+            record.get("payloadSha256") != spec.payload_sha256
+            or record.get("targetTable") != spec.target_table
+            or record.get("targetId") != str(spec.target_id)
+        ):
+            raise LegacyClinicImportError(
+                f"O registro {spec.source_table}/{spec.source_id} mudou desde a importação anterior"
+            )
+    if manifest.get("sourceFileSha256") != source_sha256:
+        raise LegacyClinicImportError(
+            "O arquivo SQL mudou desde a importação registrada no manifesto local"
+        )
+
+
+def _target_presence_by_manifest_spec(
+    specs: list[_ManifestSpec],
+    target_ids_by_table: dict[str, set[UUID]],
+) -> list[bool]:
+    return [
+        spec.target_id in target_ids_by_table[spec.target_table]
+        for spec in specs
+    ]
+
+
+async def _existing_ids(db: AsyncSession, model, ids: list[UUID]) -> set[UUID]:
+    existing: set[UUID] = set()
+    for offset in range(0, len(ids), 500):
+        chunk = ids[offset : offset + 500]
+        if not chunk:
+            continue
+        result = await db.execute(select(model.id).where(model.id.in_(chunk)))
+        existing.update(result.scalars().all())
+    return existing
+
+
 def _import_namespace(professional_id: UUID, rows: dict[str, list[dict[str, str | None]]]) -> UUID:
     source_professional_ids = {
         str(row.get("profissional_id"))
@@ -336,15 +503,20 @@ def _validate_and_count_statuses(
 ) -> Counter[str]:
     counts: Counter[str] = Counter()
     for appointment in appointments:
-        source_state = appointment.get("estado_agenda_id")
-        try:
-            target_status = INFERRED_APPOINTMENT_STATE_MAP[str(source_state)]
-        except KeyError as exc:
-            raise LegacyClinicImportError(
-                f"Estado de agenda sem mapeamento seguro: {source_state}"
-            ) from exc
-        counts[target_status] += 1
+        counts[_target_appointment_status(appointment)] += 1
     return counts
+
+
+def _target_appointment_status(appointment: dict[str, str | None]) -> str:
+    if not _is_true(appointment.get("ativo")):
+        return "cancelado"
+    source_state = appointment.get("estado_agenda_id")
+    try:
+        return INFERRED_APPOINTMENT_STATE_MAP[str(source_state)]
+    except KeyError as exc:
+        raise LegacyClinicImportError(
+            f"Estado de agenda sem mapeamento seguro: {source_state}"
+        ) from exc
 
 
 async def _resolve_professional(db: AsyncSession, email: str) -> Professional:
@@ -387,12 +559,14 @@ async def preview_legacy_clinic_import(
     caregiver_count = sum(len(_caregiver_specs(patient)) for patient in rows["pacientes"])
     session_count = sum(
         appointment.get("estado_agenda_id") == "4"
+        and _is_true(appointment.get("ativo"))
         for appointment in rows["agendamento"]
     )
 
     return LegacyClinicImportPreview(
         professional_id=professional.id,
         source_sha256=source_sha256,
+        manifest_path=str(default_legacy_import_manifest_path(Path(source_path))),
         source_counts={table: len(rows[table]) for table in SUPPORTED_TABLES},
         projected_counts={
             "appointments": len(rows["agendamento"]),
@@ -415,6 +589,8 @@ async def apply_legacy_clinic_import(
     source_path: Path,
     professional_email: str,
     accept_inferred_state_map: bool,
+    expected_source_sha256: str | None = None,
+    manifest_path: Path | None = None,
 ) -> LegacyClinicImportResult:
     """Apply a validated import after explicit acceptance of inferred states."""
 
@@ -423,7 +599,41 @@ async def apply_legacy_clinic_import(
             "Confirme explicitamente o mapeamento inferido dos estados da agenda"
         )
     professional = await _resolve_professional(db, professional_email)
+    notification_settings = await db.scalar(
+        select(NotificationSettings).where(
+            NotificationSettings.professional_id == professional.id
+        )
+    )
+    if (
+        notification_settings
+        and notification_settings.whatsapp_enabled
+        and bool(
+            (notification_settings.whatsapp_events or {}).get(
+                "appointment_reminder_24h"
+            )
+        )
+    ):
+        raise LegacyClinicImportError(
+            "Desative temporariamente o lembrete automático de 24 horas antes de aplicar"
+        )
     source_sha256, rows = _parse_legacy_sql(Path(source_path))
+    resolved_manifest_path = Path(
+        manifest_path or default_legacy_import_manifest_path(Path(source_path))
+    )
+    if resolved_manifest_path.resolve() == Path(source_path).resolve():
+        raise LegacyClinicImportError(
+            "O manifesto local deve ser diferente do arquivo SQL de origem"
+        )
+    if not expected_source_sha256:
+        raise LegacyClinicImportError(
+            "Informe o SHA-256 exibido no dry-run revisado"
+        )
+    if (
+        expected_source_sha256.strip().lower() != source_sha256
+    ):
+        raise LegacyClinicImportError(
+            "O SHA-256 do arquivo não corresponde ao dry-run revisado"
+        )
     _validate_and_count_statuses(rows["agendamento"])
     namespace = _import_namespace(professional.id, rows)
 
@@ -440,7 +650,9 @@ async def apply_legacy_clinic_import(
         and appointment.get("procedimento_id") not in procedures_by_source
         for appointment in rows["agendamento"]
     ):
-        raise LegacyClinicImportError("Há agendamento apontando para procedimento ausente no arquivo")
+        raise LegacyClinicImportError(
+            "Há agendamento apontando para procedimento ausente no arquivo"
+        )
 
     earliest_appointment: dict[str, date] = {}
     for appointment in rows["agendamento"]:
@@ -456,6 +668,34 @@ async def apply_legacy_clinic_import(
         source_id: _target_uuid(namespace, "patient", source_id)
         for source_id in patients_by_source
     }
+    source_patient_keys = Counter(
+        (
+            " ".join((patient.get("nome") or "").split()).casefold(),
+            _parse_datetime(
+                patient.get("dt_nascimento"), "pacientes.dt_nascimento"
+            ).date(),
+        )
+        for patient in rows["pacientes"]
+    )
+    if any(count > 1 for count in source_patient_keys.values()):
+        raise LegacyClinicImportError(
+            "O arquivo contém pacientes duplicados por nome e data de nascimento"
+        )
+    target_patients_result = await db.execute(
+        select(Patient).where(Patient.professional_id == professional.id)
+    )
+    planned_patient_ids = set(patient_ids.values())
+    for target_patient in target_patients_result.scalars().all():
+        if target_patient.id in planned_patient_ids:
+            continue
+        target_key = (
+            " ".join(target_patient.name.split()).casefold(),
+            target_patient.birth_date,
+        )
+        if target_key in source_patient_keys:
+            raise LegacyClinicImportError(
+                "Já existe paciente com o mesmo nome e data de nascimento na conta de destino"
+            )
     service_ids = {
         source_id: _target_uuid(namespace, "service", source_id)
         for source_id in procedures_by_source
@@ -468,7 +708,198 @@ async def apply_legacy_clinic_import(
         source_id: _target_uuid(namespace, "session", source_id)
         for source_id, appointment in appointments_by_source.items()
         if appointment.get("estado_agenda_id") == "4"
+        and _is_true(appointment.get("ativo"))
     }
+    caregiver_entries = [
+        (
+            patient,
+            index,
+            spec,
+            _target_uuid(namespace, "caregiver", f"{patient['id']}:{index}"),
+        )
+        for patient in rows["pacientes"]
+        for index, spec in enumerate(_caregiver_specs(patient))
+    ]
+    active_audits_by_id = {
+        audit["id"]: audit
+        for audit in rows["agendamento_evolucao_auditoria"]
+        if _is_true(audit.get("ativo"))
+    }
+    evolution_entries = [
+        (
+            source,
+            active_audits_by_id[source["evolucao_auditoria_id"]],
+            _target_uuid(namespace, "evolution", str(source["id"])),
+        )
+        for source in rows["agendamento_evolucao"]
+        if source.get("evolucao_auditoria_id") in active_audits_by_id
+    ]
+
+    existing_patients = await _existing_ids(db, Patient, list(patient_ids.values()))
+    existing_caregivers = await _existing_ids(
+        db, Caregiver, [entry[3] for entry in caregiver_entries]
+    )
+    existing_services = await _existing_ids(db, ServiceOffering, list(service_ids.values()))
+    existing_appointments = await _existing_ids(
+        db, Appointment, list(appointment_ids.values())
+    )
+    existing_sessions = await _existing_ids(db, Session, list(session_ids.values()))
+    existing_evolutions = await _existing_ids(
+        db, Evolution, [entry[2] for entry in evolution_entries]
+    )
+
+    manifest_specs = [
+        _ManifestSpec(
+            source_table="pacientes",
+            source_id=str(patient["id"]),
+            target_table="patients",
+            target_id=patient_ids[str(patient["id"])],
+            payload_sha256=_payload_sha256(patient),
+        )
+        for patient in rows["pacientes"]
+    ]
+    manifest_specs.extend(
+        _ManifestSpec(
+            source_table="pacientes",
+            source_id=f"{patient['id']}:caregiver:{index}",
+            target_table="caregivers",
+            target_id=caregiver_id,
+            payload_sha256=_payload_sha256(
+                {"patient": patient, "caregiverIndex": index, "spec": spec}
+            ),
+        )
+        for patient, index, spec, caregiver_id in caregiver_entries
+    )
+    manifest_specs.extend(
+        _ManifestSpec(
+            source_table="procedimento",
+            source_id=str(procedure["id"]),
+            target_table="financial_services",
+            target_id=service_ids[str(procedure["id"])],
+            payload_sha256=_payload_sha256(procedure),
+        )
+        for procedure in rows["procedimento"]
+    )
+    manifest_specs.extend(
+        _ManifestSpec(
+            source_table="agendamento",
+            source_id=str(appointment["id"]),
+            target_table="appointments",
+            target_id=appointment_ids[str(appointment["id"])],
+            payload_sha256=_payload_sha256(appointment),
+            source_metadata={"stateId": appointment.get("estado_agenda_id")},
+        )
+        for appointment in rows["agendamento"]
+    )
+    manifest_specs.extend(
+        _ManifestSpec(
+            source_table="agendamento",
+            source_id=f"{source_id}:session",
+            target_table="sessions",
+            target_id=target_id,
+            payload_sha256=_payload_sha256(appointments_by_source[source_id]),
+            source_metadata={
+                "stateId": appointments_by_source[source_id].get("estado_agenda_id")
+            },
+        )
+        for source_id, target_id in session_ids.items()
+    )
+    manifest_specs.extend(
+        _ManifestSpec(
+            source_table="agendamento_evolucao",
+            source_id=str(source["id"]),
+            target_table="evolutions",
+            target_id=evolution_id,
+            payload_sha256=_payload_sha256({"evolution": source, "audit": audit}),
+        )
+        for source, audit, evolution_id in evolution_entries
+    )
+
+    target_ids_by_table = {
+        "patients": existing_patients,
+        "caregivers": existing_caregivers,
+        "financial_services": existing_services,
+        "appointments": existing_appointments,
+        "sessions": existing_sessions,
+        "evolutions": existing_evolutions,
+    }
+    expected_counts = {
+        "appointments": len(appointment_ids),
+        "caregivers": len(caregiver_entries),
+        "evolutions": len(evolution_entries),
+        "patients": len(patient_ids),
+        "services": len(service_ids),
+        "sessions": len(session_ids),
+    }
+    empty_counts = {key: 0 for key in expected_counts}
+    manifest_payload = _manifest_payload(
+        professional_id=professional.id,
+        source_sha256=source_sha256,
+        specs=manifest_specs,
+        verified_counts=expected_counts,
+    )
+    pending_manifest_path = _pending_manifest_path(resolved_manifest_path)
+    manifest = _read_manifest(resolved_manifest_path)
+    pending_manifest = _read_manifest(pending_manifest_path)
+    if manifest is not None and pending_manifest is not None:
+        raise LegacyClinicImportError(
+            "Há um manifesto local pendente junto de uma importação concluída; revise os arquivos"
+        )
+
+    target_presence = _target_presence_by_manifest_spec(
+        manifest_specs, target_ids_by_table
+    )
+    if manifest is None and pending_manifest is not None:
+        _validate_manifest(
+            pending_manifest,
+            professional_id=professional.id,
+            source_sha256=source_sha256,
+            specs=manifest_specs,
+        )
+        if target_presence and all(target_presence):
+            try:
+                pending_manifest_path.replace(resolved_manifest_path)
+            except OSError as exc:
+                raise LegacyClinicImportError(
+                    "Não foi possível concluir a recuperação do manifesto local"
+                ) from exc
+            manifest = pending_manifest
+        elif any(target_presence):
+            raise LegacyClinicImportError(
+                "A recuperação encontrou somente parte dos destinos do manifesto pendente"
+            )
+        else:
+            pending_manifest_path.unlink(missing_ok=True)
+
+    if manifest is not None:
+        _validate_manifest(
+            manifest,
+            professional_id=professional.id,
+            source_sha256=source_sha256,
+            specs=manifest_specs,
+        )
+        for spec, target_exists in zip(
+            manifest_specs, target_presence, strict=True
+        ):
+            if not target_exists:
+                raise LegacyClinicImportError(
+                    f"O destino rastreado de {spec.source_table}/{spec.source_id} não existe mais"
+                )
+        return LegacyClinicImportResult(
+            professional_id=professional.id,
+            source_sha256=source_sha256,
+            manifest_path=str(resolved_manifest_path),
+            created_counts=empty_counts,
+            skipped_counts=expected_counts,
+            verified_counts=expected_counts,
+        )
+
+    if any(target_presence):
+        raise LegacyClinicImportError(
+            "Registros determinísticos já existem no destino sem o manifesto local"
+        )
+
+    _write_manifest(pending_manifest_path, manifest_payload)
 
     created_counts = {
         "appointments": 0,
@@ -478,10 +909,14 @@ async def apply_legacy_clinic_import(
         "services": 0,
         "sessions": 0,
     }
+    skipped_counts = {key: 0 for key in created_counts}
 
     try:
         for index, patient in enumerate(rows["pacientes"]):
             source_id = str(patient["id"])
+            if patient_ids[source_id] in existing_patients:
+                skipped_counts["patients"] += 1
+                continue
             created_at = _parse_datetime(
                 patient.get("data_criacao"), "pacientes.data_criacao"
             )
@@ -505,36 +940,39 @@ async def apply_legacy_clinic_import(
             created_counts["patients"] += 1
         await db.flush()
 
-        for patient in rows["pacientes"]:
+        for patient, index, spec, caregiver_id in caregiver_entries:
+            if caregiver_id in existing_caregivers:
+                skipped_counts["caregivers"] += 1
+                continue
             source_patient_id = str(patient["id"])
-            for index, spec in enumerate(_caregiver_specs(patient)):
-                db.add(
-                    Caregiver(
-                        id=_target_uuid(
-                            namespace, "caregiver", f"{source_patient_id}:{index}"
-                        ),
-                        patient_id=patient_ids[source_patient_id],
-                        name=str(spec["name"]),
-                        relation=str(spec["relation"]),
-                        phone=str(spec["phone"]),
-                        email=str(spec["email"]),
-                        notes="",
-                        is_primary=index == 0,
-                        whatsapp_opt_in=(
-                            index == 0
-                            and _is_true(
-                                patient.get("aceita_receber_mensagen_whatsapp")
-                            )
-                        ),
-                    )
+            db.add(
+                Caregiver(
+                    id=caregiver_id,
+                    patient_id=patient_ids[source_patient_id],
+                    name=str(spec["name"]),
+                    relation=str(spec["relation"]),
+                    phone=str(spec["phone"]),
+                    email=str(spec["email"]),
+                    notes="",
+                    is_primary=index == 0,
+                    whatsapp_opt_in=(
+                        index == 0
+                        and _is_true(
+                            patient.get("aceita_receber_mensagen_whatsapp")
+                        )
+                    ),
                 )
-                created_counts["caregivers"] += 1
+            )
+            created_counts["caregivers"] += 1
 
         service_durations: dict[str, int] = {}
         for procedure in rows["procedimento"]:
             source_id = str(procedure["id"])
             duration = _procedure_duration(procedure.get("duracao"))
             service_durations[source_id] = duration
+            if service_ids[source_id] in existing_services:
+                skipped_counts["services"] += 1
+                continue
             price_cents = _money_to_cents(
                 procedure.get("valor_total") or procedure.get("valor"),
                 "procedimento.valor_total",
@@ -561,7 +999,11 @@ async def apply_legacy_clinic_import(
         def appointment_entity(source: dict[str, str | None]) -> Appointment:
             source_id = str(source["id"])
             procedure_source_id = source.get("procedimento_id")
-            procedure = procedures_by_source.get(procedure_source_id) if procedure_source_id else None
+            procedure = (
+                procedures_by_source.get(procedure_source_id)
+                if procedure_source_id
+                else None
+            )
             starts_at = _parse_datetime(source.get("dt_inicial"), "agendamento.dt_inicial")
             fallback_duration = service_durations.get(str(procedure_source_id), 50)
             recurrence = source.get("tipo_repeticao")
@@ -588,7 +1030,7 @@ async def apply_legacy_clinic_import(
                 duration=_duration_minutes(
                     starts_at, source.get("dt_final"), fallback_duration
                 ),
-                status=INFERRED_APPOINTMENT_STATE_MAP[str(source.get("estado_agenda_id"))],
+                status=_target_appointment_status(source),
                 appointment_type=(
                     "recorrente"
                     if source.get("agendamento_pai_id") or recurrence
@@ -621,10 +1063,16 @@ async def apply_legacy_clinic_import(
             if source.get("agendamento_pai_id")
         ]
         for source in roots:
+            if appointment_ids[str(source["id"])] in existing_appointments:
+                skipped_counts["appointments"] += 1
+                continue
             db.add(appointment_entity(source))
             created_counts["appointments"] += 1
         await db.flush()
         for source in children:
+            if appointment_ids[str(source["id"])] in existing_appointments:
+                skipped_counts["appointments"] += 1
+                continue
             db.add(appointment_entity(source))
             created_counts["appointments"] += 1
         await db.flush()
@@ -635,12 +1083,19 @@ async def apply_legacy_clinic_import(
             else []
         )
         for source_id, target_session_id in session_ids.items():
+            if target_session_id in existing_sessions:
+                skipped_counts["sessions"] += 1
+                continue
             appointment = appointments_by_source[source_id]
             starts_at = _parse_datetime(
                 appointment.get("dt_inicial"), "agendamento.dt_inicial"
             )
             procedure_source_id = appointment.get("procedimento_id")
-            procedure = procedures_by_source.get(procedure_source_id) if procedure_source_id else None
+            procedure = (
+                procedures_by_source.get(procedure_source_id)
+                if procedure_source_id
+                else None
+            )
             db.add(
                 Session(
                     id=target_session_id,
@@ -673,14 +1128,9 @@ async def apply_legacy_clinic_import(
             created_counts["sessions"] += 1
         await db.flush()
 
-        audits_by_id = {
-            audit["id"]: audit
-            for audit in rows["agendamento_evolucao_auditoria"]
-            if _is_true(audit.get("ativo"))
-        }
-        for source in rows["agendamento_evolucao"]:
-            audit = audits_by_id.get(source.get("evolucao_auditoria_id"))
-            if not audit:
+        for source, audit, evolution_id in evolution_entries:
+            if evolution_id in existing_evolutions:
+                skipped_counts["evolutions"] += 1
                 continue
             source_appointment_id = str(audit.get("agendamento_id"))
             appointment = appointments_by_source.get(source_appointment_id)
@@ -699,7 +1149,7 @@ async def apply_legacy_clinic_import(
                 )
             db.add(
                 Evolution(
-                    id=_target_uuid(namespace, "evolution", str(source["id"])),
+                    id=evolution_id,
                     patient_id=patient_ids[str(appointment["paciente_id"])],
                     session_id=session_ids.get(source_appointment_id),
                     professional_id=professional.id,
@@ -721,10 +1171,45 @@ async def apply_legacy_clinic_import(
         await db.commit()
     except Exception:
         await db.rollback()
+        pending_manifest_path.unlink(missing_ok=True)
         raise
+
+    verified_counts = {
+        "appointments": len(
+            await _existing_ids(db, Appointment, list(appointment_ids.values()))
+        ),
+        "caregivers": len(
+            await _existing_ids(db, Caregiver, [entry[3] for entry in caregiver_entries])
+        ),
+        "evolutions": len(
+            await _existing_ids(db, Evolution, [entry[2] for entry in evolution_entries])
+        ),
+        "patients": len(
+            await _existing_ids(db, Patient, list(patient_ids.values()))
+        ),
+        "services": len(
+            await _existing_ids(db, ServiceOffering, list(service_ids.values()))
+        ),
+        "sessions": len(
+            await _existing_ids(db, Session, list(session_ids.values()))
+        ),
+    }
+    if verified_counts != expected_counts:
+        raise LegacyClinicImportError(
+            "A transação foi confirmada, mas a verificação pós-commit encontrou divergências"
+        )
+    try:
+        pending_manifest_path.replace(resolved_manifest_path)
+    except OSError as exc:
+        raise LegacyClinicImportError(
+            "Os dados foram confirmados, mas o manifesto local ficou pendente"
+        ) from exc
 
     return LegacyClinicImportResult(
         professional_id=professional.id,
         source_sha256=source_sha256,
+        manifest_path=str(resolved_manifest_path),
         created_counts=created_counts,
+        skipped_counts=skipped_counts,
+        verified_counts=verified_counts,
     )
