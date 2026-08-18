@@ -224,20 +224,9 @@ class BillingCheckoutService:
         try:
             gateway = AsaasPaymentGateway()
             if hosted_annual:
-                checkout = await gateway.get_checkout(payment_id)
-                invoice_url = next(
-                    (
-                        str(checkout[key])
-                        for key in ("link", "url", "checkoutUrl")
-                        if checkout.get(key)
-                    ),
-                    None,
-                )
-                if not invoice_url:
-                    invoice_url = gateway._hosted_checkout_url(checkout)
                 return {
                     "session_id": session_id,
-                    "invoice_url": invoice_url,
+                    "invoice_url": gateway._hosted_checkout_url({"id": payment_id}),
                 }
             payment = await gateway.ensure_card_billing(payment_id)
         except (PaymentGatewayConfigError, PaymentGatewayError) as exc:

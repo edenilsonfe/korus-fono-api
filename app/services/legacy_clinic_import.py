@@ -276,6 +276,33 @@ def _procedure_duration(value: str | None) -> int:
     return duration
 
 
+def _procedure_price_cents(procedure: dict[str, str | None]) -> int | None:
+    price_cents = _money_to_cents(
+        procedure.get("valor_total") or procedure.get("valor"),
+        "procedimento.valor_total",
+    )
+    return price_cents if price_cents and price_cents > 0 else None
+
+
+def _importable_procedures(
+    procedures: list[dict[str, str | None]],
+    appointments: list[dict[str, str | None]],
+) -> tuple[list[dict[str, str | None]], int, int]:
+    imported: list[dict[str, str | None]] = []
+    skipped_ids: set[str] = set()
+    for procedure in procedures:
+        source_id = str(procedure["id"])
+        if _procedure_price_cents(procedure) is None:
+            skipped_ids.add(source_id)
+            continue
+        imported.append(procedure)
+    linked_appointment_count = sum(
+        str(appointment.get("procedimento_id")) in skipped_ids
+        for appointment in appointments
+    )
+    return imported, len(skipped_ids), linked_appointment_count
+
+
 class _LegacyHtmlToText(HTMLParser):
     _BLOCK_TAGS = {"br", "div", "p", "li", "ol", "ul", "h1", "h2", "h3", "h4"}
     _IGNORED_TAGS = {"script", "style"}
@@ -546,6 +573,11 @@ async def preview_legacy_clinic_import(
     source_sha256, rows = _parse_legacy_sql(Path(source_path))
 
     appointment_status_counts = _validate_and_count_statuses(rows["agendamento"])
+    (
+        imported_procedures,
+        skipped_unpriced_procedure_count,
+        unpriced_procedure_appointment_count,
+    ) = _importable_procedures(rows["procedimento"], rows["agendamento"])
 
     active_audit_ids = {
         audit["id"]
@@ -563,6 +595,31 @@ async def preview_legacy_clinic_import(
         for appointment in rows["agendamento"]
     )
 
+    warnings = [
+        "O mapeamento dos estados da agenda foi inferido e exige aceite explícito para aplicar."
+    ]
+    if skipped_unpriced_procedure_count:
+        singular = skipped_unpriced_procedure_count == 1
+        noun = "procedimento" if singular else "procedimentos"
+        verb = "será ignorado" if singular else "serão ignorados"
+        create_verb = "será criado" if singular else "serão criados"
+        if unpriced_procedure_appointment_count:
+            warnings.append(
+                f"{skipped_unpriced_procedure_count} {noun} sem preço não "
+                f"{create_verb} "
+                "como serviço financeiro."
+            )
+        else:
+            warnings.append(
+                f"{skipped_unpriced_procedure_count} {noun} sem preço e sem "
+                f"agendamentos {verb}."
+            )
+    if unpriced_procedure_appointment_count:
+        warnings.append(
+            f"{unpriced_procedure_appointment_count} agendamentos com procedimento sem "
+            "preço manterão o snapshot da origem sem vínculo a serviço financeiro."
+        )
+
     return LegacyClinicImportPreview(
         professional_id=professional.id,
         source_sha256=source_sha256,
@@ -573,13 +630,11 @@ async def preview_legacy_clinic_import(
             "caregivers": caregiver_count,
             "evolutions": active_evolution_count,
             "patients": len(rows["pacientes"]),
-            "services": len(rows["procedimento"]),
+            "services": len(imported_procedures),
             "sessions": session_count,
         },
         appointment_status_counts=dict(sorted(appointment_status_counts.items())),
-        warnings=[
-            "O mapeamento dos estados da agenda foi inferido e exige aceite explícito para aplicar."
-        ],
+        warnings=warnings,
     )
 
 
@@ -638,7 +693,7 @@ async def apply_legacy_clinic_import(
     namespace = _import_namespace(professional.id, rows)
 
     patients_by_source = {row["id"]: row for row in rows["pacientes"]}
-    procedures_by_source = {row["id"]: row for row in rows["procedimento"]}
+    all_procedures_by_source = {row["id"]: row for row in rows["procedimento"]}
     appointments_by_source = {row["id"]: row for row in rows["agendamento"]}
     if any(
         appointment.get("paciente_id") not in patients_by_source
@@ -647,12 +702,16 @@ async def apply_legacy_clinic_import(
         raise LegacyClinicImportError("Há agendamento apontando para paciente ausente no arquivo")
     if any(
         appointment.get("procedimento_id")
-        and appointment.get("procedimento_id") not in procedures_by_source
+        and appointment.get("procedimento_id") not in all_procedures_by_source
         for appointment in rows["agendamento"]
     ):
         raise LegacyClinicImportError(
             "Há agendamento apontando para procedimento ausente no arquivo"
         )
+    imported_procedures, _, _ = _importable_procedures(
+        rows["procedimento"], rows["agendamento"]
+    )
+    procedures_by_source = all_procedures_by_source
 
     earliest_appointment: dict[str, date] = {}
     for appointment in rows["agendamento"]:
@@ -697,8 +756,10 @@ async def apply_legacy_clinic_import(
                 "Já existe paciente com o mesmo nome e data de nascimento na conta de destino"
             )
     service_ids = {
-        source_id: _target_uuid(namespace, "service", source_id)
-        for source_id in procedures_by_source
+        str(procedure["id"]): _target_uuid(
+            namespace, "service", str(procedure["id"])
+        )
+        for procedure in imported_procedures
     }
     appointment_ids = {
         source_id: _target_uuid(namespace, "appointment", source_id)
@@ -778,7 +839,7 @@ async def apply_legacy_clinic_import(
             target_id=service_ids[str(procedure["id"])],
             payload_sha256=_payload_sha256(procedure),
         )
-        for procedure in rows["procedimento"]
+        for procedure in imported_procedures
     )
     manifest_specs.extend(
         _ManifestSpec(
@@ -965,18 +1026,17 @@ async def apply_legacy_clinic_import(
             )
             created_counts["caregivers"] += 1
 
-        service_durations: dict[str, int] = {}
-        for procedure in rows["procedimento"]:
+        service_durations = {
+            str(procedure["id"]): _procedure_duration(procedure.get("duracao"))
+            for procedure in rows["procedimento"]
+        }
+        for procedure in imported_procedures:
             source_id = str(procedure["id"])
-            duration = _procedure_duration(procedure.get("duracao"))
-            service_durations[source_id] = duration
+            duration = service_durations[source_id]
             if service_ids[source_id] in existing_services:
                 skipped_counts["services"] += 1
                 continue
-            price_cents = _money_to_cents(
-                procedure.get("valor_total") or procedure.get("valor"),
-                "procedimento.valor_total",
-            )
+            price_cents = _procedure_price_cents(procedure)
             if price_cents is None:
                 raise LegacyClinicImportError(
                     f"Procedimento sem valor: {source_id}"

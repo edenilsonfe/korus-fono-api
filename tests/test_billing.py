@@ -1,7 +1,7 @@
 """Billing webhook and reconciliation tests."""
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select
@@ -997,9 +997,7 @@ async def test_prepare_annual_checkout_returns_hosted_link_without_locking_payme
 
     invoice = "https://sandbox.asaas.com/checkoutSession/show?id=chk_prepare_annual"
     gateway = AsyncMock()
-    gateway.get_checkout = AsyncMock(
-        return_value={"id": "chk_prepare_annual", "status": "ACTIVE", "link": invoice}
-    )
+    gateway._hosted_checkout_url = MagicMock(return_value=invoice)
 
     with patch(
         "app.services.billing_checkout_service.AsaasPaymentGateway",
@@ -1010,5 +1008,6 @@ async def test_prepare_annual_checkout_returns_hosted_link_without_locking_payme
         )
 
     assert result["invoice_url"] == invoice
-    gateway.get_checkout.assert_awaited_once_with("chk_prepare_annual")
+    gateway.get_checkout.assert_not_awaited()
+    gateway._hosted_checkout_url.assert_called_once_with({"id": "chk_prepare_annual"})
     gateway.ensure_card_billing.assert_not_awaited()
