@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.billing.errors import PaymentGatewayError
 from app.billing.types import InternalBillingEventType
 from app.billing.webhook_normalizer import StubWebhookNormalizer
 from app.models.billing import Plan, Subscription
@@ -12,6 +13,41 @@ from app.models.professional import Professional
 from app.services.billing_checkout_service import BillingCheckoutService
 from app.services.plan_catalog_seed import COMMERCIAL_PLAN_SEEDS
 from app.services.saas_billing_service import SaasBillingService
+
+
+@pytest.mark.asyncio
+async def test_checkout_returns_bad_gateway_when_asaas_rejects_customer(
+    db_session,
+    professional,
+    auth_headers,
+    api_client,
+    monkeypatch,
+):
+    professional.cpf = "24971563792"
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[0])
+    db_session.add(plan)
+    await db_session.commit()
+
+    gateway = AsyncMock()
+    gateway.provider_key = "asaas"
+    gateway.create_customer = AsyncMock(
+        side_effect=PaymentGatewayError(
+            'Gateway HTTP 401: {"errors":[{"code":"invalid_environment"}]}',
+            status_code=401,
+        )
+    )
+    monkeypatch.setattr("app.api.v1.billing.get_payment_gateway", lambda: gateway)
+
+    response = await api_client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={"planSlug": plan.slug},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "Não foi possível iniciar o pagamento. Tente novamente em instantes."
+    }
 
 
 @pytest.mark.asyncio

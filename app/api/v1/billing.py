@@ -49,6 +49,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
+_CHECKOUT_GATEWAY_ERROR_DETAIL = (
+    "Não foi possível iniciar o pagamento. Tente novamente em instantes."
+)
+
 # A cobrança é acessível logo após o cadastro. A sessão continua obrigatória,
 # mas a verificação de e-mail permanece reservada às rotas clínicas.
 
@@ -82,6 +86,13 @@ async def track_checkout_started_task(
 
 def _digits_only(value: str | None) -> str:
     return re.sub(r"\D", "", value or "")
+
+
+def _checkout_gateway_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail=_CHECKOUT_GATEWAY_ERROR_DETAIL,
+    )
 
 
 def _plan_public(plan: Plan) -> PlanPublicResponse:
@@ -356,14 +367,25 @@ async def create_billing_checkout(
         if document:
             metadata["customer_document"] = document
         customer_svc = BillingCustomerService(db)
-        metadata["customer_external_id"] = await customer_svc.ensure_customer(
-            professional_id=professional_id,
-            provider=provider,
-            email=professional.email,
-            name=professional.name,
-            gateway=gateway,
-            document=document or None,
-        )
+        try:
+            metadata["customer_external_id"] = await customer_svc.ensure_customer(
+                professional_id=professional_id,
+                provider=provider,
+                email=professional.email,
+                name=professional.name,
+                gateway=gateway,
+                document=document or None,
+            )
+        except PaymentGatewayError as exc:
+            logger.warning(
+                "Billing checkout gateway failure provider=%s stage=%s professional_id=%s: %s",
+                provider,
+                "ensure_customer",
+                professional_id,
+                exc,
+                exc_info=True,
+            )
+            raise _checkout_gateway_error() from exc
         if existing_sub and existing_sub.external_subscription_id:
             metadata["existing_external_subscription_id"] = existing_sub.external_subscription_id
             if existing_sub.external_checkout_id:
@@ -378,7 +400,15 @@ async def create_billing_checkout(
             metadata=metadata,
         )
     except PaymentGatewayError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        logger.warning(
+            "Billing checkout gateway failure provider=%s stage=%s professional_id=%s: %s",
+            provider,
+            "create_checkout_session",
+            professional_id,
+            exc,
+            exc_info=True,
+        )
+        raise _checkout_gateway_error() from exc
 
     await _attach_checkout_to_subscription(
         db,
