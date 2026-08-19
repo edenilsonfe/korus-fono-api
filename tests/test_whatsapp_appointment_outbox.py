@@ -277,6 +277,9 @@ async def test_opt_in_reminder_appends_signed_response_link_at_dispatch_time(
     assert sent_text.startswith("Lembrete atualizado para 10:00.")
     assert "Confirme ou cancele sua presença:" in sent_text
     assert "https://app.korusfono.com.br/confirmar-consulta#token=" in sent_text
+    sent_token = sent_text.rsplit("#token=", maxsplit=1)[1]
+    assert len(sent_token) == 44
+    assert "." not in sent_token
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import quote
@@ -17,6 +20,9 @@ from app.models.appointment import Appointment
 from app.models.professional import Professional
 
 APPOINTMENT_RESPONSE_TOKEN_TYPE = "appointment_attendance_response"
+COMPACT_TOKEN_VERSION = 1
+COMPACT_TOKEN_SIGNATURE_BYTES = 16
+COMPACT_TOKEN_RAW_BYTES = 1 + 16 + COMPACT_TOKEN_SIGNATURE_BYTES
 ACTIVE_RESPONSE_STATUSES = frozenset({"pendente", "confirmado"})
 INVALID_LINK_MESSAGE = "Link inválido ou expirado."
 UNAVAILABLE_RESPONSE_MESSAGE = (
@@ -47,9 +53,10 @@ class AppointmentResponseDetails:
 @dataclass(frozen=True)
 class _ResponseTokenClaims:
     appointment_id: UUID
-    professional_id: UUID
-    scheduled_date: str
-    scheduled_time: str
+    professional_id: UUID | None = None
+    scheduled_date: str | None = None
+    scheduled_time: str | None = None
+    compact_signature: bytes | None = None
 
 
 def _appointment_starts_at(appointment: Appointment) -> datetime:
@@ -57,19 +64,30 @@ def _appointment_starts_at(appointment: Appointment) -> datetime:
     return datetime.combine(appointment.date, appointment.time, tzinfo=timezone)
 
 
+def _compact_token_signature(appointment: Appointment) -> bytes:
+    message = b"\0".join(
+        (
+            APPOINTMENT_RESPONSE_TOKEN_TYPE.encode("ascii"),
+            bytes((COMPACT_TOKEN_VERSION,)),
+            UUID(str(appointment.id)).bytes,
+            UUID(str(appointment.professional_id)).bytes,
+            appointment.date.isoformat().encode("ascii"),
+            appointment.time.isoformat().encode("ascii"),
+        )
+    )
+    secret = get_settings().jwt_secret.encode("utf-8")
+    return hmac.new(secret, message, hashlib.sha256).digest()[
+        :COMPACT_TOKEN_SIGNATURE_BYTES
+    ]
+
+
 def create_appointment_response_token(appointment: Appointment) -> str:
-    settings = get_settings()
-    now = datetime.now(UTC)
-    payload = {
-        "sub": str(appointment.id),
-        "type": APPOINTMENT_RESPONSE_TOKEN_TYPE,
-        "professional_id": str(appointment.professional_id),
-        "scheduled_date": appointment.date.isoformat(),
-        "scheduled_time": appointment.time.isoformat(),
-        "iat": now,
-        "exp": _appointment_starts_at(appointment).astimezone(UTC),
-    }
-    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    payload = (
+        bytes((COMPACT_TOKEN_VERSION,))
+        + UUID(str(appointment.id)).bytes
+        + _compact_token_signature(appointment)
+    )
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
 
 
 def build_appointment_response_url(appointment: Appointment) -> str:
@@ -79,7 +97,28 @@ def build_appointment_response_url(appointment: Appointment) -> str:
     return f"{base_url}/confirmar-consulta#token={token}"
 
 
-def _decode_response_token(token: str) -> _ResponseTokenClaims:
+def _decode_compact_response_token(token: str) -> _ResponseTokenClaims:
+    try:
+        padding = b"=" * (-len(token) % 4)
+        payload = base64.b64decode(
+            token.encode("ascii") + padding,
+            altchars=b"-_",
+            validate=True,
+        )
+        if (
+            len(payload) != COMPACT_TOKEN_RAW_BYTES
+            or payload[0] != COMPACT_TOKEN_VERSION
+        ):
+            raise ValueError("invalid compact appointment response token")
+        return _ResponseTokenClaims(
+            appointment_id=UUID(bytes=payload[1:17]),
+            compact_signature=payload[17:],
+        )
+    except (ValueError, UnicodeError) as exc:
+        raise InvalidAppointmentResponseToken(INVALID_LINK_MESSAGE) from exc
+
+
+def _decode_legacy_response_token(token: str) -> _ResponseTokenClaims:
     settings = get_settings()
     try:
         payload = jwt.decode(
@@ -110,19 +149,25 @@ def _decode_response_token(token: str) -> _ResponseTokenClaims:
         raise InvalidAppointmentResponseToken(INVALID_LINK_MESSAGE) from exc
 
 
+def _decode_response_token(token: str) -> _ResponseTokenClaims:
+    if "." not in token:
+        return _decode_compact_response_token(token)
+    return _decode_legacy_response_token(token)
+
+
 async def _load_appointment(
     db: AsyncSession,
     claims: _ResponseTokenClaims,
     *,
     for_update: bool,
 ) -> tuple[Appointment, Professional]:
+    conditions = [Appointment.id == claims.appointment_id]
+    if claims.compact_signature is None:
+        conditions.append(Appointment.professional_id == claims.professional_id)
     statement = (
         select(Appointment, Professional)
         .join(Professional, Professional.id == Appointment.professional_id)
-        .where(
-            Appointment.id == claims.appointment_id,
-            Appointment.professional_id == claims.professional_id,
-        )
+        .where(*conditions)
     )
     if for_update:
         statement = statement.with_for_update(of=Appointment)
@@ -132,7 +177,14 @@ async def _load_appointment(
         raise InvalidAppointmentResponseToken(INVALID_LINK_MESSAGE)
 
     appointment, professional = row
-    if (
+    if claims.compact_signature is not None:
+        expected_signature = _compact_token_signature(appointment)
+        if not hmac.compare_digest(
+            claims.compact_signature,
+            expected_signature,
+        ):
+            raise InvalidAppointmentResponseToken(INVALID_LINK_MESSAGE)
+    elif (
         appointment.date.isoformat() != claims.scheduled_date
         or appointment.time.isoformat() != claims.scheduled_time
     ):
