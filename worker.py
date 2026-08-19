@@ -7,7 +7,7 @@ from arq import cron
 from arq.connections import RedisSettings
 from sqlalchemy import select
 
-from app.core.config import get_settings
+from app.core.config import get_settings, validate_settings
 from app.core.utils import utcnow
 from app.db.session import AsyncSessionLocal
 from app.models.ai import AIJob
@@ -96,4 +96,4 @@ class WorkerSettings:
 
     @staticmethod
     async def on_startup(ctx):
-        pass
+        validate_settings(get_settings())

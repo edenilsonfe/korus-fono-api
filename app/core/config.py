@@ -1,4 +1,5 @@
 from functools import lru_cache
+from urllib.parse import urlsplit
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -176,6 +177,20 @@ INSECURE_JWT_SECRETS = frozenset({"change-me-in-production", ""})
 PRODUCTION_SENTRY_ENVS = frozenset({"production", "prod"})
 
 
+def _is_public_https_url(value: str) -> bool:
+    try:
+        parsed = urlsplit((value or "").strip())
+        hostname = (parsed.hostname or "").rstrip(".").lower()
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https"
+        and bool(hostname)
+        and hostname not in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+        and not hostname.endswith(".localhost")
+    )
+
+
 def is_production_runtime(settings: Settings) -> bool:
     env = (settings.sentry_environment or "").strip().lower()
     return env in PRODUCTION_SENTRY_ENVS
@@ -206,6 +221,10 @@ def validate_settings(settings: Settings) -> None:
 
     if settings.debug:
         return
+    if not _is_public_https_url(settings.frontend_url):
+        raise RuntimeError(
+            "FRONTEND_URL deve apontar para uma origem HTTPS pública com DEBUG=false"
+        )
     secret = (settings.jwt_secret or "").strip()
     if secret in INSECURE_JWT_SECRETS or len(secret) < 32:
         raise RuntimeError(
