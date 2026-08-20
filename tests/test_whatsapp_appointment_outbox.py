@@ -13,8 +13,8 @@ from app.models.appointment import Appointment
 from app.models.caregiver import Caregiver
 from app.models.notification_message_log import NotificationMessageLog
 from app.models.notification_settings import NotificationSettings
-from app.services.whatsapp_appointment_outbox import create_appointment_event_log
 from app.services.evolution_whatsapp_service import EvolutionDeliveryUnknownError
+from app.services.whatsapp_appointment_outbox import create_appointment_event_log
 from app.services.whatsapp_notification_service import WhatsAppNotificationService
 from app.services.whatsapp_scheduler_service import WhatsAppSchedulerService
 from app.services.whatsapp_types import WhatsAppSendResult
@@ -411,6 +411,21 @@ async def test_ambiguous_delivery_is_not_retried_automatically(
     assert recovered == 0
     assert send_mock.await_count == 1
 
+    appointment_start = datetime.combine(
+        appointment.date, appointment.time, tzinfo=UTC
+    )
+    monkeypatch.setattr(
+        WhatsAppSchedulerService,
+        "_now",
+        lambda _self: appointment_start - timedelta(hours=3),
+    )
+    reminders = await WhatsAppSchedulerService(
+        db_session
+    ).run_appointment_reminders_24h()
+
+    assert reminders == 0
+    assert send_mock.await_count == 1
+
 
 @pytest.mark.asyncio
 async def test_stale_processing_is_quarantined_instead_of_retried(
@@ -444,4 +459,194 @@ async def test_stale_processing_is_quarantined_instead_of_retried(
     assert recovered == 0
     assert event_log.status == "failed"
     assert event_log.error_code == "delivery_unknown"
+    send_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_sends_late_created_appointment_inside_24h_horizon_once(
+    db_session, professional, patient, monkeypatch
+):
+    fixed_now = datetime(2026, 8, 19, 12, 0, tzinfo=UTC)
+    starts_at = fixed_now + timedelta(hours=4)
+    await _enable_opt_in(db_session, patient.id)
+    await _enable_event(db_session, professional.id, "appointment_reminder_24h")
+    appointment = Appointment(
+        professional_id=professional.id,
+        patient_id=patient.id,
+        date=starts_at.date(),
+        time=starts_at.time().replace(tzinfo=None),
+        type="sessão",
+        duration=50,
+        status="pendente",
+    )
+    db_session.add(appointment)
+    await db_session.commit()
+
+    send_mock = AsyncMock(
+        return_value=WhatsAppSendResult(
+            provider="evolution",
+            provider_message_id="late-created-reminder",
+            status="sent",
+            payload={},
+        )
+    )
+    monkeypatch.setattr(
+        "app.services.whatsapp_notification_service.get_active_whatsapp_provider",
+        lambda _db: _fake_provider(send_mock),
+    )
+    monkeypatch.setattr(
+        WhatsAppSchedulerService, "_now", lambda _self: fixed_now
+    )
+    monkeypatch.setattr(
+        "app.services.whatsapp_scheduler_service.ZoneInfo", lambda _key: UTC
+    )
+    scheduler = WhatsAppSchedulerService(db_session)
+
+    assert await scheduler.run_appointment_reminders_24h() == 1
+    assert await scheduler.run_appointment_reminders_24h() == 0
+
+    reminder_logs = (
+        await db_session.execute(
+            select(NotificationMessageLog).where(
+                NotificationMessageLog.appointment_id == appointment.id,
+                NotificationMessageLog.notification_type
+                == "appointment_reminder_24h",
+            )
+        )
+    ).scalars().all()
+    assert len(reminder_logs) == 1
+    assert reminder_logs[0].status == "sent"
+    assert reminder_logs[0].provider_message_id == "late-created-reminder"
+    send_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_recovers_opt_in_skip_before_appointment(
+    db_session, professional, patient, monkeypatch
+):
+    clock = {"now": datetime(2026, 8, 19, 12, 0, tzinfo=UTC)}
+    starts_at = clock["now"] + timedelta(hours=24)
+    caregiver = (
+        await db_session.execute(
+            select(Caregiver).where(Caregiver.patient_id == patient.id)
+        )
+    ).scalar_one()
+    caregiver.phone = "11988887777"
+    caregiver.whatsapp_opt_in = False
+    await _enable_event(db_session, professional.id, "appointment_reminder_24h")
+    appointment = Appointment(
+        professional_id=professional.id,
+        patient_id=patient.id,
+        date=starts_at.date(),
+        time=starts_at.time().replace(tzinfo=None),
+        type="sessão",
+        duration=50,
+        status="pendente",
+    )
+    db_session.add(appointment)
+    await db_session.commit()
+
+    send_mock = AsyncMock(
+        return_value=WhatsAppSendResult(
+            provider="evolution",
+            provider_message_id="recovered-opt-in-reminder",
+            status="sent",
+            payload={},
+        )
+    )
+    monkeypatch.setattr(
+        "app.services.whatsapp_notification_service.get_active_whatsapp_provider",
+        lambda _db: _fake_provider(send_mock),
+    )
+    monkeypatch.setattr(
+        WhatsAppSchedulerService, "_now", lambda _self: clock["now"]
+    )
+    monkeypatch.setattr(
+        "app.services.whatsapp_scheduler_service.ZoneInfo", lambda _key: UTC
+    )
+    scheduler = WhatsAppSchedulerService(db_session)
+
+    assert await scheduler.run_appointment_reminders_24h() == 0
+    event_log = (
+        await db_session.execute(
+            select(NotificationMessageLog).where(
+                NotificationMessageLog.appointment_id == appointment.id,
+                NotificationMessageLog.notification_type
+                == "appointment_reminder_24h",
+            )
+        )
+    ).scalar_one()
+    assert event_log.status == "skipped"
+    assert event_log.payload["skip_reason"] == "whatsapp_opt_in_missing"
+    send_mock.assert_not_awaited()
+
+    caregiver.whatsapp_opt_in = True
+    await db_session.commit()
+    clock["now"] += timedelta(hours=3)
+
+    assert await scheduler.run_appointment_reminders_24h() == 1
+    await db_session.refresh(event_log)
+    assert event_log.status == "sent"
+    assert event_log.provider_message_id == "recovered-opt-in-reminder"
+    assert event_log.payload["recovery_history"][-1]["skip_reason"] == (
+        "whatsapp_opt_in_missing"
+    )
+    assert "skip_reason" not in event_log.payload
+    send_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_does_not_recover_opt_in_skip_without_current_consent(
+    db_session, professional, patient, monkeypatch
+):
+    fixed_now = datetime(2026, 8, 19, 12, 0, tzinfo=UTC)
+    starts_at = fixed_now + timedelta(hours=24)
+    caregiver = (
+        await db_session.execute(
+            select(Caregiver).where(Caregiver.patient_id == patient.id)
+        )
+    ).scalar_one()
+    caregiver.phone = "11988887777"
+    caregiver.whatsapp_opt_in = False
+    await _enable_event(db_session, professional.id, "appointment_reminder_24h")
+    appointment = Appointment(
+        professional_id=professional.id,
+        patient_id=patient.id,
+        date=starts_at.date(),
+        time=starts_at.time().replace(tzinfo=None),
+        type="sessão",
+        duration=50,
+        status="pendente",
+    )
+    db_session.add(appointment)
+    await db_session.commit()
+
+    send_mock = AsyncMock()
+    monkeypatch.setattr(
+        "app.services.whatsapp_notification_service.get_active_whatsapp_provider",
+        lambda _db: _fake_provider(send_mock),
+    )
+    monkeypatch.setattr(
+        WhatsAppSchedulerService, "_now", lambda _self: fixed_now
+    )
+    monkeypatch.setattr(
+        "app.services.whatsapp_scheduler_service.ZoneInfo", lambda _key: UTC
+    )
+    scheduler = WhatsAppSchedulerService(db_session)
+
+    assert await scheduler.run_appointment_reminders_24h() == 0
+    assert await scheduler.run_appointment_reminders_24h() == 0
+
+    reminder_logs = (
+        await db_session.execute(
+            select(NotificationMessageLog).where(
+                NotificationMessageLog.appointment_id == appointment.id,
+                NotificationMessageLog.notification_type
+                == "appointment_reminder_24h",
+            )
+        )
+    ).scalars().all()
+    assert len(reminder_logs) == 1
+    assert reminder_logs[0].status == "skipped"
+    assert reminder_logs[0].payload["skip_reason"] == "whatsapp_opt_in_missing"
     send_mock.assert_not_awaited()

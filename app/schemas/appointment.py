@@ -1,8 +1,14 @@
 from datetime import date as DateType, time as TimeType
+from typing import Literal, TypeAlias
 from uuid import UUID
 
 from app.schemas.common import CamelModel
 from app.schemas.finance import AppointmentCompleteRequest, AppointmentCompleteResponse
+
+
+AppointmentStatus: TypeAlias = Literal[
+    "pendente", "confirmado", "concluido", "cancelado", "falta"
+]
 
 
 class WeekdaySlot(CamelModel):
@@ -18,7 +24,7 @@ class AppointmentCreate(CamelModel):
     time: TimeType
     type: str
     duration: int = 50
-    status: str = "pendente"
+    status: AppointmentStatus = "pendente"
     appointment_type: str = "avulso"
     frequency: str | None = None
     end_date: DateType | None = None
@@ -32,7 +38,7 @@ class AppointmentUpdate(CamelModel):
     time: TimeType | None = None
     type: str | None = None
     duration: int | None = None
-    status: str | None = None
+    status: AppointmentStatus | None = None
 
 
 class AppointmentResponse(CamelModel):
@@ -47,7 +53,7 @@ class AppointmentResponse(CamelModel):
     type: str
     therapist: str
     duration: int
-    status: str
+    status: AppointmentStatus
     appointment_type: str = "avulso"
     series_id: str | None = None
     frequency: str | None = None

@@ -424,6 +424,50 @@ class WhatsAppNotificationService:
                 return True
         return False
 
+    async def _requeue_opt_in_skipped_reminder(self, log_id: UUID) -> bool:
+        """Reopen a reminder only when consent and phone are now both present."""
+        result = await self.db.execute(
+            select(NotificationMessageLog)
+            .where(NotificationMessageLog.id == log_id)
+            .with_for_update(skip_locked=True)
+        )
+        log = result.scalar_one_or_none()
+        payload = dict(log.payload or {}) if log else {}
+        if (
+            not log
+            or log.notification_type != WHATSAPP_EVENT_REMINDER_24H
+            or log.status != MESSAGE_STATUS_SKIPPED
+            or payload.get("skip_reason") != "whatsapp_opt_in_missing"
+            or log.provider_message_id is not None
+            or log.patient_id is None
+        ):
+            await self.db.commit()
+            return False
+
+        phone, opt_in = await _primary_caregiver_contact(self.db, log.patient_id)
+        if not opt_in or not phone:
+            await self.db.commit()
+            return False
+
+        recovery_history = list(payload.get("recovery_history") or [])
+        recovery_history.append(
+            {
+                "skip_reason": payload.pop("skip_reason"),
+                "previous_attempt_count": int(log.attempt_count or 0),
+                "recovered_at": datetime.now(UTC).isoformat(),
+            }
+        )
+        payload["recovery_history"] = recovery_history
+        log.payload = payload
+        log.status = MESSAGE_STATUS_QUEUED
+        log.attempt_count = 0
+        log.error_code = None
+        log.last_error = None
+        log.failed_at = None
+        log.next_retry_at = None
+        await self.db.commit()
+        return True
+
     async def dispatch_event_log(self, log_id: UUID) -> bool:
         """Claim and send one durable appointment outbox event."""
         log = await self._claim_event_log(log_id)
@@ -628,6 +672,11 @@ class WhatsAppNotificationService:
         if not log:
             return False
         await self.db.commit()
+        if (
+            log.status == MESSAGE_STATUS_SKIPPED
+            and not await self._requeue_opt_in_skipped_reminder(log.id)
+        ):
+            return False
         return await self.dispatch_event_log(log.id)
 
     async def _dispatch_appointment_event(

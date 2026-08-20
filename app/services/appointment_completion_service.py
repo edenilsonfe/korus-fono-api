@@ -67,8 +67,12 @@ async def complete_appointment(
     if not row:
         raise HTTPException(status_code=404, detail="Atendimento não encontrado")
     appointment, patient = row
-    if appointment.status == "cancelado":
-        raise HTTPException(status_code=409, detail="Um atendimento cancelado não pode ser concluído")
+    if appointment.status in {"cancelado", "falta"}:
+        status_label = "cancelado" if appointment.status == "cancelado" else "com falta"
+        raise HTTPException(
+            status_code=409,
+            detail=f"Um atendimento {status_label} não pode ser concluído",
+        )
 
     session_result = await db.execute(
         select(Session).where(

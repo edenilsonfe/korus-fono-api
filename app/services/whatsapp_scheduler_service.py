@@ -23,6 +23,7 @@ from app.models.notification_message_log import (
     MESSAGE_STATUS_FAILED,
     MESSAGE_STATUS_PROCESSING,
     MESSAGE_STATUS_QUEUED,
+    MESSAGE_STATUS_SKIPPED,
     NotificationMessageLog,
 )
 from app.services.whatsapp_notification_service import (
@@ -136,22 +137,24 @@ class WhatsAppSchedulerService:
         return sent
 
     async def run_appointment_reminders_24h(self) -> int:
+        """Send unsent reminders as soon as an appointment enters the 24h horizon."""
         settings = get_settings()
         notifier = WhatsAppNotificationService(self.db)
         now = self._now()
-        target = now + timedelta(hours=settings.whatsapp_reminder_window_hours)
         tolerance = timedelta(minutes=settings.whatsapp_reminder_tolerance_minutes)
-        window_start = target - tolerance
-        window_end = target + tolerance
-
-        candidate_dates = {window_start.date(), window_end.date(), target.date()}
+        horizon_end = (
+            now
+            + timedelta(hours=settings.whatsapp_reminder_window_hours)
+            + tolerance
+        )
 
         result = await self.db.execute(
             select(Appointment)
             .options(joinedload(Appointment.patient))
             .where(
                 Appointment.status.in_(ACTIVE_APPOINTMENT_STATUSES),
-                Appointment.date.in_(candidate_dates),
+                Appointment.date >= now.date(),
+                Appointment.date <= horizon_end.date(),
             )
         )
         appointments = result.scalars().unique().all()
@@ -160,7 +163,7 @@ class WhatsAppSchedulerService:
             starts_at = self._appointment_starts_at(appointment)
             if starts_at <= now:
                 continue
-            if not (window_start <= starts_at <= window_end):
+            if starts_at > horizon_end:
                 continue
             candidates.append(appointment)
 
@@ -186,6 +189,8 @@ class WhatsAppSchedulerService:
                 NotificationMessageLog.appointment_id,
                 NotificationMessageLog.scheduled_date,
                 NotificationMessageLog.scheduled_time,
+                NotificationMessageLog.status,
+                NotificationMessageLog.payload,
             ).where(
                 NotificationMessageLog.appointment_id.in_(appointment_ids),
                 NotificationMessageLog.notification_type == WHATSAPP_EVENT_REMINDER_24H,
@@ -208,17 +213,29 @@ class WhatsAppSchedulerService:
                         NotificationMessageLog.attempt_count >= MAX_SEND_ATTEMPTS,
                     ),
                     NotificationMessageLog.error_code.in_(
-                        ("no_phone", "missing_phone", "invalid_phone")
+                        _NON_RETRYABLE_ERRORS
                     ),
                 ),
             )
         )
         already_sent: set = set()
         by_id = {appointment.id: appointment for appointment in appointments}
-        for appointment_id, scheduled_date, scheduled_time in result.all():
+        for (
+            appointment_id,
+            scheduled_date,
+            scheduled_time,
+            status,
+            payload,
+        ) in result.all():
             appointment = by_id.get(appointment_id)
             if not appointment:
                 continue
             if scheduled_date == appointment.date and scheduled_time == appointment.time:
+                if (
+                    status == MESSAGE_STATUS_SKIPPED
+                    and (payload or {}).get("skip_reason")
+                    == "whatsapp_opt_in_missing"
+                ):
+                    continue
                 already_sent.add(appointment_id)
         return already_sent
