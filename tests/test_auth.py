@@ -130,3 +130,57 @@ async def test_register_can_checkout_before_verification_and_creates_demo_patien
     assert patients.status_code == 200
     demo = next(p for p in patients.json()["items"] if p["name"] == "Paciente demonstração")
     assert demo["isDemo"] is True
+
+    anamnese = await api_client.get(f"/api/v1/patients/{demo['id']}/anamnese")
+    assert anamnese.status_code == 200
+    entries = {entry["section"]: entry["value"] for entry in anamnese.json()["entries"]}
+    assert set(entries) == {
+        "Gestação",
+        "Parto",
+        "Desenvolvimento motor",
+        "Desenvolvimento da linguagem",
+        "Histórico escolar",
+        "Comorbidades",
+        "Medicamentos",
+        "Observações",
+    }
+    assert all(value.strip() for value in entries.values())
+    assert "fictícios" in entries["Observações"]
+
+    evolutions = await api_client.get(f"/api/v1/patients/{demo['id']}/evolutions")
+    assert evolutions.status_code == 200
+    evolution_items = evolutions.json()
+    assert {item["title"] for item in evolution_items} == {
+        "Avaliação inicial",
+        "Adaptação ao processo terapêutico",
+        "Ampliação da comunicação funcional",
+        "Evolução recente",
+    }
+    assert len(evolution_items) == 4
+    assert all(item["content"].strip() for item in evolution_items)
+
+    assessments = await api_client.get(f"/api/v1/patients/{demo['id']}/assessments")
+    assert assessments.status_code == 200
+    assessment_items = assessments.json()
+    assert {item["protocolId"] for item in assessment_items} == {
+        "desenvolvimento-infantil",
+        "portage",
+    }
+    assert all(item["status"] == "completed" for item in assessment_items)
+    assert all(item["interpretation"].strip() for item in assessment_items)
+    assert all(item["metadata"]["demoSeedVersion"] == 1 for item in assessment_items)
+    assert "mchat" not in {item["protocolId"] for item in assessment_items}
+
+    goals = await api_client.get(f"/api/v1/patients/{demo['id']}/goals")
+    assert goals.status_code == 200
+    assert {item["title"] for item in goals.json()} == {
+        "Ampliar vocabulário funcional",
+        "Combinar duas palavras espontaneamente",
+    }
+
+    domains = await api_client.get(f"/api/v1/patients/{demo['id']}/clinical-domains")
+    assert domains.status_code == 200
+    domain_items = {item["key"]: item for item in domains.json()}
+    assert set(domain_items) == {"linguagem", "social", "atencao"}
+    assert all(len(item["history"]) == 3 for item in domain_items.values())
+    assert all(item["delta"] > 0 for item in domain_items.values())

@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from uuid import UUID
 
@@ -14,11 +14,6 @@ from app.core.auth_cookies import (
 )
 from app.core.client_ip import get_client_ip
 from app.core.config import get_settings
-from app.core.demo_patient import (
-    DEMO_AVATAR_COLOR,
-    DEMO_PATIENT_NAME,
-    demo_patient_birth_date,
-)
 from app.core.deps import get_current_professional
 from app.core.security import (
     create_access_token,
@@ -27,7 +22,6 @@ from app.core.security import (
 )
 from app.db.session import get_db
 from app.core.specialty_catalog import specialty_label
-from app.models.patient import Patient
 from app.models.professional import Professional
 from app.schemas.auth import (
     ChangePasswordRequest,
@@ -66,6 +60,7 @@ from app.services.refresh_token_service import (
 )
 from app.services.meta_pixel_service import MetaPixelService
 from app.services.new_account_notification import send_new_account_notification_sync
+from app.services.demo_patient_service import ensure_demo_patient
 from app.services.whatsapp_welcome_service import (
     dispatch_whatsapp_welcome_message,
     queue_whatsapp_welcome_message,
@@ -222,18 +217,7 @@ async def register(
     await db.flush()
     add_default_financial_categories(db, professional.id)
     add_default_payment_methods(db, professional.id)
-    db.add(
-        Patient(
-            professional_id=professional.id,
-            name=DEMO_PATIENT_NAME,
-            birth_date=demo_patient_birth_date(),
-            diagnosis_keys=[],
-            status="avaliacao",
-            start_date=date.today(),
-            avatar_color=DEMO_AVATAR_COLOR,
-            is_demo=True,
-        )
-    )
+    await ensure_demo_patient(db, professional)
     welcome_log = await queue_whatsapp_welcome_message(db, professional)
     access_token, refresh_token = await _issue_tokens(db, professional)
     raw_token = await request_email_verification(db, professional, force=True)

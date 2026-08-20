@@ -3,7 +3,9 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import httpx
 from fastapi import HTTPException
+from openai import AuthenticationError, RateLimitError
 
 from app.core.config import get_settings
 from app.services.ai_prompts import AI_TOOL_SPECS, build_request_prompt, build_tool_prompt
@@ -111,6 +113,47 @@ async def test_run_llm_rejects_unconfigured_provider_instead_of_simulating():
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail == "Ferramentas de IA não configuradas."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "provider_error",
+    [
+        RateLimitError(
+            "rate limited",
+            response=httpx.Response(429, request=httpx.Request("POST", "https://provider")),
+            body={"error": {"type": "FreeUsageLimitError"}},
+        ),
+        AuthenticationError(
+            "insufficient credits",
+            response=httpx.Response(401, request=httpx.Request("POST", "https://provider")),
+            body={"error": {"type": "CreditsError"}},
+        ),
+    ],
+)
+async def test_run_llm_translates_provider_capacity_errors_to_safe_json_error(provider_error):
+    from app.services.ai_service import run_llm
+
+    with patch("app.services.ai_service.get_settings") as mock_settings:
+        settings = mock_settings.return_value
+        settings.opencode_api_key = "test-key"
+        settings.opencode_base_url = "https://provider"
+        settings.opencode_model = "test-model"
+        settings.assistant_llm_timeout_seconds = 30
+
+        with patch("openai.AsyncOpenAI") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value = mock_client
+            mock_client.chat.completions.create = AsyncMock(side_effect=provider_error)
+
+            with pytest.raises(HTTPException) as exc_info:
+                await run_llm("dados clínicos reais")
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == (
+        "Serviço de IA temporariamente indisponível. Tente novamente em alguns minutos."
+    )
+    assert exc_info.value.headers == {"Retry-After": "60"}
 
 
 def _force_memory_rate_limit_fallback(*_args, **_kwargs):

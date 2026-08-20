@@ -22,6 +22,7 @@ def _prod_asaas(**kwargs) -> Settings:
         "billing_provider": "asaas",
         "asaas_api_key": ASAAS_KEY,
         "opencode_api_key": "opencode-test-key",
+        "frontend_url": "https://app.korusfono.com.br",
         **EVOLUTION_KW,
     }
     base.update(kwargs)
@@ -73,6 +74,30 @@ def test_production_allows_asaas():
 def test_production_refuses_unconfigured_ai_provider():
     settings = _prod_asaas(opencode_api_key="")
     with pytest.raises(RuntimeError, match="OPENCODE_API_KEY"):
+        validate_settings(settings)
+
+
+@pytest.mark.parametrize(
+    "frontend_url",
+    [
+        "",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://[::1]:5173",
+    ],
+)
+def test_production_refuses_non_public_frontend_url(frontend_url: str):
+    settings = _prod_asaas(frontend_url=frontend_url)
+    with pytest.raises(RuntimeError, match="FRONTEND_URL"):
+        validate_settings(settings)
+
+
+def test_non_debug_runtime_refuses_local_frontend_without_sentry_environment():
+    settings = _prod_asaas(
+        sentry_environment="",
+        frontend_url="http://localhost:5173",
+    )
+    with pytest.raises(RuntimeError, match="FRONTEND_URL"):
         validate_settings(settings)
 
 

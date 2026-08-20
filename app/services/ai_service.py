@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -12,6 +13,9 @@ from app.models.ai import AIJob
 from app.models.patient import Patient
 from app.models.professional import Professional
 from app.services.patient import get_patient_aggregates
+
+
+logger = logging.getLogger(__name__)
 
 
 def hash_input(data: dict) -> str:
@@ -93,7 +97,7 @@ async def run_llm(prompt: str, system: str = "", output: str = "plain") -> str:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Ferramentas de IA não configuradas.",
         )
-    from openai import AsyncOpenAI
+    from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
 
     client = AsyncOpenAI(
         api_key=settings.opencode_api_key,
@@ -104,7 +108,25 @@ async def run_llm(prompt: str, system: str = "", output: str = "plain") -> str:
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
-    response = await client.chat.completions.create(model=settings.opencode_model, messages=messages)
+    try:
+        response = await client.chat.completions.create(
+            model=settings.opencode_model,
+            messages=messages,
+        )
+    except (APIStatusError, APIConnectionError, APITimeoutError) as exc:
+        logger.warning(
+            "AI provider temporarily unavailable: error=%s status=%s",
+            type(exc).__name__,
+            getattr(exc, "status_code", None),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Serviço de IA temporariamente indisponível. "
+                "Tente novamente em alguns minutos."
+            ),
+            headers={"Retry-After": "60"},
+        ) from exc
     content = response.choices[0].message.content or ""
     from app.services.assistant.format_reply import sanitize_llm_markdown, sanitize_llm_plain_text
 
