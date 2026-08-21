@@ -8,11 +8,37 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.constants.whatsapp_events import format_event_message
 from app.models.appointment import Appointment
 from app.models.caregiver import Caregiver
 from app.models.notification_message_log import NotificationMessageLog
 from app.services.whatsapp_notification_service import WhatsAppNotificationService
 from app.services.whatsapp_types import WhatsAppSendResult
+
+
+def test_template_variables_support_portuguese_names_and_legacy_aliases():
+    context = {
+        "patient_name": "João Silva",
+        "caregiver_name": "Maria Silva",
+        "professional_name": "Dra. Camila Rocha",
+        "appointment_date": "21/08/2026",
+        "appointment_time": "09:30",
+        "clinic_name": "Clínica Camila",
+    }
+
+    assert format_event_message(
+        "appointment_confirmation",
+        context,
+        custom_template=(
+            "Oi, {{nomeResponsavel}}. {{nomePaciente}} será atendido por "
+            "{{nomeProfissional}} em {{dataAtendimento}} às {{horarioAtendimento}}."
+        ),
+    ) == "Oi, Maria. João será atendido por Dra. em 21/08/2026 às 09:30."
+    assert format_event_message(
+        "appointment_confirmation",
+        context,
+        custom_template="{{patientName}} / {{caregiverName}} / {{appointmentDate}}",
+    ) == "João / Maria / 21/08/2026"
 
 
 @pytest.fixture(autouse=True)
@@ -45,6 +71,9 @@ async def test_reminder_template_survives_update_and_reload(api_client, auth_hea
         == custom_template
     )
     assert updated.json()["templateDefaults"]["appointment_reminder_24h"]
+    assert "{{nomePaciente}}" in updated.json()["templateDefaults"][
+        "appointment_reminder_24h"
+    ]
 
     reloaded = await api_client.get(
         "/api/v1/whatsapp/settings",

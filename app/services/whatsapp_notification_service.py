@@ -56,7 +56,7 @@ _NON_RETRYABLE_ERROR_CODES = frozenset(
 
 async def _primary_caregiver_contact(
     db: AsyncSession, patient_id: UUID
-) -> tuple[str | None, bool]:
+) -> tuple[str | None, bool, str]:
     result = await db.execute(
         select(Caregiver)
         .where(Caregiver.patient_id == patient_id)
@@ -65,8 +65,8 @@ async def _primary_caregiver_contact(
     caregivers = result.scalars().all()
     primary = next((c for c in caregivers if c.is_primary), caregivers[0] if caregivers else None)
     if not primary:
-        return None, False
-    return primary.phone or None, primary.whatsapp_opt_in
+        return None, False, ""
+    return primary.phone or None, primary.whatsapp_opt_in, primary.name
 
 
 class WhatsAppNotificationService:
@@ -444,7 +444,9 @@ class WhatsAppNotificationService:
             await self.db.commit()
             return False
 
-        phone, opt_in = await _primary_caregiver_contact(self.db, log.patient_id)
+        phone, opt_in, _caregiver_name = await _primary_caregiver_contact(
+            self.db, log.patient_id
+        )
         if not opt_in or not phone:
             await self.db.commit()
             return False
@@ -529,7 +531,9 @@ class WhatsAppNotificationService:
         }
 
         patient: Patient = appointment.patient
-        phone, opt_in = await _primary_caregiver_contact(self.db, patient.id)
+        phone, opt_in, caregiver_name = await _primary_caregiver_contact(
+            self.db, patient.id
+        )
         if not opt_in:
             await self._mark_log_skipped(log, reason="whatsapp_opt_in_missing")
             return False
@@ -559,6 +563,8 @@ class WhatsAppNotificationService:
         context = {
             "patient_name": patient.name,
             "patient_first_name": self._first_name(patient.name),
+            "caregiver_name": caregiver_name,
+            "caregiver_first_name": self._first_name(caregiver_name),
             "professional_name": professional.name,
             "professional_first_name": self._first_name(professional.name),
             "appointment_date": appointment.date.strftime("%d/%m/%Y"),

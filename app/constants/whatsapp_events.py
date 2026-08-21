@@ -31,21 +31,21 @@ APPOINTMENT_NOTIFICATION_EVENT_MAP: dict[str, str] = {
 }
 
 DEFAULT_APPOINTMENT_REMINDER_MESSAGE = (
-    "Olá, {{patientName}}. Tudo bem?\n\n"
-    "Lembrando que sua sessão com {{clinicianName}} está marcada para:\n\n"
-    "🗓️ {{appointmentDate}}\n"
-    "⏰ {{appointmentTime}}\n"
-    "📍 {{clinicName}}\n\n"
+    "Olá, {{nomePaciente}}. Tudo bem?\n\n"
+    "Lembrando que sua sessão com {{nomeProfissional}} está marcada para:\n\n"
+    "🗓️ {{dataAtendimento}}\n"
+    "⏰ {{horarioAtendimento}}\n"
+    "📍 {{nomeClinica}}\n\n"
     "Qualquer imprevisto, me avise com antecedência."
 )
 
 # Positional form retained for the provider's default reminder method.
 REMINDER_TEMPLATE_BODY = (
-    DEFAULT_APPOINTMENT_REMINDER_MESSAGE.replace("{{patientName}}", "{{1}}")
-    .replace("{{clinicianName}}", "{{2}}")
-    .replace("{{appointmentDate}}", "{{3}}")
-    .replace("{{appointmentTime}}", "{{4}}")
-    .replace("{{clinicName}}", "{{5}}")
+    DEFAULT_APPOINTMENT_REMINDER_MESSAGE.replace("{{nomePaciente}}", "{{1}}")
+    .replace("{{nomeProfissional}}", "{{2}}")
+    .replace("{{dataAtendimento}}", "{{3}}")
+    .replace("{{horarioAtendimento}}", "{{4}}")
+    .replace("{{nomeClinica}}", "{{5}}")
 )
 
 # Welcome message sent by the platform's own number right after registration.
@@ -66,40 +66,40 @@ WELCOME_MESSAGE_MAX_LENGTH = 4000
 DEFAULT_EVENT_MESSAGE_TEMPLATES: dict[str, str] = {
     WHATSAPP_EVENT_REMINDER_24H: DEFAULT_APPOINTMENT_REMINDER_MESSAGE,
     WHATSAPP_EVENT_CONFIRMATION: (
-        "Olá, {{patientName}}. Tudo bem?\n\n"
-        "Sua sessão com {{clinicianName}} foi confirmada para:\n\n"
-        "🗓️ {{appointmentDate}}\n"
-        "⏰ {{appointmentTime}}\n"
-        "📍 {{clinicName}}\n\n"
+        "Olá, {{nomePaciente}}. Tudo bem?\n\n"
+        "Sua sessão com {{nomeProfissional}} foi confirmada para:\n\n"
+        "🗓️ {{dataAtendimento}}\n"
+        "⏰ {{horarioAtendimento}}\n"
+        "📍 {{nomeClinica}}\n\n"
         "Qualquer dúvida, estou à disposição."
     ),
     WHATSAPP_EVENT_CANCELLED: (
-        "Olá, {{patientName}}. Tudo bem?\n\n"
+        "Olá, {{nomePaciente}}. Tudo bem?\n\n"
         "Por um imprevisto, precisaremos cancelar o atendimento que estava marcado para:\n\n"
-        "🗓️ {{appointmentDate}}\n"
-        "⏰ {{appointmentTime}}\n\n"
+        "🗓️ {{dataAtendimento}}\n"
+        "⏰ {{horarioAtendimento}}\n\n"
         "Peço desculpas por isso. Quero te atender no melhor horário possível, "
         "então me diga quando fica melhor para você.\n\n"
         "Combinado?"
     ),
     WHATSAPP_EVENT_RESCHEDULED: (
-        "Olá, {{patientName}}. Tudo bem?\n\n"
-        "Seu atendimento com {{clinicianName}} foi reagendado para:\n\n"
-        "🗓️ {{appointmentDate}}\n"
-        "⏰ {{appointmentTime}}\n"
-        "📍 {{clinicName}}\n\n"
+        "Olá, {{nomePaciente}}. Tudo bem?\n\n"
+        "Seu atendimento com {{nomeProfissional}} foi reagendado para:\n\n"
+        "🗓️ {{dataAtendimento}}\n"
+        "⏰ {{horarioAtendimento}}\n"
+        "📍 {{nomeClinica}}\n\n"
         "Se precisar de outro horário, é só me avisar."
     ),
     WHATSAPP_EVENT_BILLING_REMINDER: (
-        "Olá, {{patientName}}. Tudo bem?\n\n"
-        "Lembramos que há um pagamento pendente de R$ {{amount}} "
-        "com vencimento em {{dueDate}}.\n\n"
+        "Olá, {{nomePaciente}}. Tudo bem?\n\n"
+        "Lembramos que há um pagamento pendente de R$ {{valor}} "
+        "com vencimento em {{dataVencimento}}.\n\n"
         "Qualquer dúvida, estou à disposição."
     ),
     WHATSAPP_EVENT_BILLING_OVERDUE: (
-        "Olá, {{patientName}}. Tudo bem?\n\n"
-        "Identificamos um pagamento em atraso de R$ {{amount}} "
-        "(vencimento {{dueDate}}).\n\n"
+        "Olá, {{nomePaciente}}. Tudo bem?\n\n"
+        "Identificamos um pagamento em atraso de R$ {{valor}} "
+        "(vencimento {{dataVencimento}}).\n\n"
         "Entre em contato para regularizar."
     ),
 }
@@ -118,18 +118,46 @@ def _first_name(full_name: str | None) -> str:
 
 def build_template_context(raw: dict[str, str]) -> dict[str, str]:
     patient_name = raw.get("patient_name", "")
+    caregiver_name = raw.get("caregiver_name", "")
     professional_name = raw.get("professional_name", "")
-    return {
-        "patientName": raw.get("patient_first_name") or _first_name(patient_name) or patient_name,
-        "clinicianName": raw.get("professional_first_name")
+    patient_first_name = (
+        raw.get("patient_first_name") or _first_name(patient_name) or patient_name
+    )
+    caregiver_first_name = (
+        raw.get("caregiver_first_name") or _first_name(caregiver_name) or caregiver_name
+    )
+    professional_first_name = (
+        raw.get("professional_first_name")
         or _first_name(professional_name)
-        or professional_name,
-        "appointmentDate": raw.get("appointment_date", ""),
-        "appointmentTime": raw.get("appointment_time", ""),
-        "appointmentType": raw.get("appointment_type", ""),
-        "clinicName": raw.get("clinic_name", ""),
-        "amount": raw.get("amount", ""),
-        "dueDate": raw.get("due_date", ""),
+        or professional_name
+    )
+    appointment_date = raw.get("appointment_date", "")
+    appointment_time = raw.get("appointment_time", "")
+    appointment_type = raw.get("appointment_type", "")
+    clinic_name = raw.get("clinic_name", "")
+    amount = raw.get("amount", "")
+    due_date = raw.get("due_date", "")
+    return {
+        # Nomes em português são o contrato exibido no editor.
+        "nomePaciente": patient_first_name,
+        "nomeResponsavel": caregiver_first_name,
+        "nomeProfissional": professional_first_name,
+        "dataAtendimento": appointment_date,
+        "horarioAtendimento": appointment_time,
+        "tipoAtendimento": appointment_type,
+        "nomeClinica": clinic_name,
+        "valor": amount,
+        "dataVencimento": due_date,
+        # Aliases legados mantêm templates já salvos em inglês funcionando.
+        "patientName": patient_first_name,
+        "caregiverName": caregiver_first_name,
+        "clinicianName": professional_first_name,
+        "appointmentDate": appointment_date,
+        "appointmentTime": appointment_time,
+        "appointmentType": appointment_type,
+        "clinicName": clinic_name,
+        "amount": amount,
+        "dueDate": due_date,
     }
 
 

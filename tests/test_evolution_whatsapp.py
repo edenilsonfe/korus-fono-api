@@ -613,8 +613,8 @@ async def test_dispatch_reminder_uses_professional_custom_template(
     caregiver.phone = "11988887777"
 
     custom_template = (
-        "Oi, {{patientName}}! Lembrete com {{clinicianName}} em "
-        "{{appointmentDate}} às {{appointmentTime}}."
+        "Oi, {{nomeResponsavel}}! Lembrete de {{nomePaciente}} com "
+        "{{nomeProfissional}} em {{dataAtendimento}} às {{horarioAtendimento}}."
     )
     settings_row = NotificationSettings(
         professional_id=professional.id,
@@ -662,7 +662,10 @@ async def test_dispatch_reminder_uses_professional_custom_template(
     send_text_mock.assert_awaited_once_with(
         professional.id,
         "11988887777",
-        f"Oi, João! Lembrete com Dra. em {appt.date.strftime('%d/%m/%Y')} às 09:00.",
+        (
+            f"Oi, Maria! Lembrete de João com Dra. em "
+            f"{appt.date.strftime('%d/%m/%Y')} às 09:00."
+        ),
     )
     send_default_reminder_mock.assert_not_awaited()
 
