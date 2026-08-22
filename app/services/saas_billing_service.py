@@ -205,11 +205,33 @@ class SaasBillingService:
             if not subscriptions:
                 continue
 
-            target = subscriptions[0]
-            for sub in subscriptions:
-                if sub.status in ("active", "trialing", "incomplete"):
-                    target = sub
-                    break
+            external_subscription_id = payload.get("external_subscription_id")
+            external_checkout_id = payload.get("external_checkout_id")
+            target = next(
+                (
+                    sub
+                    for sub in subscriptions
+                    if external_subscription_id
+                    and sub.external_subscription_id == str(external_subscription_id)
+                ),
+                None,
+            )
+            if target is None:
+                target = next(
+                    (
+                        sub
+                        for sub in subscriptions
+                        if external_checkout_id
+                        and sub.external_checkout_id == str(external_checkout_id)
+                    ),
+                    None,
+                )
+            if target is None:
+                target = subscriptions[0]
+                for sub in subscriptions:
+                    if sub.status in ("active", "trialing", "incomplete"):
+                        target = sub
+                        break
 
             target.status = sub_status
             if payload.get("provider"):

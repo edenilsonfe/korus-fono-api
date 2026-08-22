@@ -122,6 +122,33 @@ class AsaasWebhookNormalizer(WebhookNormalizer):
     def normalize(self, raw_body: dict[str, Any], headers: dict[str, str]) -> list[NormalizedBillingEvent]:
         event_name = str(raw_body.get("event") or "")
 
+        checkout = raw_body.get("checkout") or {}
+        if event_name == "CHECKOUT_PAID" and isinstance(checkout, dict) and checkout:
+            checkout_id = checkout.get("id") or raw_body.get("id")
+            ext_ref = checkout.get("externalReference")
+            professional_id, plan_slug = _parse_external_reference(ext_ref)
+            payload = {
+                **checkout,
+                "provider": "asaas",
+                "external_reference": ext_ref,
+                "plan_slug": plan_slug,
+                "external_checkout_id": checkout_id,
+                "checkout_session_id": checkout_id,
+                "last_payment_at": raw_body.get("dateCreated")
+                or checkout.get("dateCreated"),
+                "subscription_status": "active",
+            }
+            if professional_id:
+                payload["professional_id"] = professional_id
+            return [
+                NormalizedBillingEvent(
+                    event_type=InternalBillingEventType.PAYMENT_SUCCEEDED,
+                    external_event_id=f"asaas-{event_name}-{checkout_id or 'unknown'}",
+                    payload=payload,
+                    professional_hint=professional_id,
+                )
+            ]
+
         subscription = raw_body.get("subscription") or {}
         if isinstance(subscription, dict) and subscription and event_name.startswith("SUBSCRIPTION"):
             sub_id = subscription.get("id") or "unknown"

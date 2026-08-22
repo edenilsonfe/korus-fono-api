@@ -1,10 +1,15 @@
 """HTTP-level auth matrix for POST /billing/webhooks/{provider}."""
 
+from datetime import UTC, datetime
+
 import pytest
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.compiler import compiles
 
 from app.core.config import get_settings
+from app.models.billing import Plan, Subscription
+from app.models.professional import Professional
+from app.services.plan_catalog_seed import COMMERCIAL_PLAN_SEEDS
 
 
 # ponytail: sqlite (test DB) has no native JSONB/ARRAY; same shim as
@@ -62,6 +67,82 @@ async def test_asaas_webhook_accepts_correct_header(api_client, monkeypatch):
         headers={"asaas-access-token": "correct-token"},
     )
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_asaas_checkout_paid_activates_the_matching_annual_subscription(
+    api_client,
+    db_session,
+    monkeypatch,
+):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "asaas_webhook_token", "correct-token")
+
+    monthly_plan = Plan(**COMMERCIAL_PLAN_SEEDS[0])
+    yearly_plan = Plan(**COMMERCIAL_PLAN_SEEDS[1])
+    professional = Professional(
+        email="checkout-paid@test.com",
+        password_hash="hash",
+        name="Checkout Paid",
+        subscription_status="trialing",
+        trial_started_at=datetime(2026, 8, 15, tzinfo=UTC),
+        trial_ends_at=datetime(2026, 8, 22, tzinfo=UTC),
+    )
+    db_session.add_all([monthly_plan, yearly_plan, professional])
+    await db_session.flush()
+
+    annual_subscription = Subscription(
+        professional_id=professional.id,
+        plan_id=yearly_plan.id,
+        status="incomplete",
+        provider="asaas",
+        external_checkout_id="checkout-paid-annual",
+        updated_at=datetime(2026, 8, 21, tzinfo=UTC),
+    )
+    newer_monthly_subscription = Subscription(
+        professional_id=professional.id,
+        plan_id=monthly_plan.id,
+        status="active",
+        provider="asaas",
+        external_subscription_id="sub-monthly-existing",
+        external_checkout_id="pay-monthly-existing",
+        updated_at=datetime(2026, 8, 22, tzinfo=UTC),
+    )
+    db_session.add_all([annual_subscription, newer_monthly_subscription])
+    await db_session.commit()
+
+    response = await api_client.post(
+        "/api/v1/billing/webhooks/asaas",
+        json={
+            "id": "evt-checkout-paid-annual",
+            "event": "CHECKOUT_PAID",
+            "dateCreated": "2026-08-21 21:58:25",
+            "checkout": {
+                "id": "checkout-paid-annual",
+                "status": "PAID",
+                "externalReference": f"{professional.id}:korusfono_pro_yearly",
+                "chargeTypes": ["DETACHED", "INSTALLMENT"],
+            },
+        },
+        headers={"asaas-access-token": "correct-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"received": True, "events": 1}
+
+    await db_session.refresh(professional)
+    await db_session.refresh(annual_subscription)
+    await db_session.refresh(newer_monthly_subscription)
+    assert professional.subscription_status == "active"
+    assert annual_subscription.status == "active"
+    assert annual_subscription.last_payment_at == datetime(
+        2026, 8, 21, 21, 58, 25
+    )
+    assert annual_subscription.current_period_end == datetime(
+        2027, 8, 21, 21, 58, 25
+    )
+    assert newer_monthly_subscription.plan_id == monthly_plan.id
+    assert newer_monthly_subscription.external_checkout_id == "pay-monthly-existing"
 
 
 @pytest.mark.asyncio
