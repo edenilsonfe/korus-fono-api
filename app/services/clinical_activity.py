@@ -95,7 +95,7 @@ async def record_evolution(
         patient_id=evolution.patient_id,
         professional_id=professional.id,
         event_type="evolucao",
-        title=evolution.title,
+        title=evolution.title or "Evolução registrada",
         description=(evolution.content or "")[:200],
         source_id=evolution.id,
     )

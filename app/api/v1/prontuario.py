@@ -71,7 +71,7 @@ async def create_evolution(
         session_id=UUID(body.session_id) if body.session_id else None,
         professional_id=professional.id,
         date=utcnow(),
-        title=body.title,
+        title=(body.title.strip() or None) if body.title else None,
         content=body.content,
     )
     db.add(evolution)

@@ -22,7 +22,7 @@ class Evolution(Base, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("professionals.id"), nullable=False
     )
     date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
 
     patient: Mapped["Patient"] = relationship(back_populates="evolutions")  # noqa: F821
