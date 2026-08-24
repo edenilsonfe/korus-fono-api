@@ -88,3 +88,58 @@ async def create_appointment_event_log(
     db.add(log)
     await db.flush()
     return log
+
+
+async def create_appointment_event_logs(
+    db: AsyncSession,
+    appointments: list[Appointment],
+    event_name: str,
+) -> list[NotificationMessageLog]:
+    """Persist the same enabled event for many appointments with one settings lookup."""
+    if not appointments:
+        return []
+
+    event_id = resolve_appointment_event_id(event_name)
+    if not event_id:
+        return []
+
+    professional_id = appointments[0].professional_id
+    if any(appointment.professional_id != professional_id for appointment in appointments):
+        raise ValueError("Bulk appointment events must belong to one professional")
+
+    settings_result = await db.execute(
+        select(NotificationSettings).where(
+            NotificationSettings.professional_id == professional_id
+        )
+    )
+    notification_settings = settings_result.scalar_one_or_none()
+    if not notification_settings or not notification_settings.whatsapp_enabled:
+        return []
+    if not normalize_whatsapp_events(notification_settings.whatsapp_events).get(event_id):
+        return []
+
+    provider = get_settings().whatsapp_provider
+    logs: list[NotificationMessageLog] = []
+    for appointment in appointments:
+        log_id = uuid.uuid4()
+        logs.append(
+            NotificationMessageLog(
+                id=log_id,
+                professional_id=appointment.professional_id,
+                appointment_id=appointment.id,
+                patient_id=appointment.patient_id,
+                channel="whatsapp",
+                notification_type=event_id,
+                provider=provider,
+                deduplication_key=f"appointment-event:{log_id}",
+                status=MESSAGE_STATUS_QUEUED,
+                scheduled_date=appointment.date,
+                scheduled_time=appointment.time,
+                attempt_count=0,
+                payload={"event_snapshot": appointment_event_snapshot(appointment)},
+            )
+        )
+
+    db.add_all(logs)
+    await db.flush()
+    return logs

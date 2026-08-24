@@ -1,7 +1,7 @@
 from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,7 @@ from app.models.professional import Professional
 from app.models.session import Session
 from app.schemas.common import PaginatedResponse
 from app.schemas.patient import (
+    BulkAppointmentCancellationResponse,
     CaregiverCreate,
     CaregiverResponse,
     CaregiverUpdate,
@@ -30,7 +31,9 @@ from app.services.patient import (
     get_patient_aggregates,
     get_patient_aggregates_batch,
 )
+from app.services.patient_appointment_service import cancel_future_patient_appointments
 from app.services.timeline import create_timeline_event
+from app.services.whatsapp_queue import enqueue_whatsapp_appointment_event_log
 
 router = APIRouter(prefix="/patients", tags=["patients"])
 
@@ -338,6 +341,27 @@ async def update_patient(
         setattr(patient, field, value)
     await db.flush()
     return await _build_summary(db, patient, professional)
+
+
+@router.patch(
+    "/{patient_id}/appointments/cancel-future",
+    response_model=BulkAppointmentCancellationResponse,
+)
+async def cancel_future_appointments(
+    patient_id: UUID,
+    background_tasks: BackgroundTasks,
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    patient = await get_patient_for_professional(patient_id, professional, db)
+    appointments, event_logs = await cancel_future_patient_appointments(
+        db,
+        professional_id=professional.id,
+        patient_id=patient.id,
+    )
+    for event_log in event_logs:
+        background_tasks.add_task(enqueue_whatsapp_appointment_event_log, event_log.id)
+    return BulkAppointmentCancellationResponse(cancelled_count=len(appointments))
 
 
 @router.put("/{patient_id}/therapy-plan", response_model=PatientSummary)

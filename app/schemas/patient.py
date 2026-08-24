@@ -1,10 +1,13 @@
 from datetime import date as DateType
+from typing import Literal, TypeAlias
 
 from pydantic import EmailStr, Field, TypeAdapter, field_validator
 
 from app.schemas.common import CamelModel
 
 _email_adapter = TypeAdapter(EmailStr)
+
+PatientStatus: TypeAlias = Literal["ativo", "avaliacao", "pausado", "alta", "inativo"]
 
 
 def _normalize_optional_email(value: str | None) -> str:
@@ -67,7 +70,7 @@ class PatientCreate(CamelModel):
     name: str
     birth_date: DateType
     diagnosis_keys: list[str] = Field(min_length=1)
-    status: str = "avaliacao"
+    status: PatientStatus = "avaliacao"
     guardians: list[CaregiverCreate] = Field(default_factory=list)
 
 
@@ -75,7 +78,7 @@ class PatientUpdate(CamelModel):
     name: str | None = None
     birth_date: DateType | None = None
     diagnosis_keys: list[str] | None = None
-    status: str | None = None
+    status: PatientStatus | None = None
 
     @field_validator("diagnosis_keys")
     @classmethod
@@ -208,3 +211,7 @@ class PatientDetail(PatientSummary):
     sessions: list[SessionResponse] = Field(default_factory=list)
     timeline: list[TimelineEventResponse] = Field(default_factory=list)
     files: list[AttachmentResponse] = Field(default_factory=list)
+
+
+class BulkAppointmentCancellationResponse(CamelModel):
+    cancelled_count: int
