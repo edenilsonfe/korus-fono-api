@@ -98,21 +98,81 @@ FLUENCY_DISFLUENCY_TYPES = [
 ]
 
 PRAGMATICS_ITEMS = [
-    {"id": "prag_01", "category": "Atos comunicativos", "text": "Contato visual adequado"},
-    {"id": "prag_02", "category": "Atos comunicativos", "text": "Iniciativa comunicativa"},
-    {"id": "prag_03", "category": "Atos comunicativos", "text": "Manutenção de turnos conversacionais"},
-    {"id": "prag_04", "category": "Atos comunicativos", "text": "Uso de gestos comunicativos"},
-    {"id": "prag_05", "category": "Funções", "text": "Função instrumental (pedir, solicitar)"},
-    {"id": "prag_06", "category": "Funções", "text": "Função reguladora (proibir, orientar)"},
-    {"id": "prag_07", "category": "Funções", "text": "Função interacional (cumprimentar, despedir)"},
-    {"id": "prag_08", "category": "Funções", "text": "Função heurística (perguntar, investigar)"},
-    {"id": "prag_09", "category": "Funções", "text": "Função imaginativa (brincadeira simbólica)"},
-    {"id": "prag_10", "category": "Meios", "text": "Uso adequado do meio verbal"},
-    {"id": "prag_11", "category": "Meios", "text": "Uso adequado do meio vocal"},
-    {"id": "prag_12", "category": "Meios", "text": "Uso adequado do meio gestual"},
-    {"id": "prag_13", "category": "Narrativa", "text": "Sequenciamento de eventos em narrativa"},
-    {"id": "prag_14", "category": "Narrativa", "text": "Coerência temática"},
-    {"id": "prag_15", "category": "Narrativa", "text": "Referência a personagens e ações"},
+    {
+        "id": "prag_01",
+        "category": "Atos comunicativos",
+        "text": "A criança estabelece contato visual adequado durante a interação?",
+    },
+    {
+        "id": "prag_02",
+        "category": "Atos comunicativos",
+        "text": "A criança inicia interações ou trocas comunicativas?",
+    },
+    {
+        "id": "prag_03",
+        "category": "Atos comunicativos",
+        "text": "A criança mantém a alternância de turnos durante a conversa?",
+    },
+    {
+        "id": "prag_04",
+        "category": "Atos comunicativos",
+        "text": "A criança utiliza gestos com finalidade comunicativa?",
+    },
+    {
+        "id": "prag_05",
+        "category": "Funções",
+        "text": "A criança utiliza a comunicação para pedir ou solicitar algo?",
+    },
+    {
+        "id": "prag_06",
+        "category": "Funções",
+        "text": "A criança utiliza a comunicação para proibir ou orientar alguém?",
+    },
+    {
+        "id": "prag_07",
+        "category": "Funções",
+        "text": "A criança utiliza a comunicação para cumprimentar ou se despedir?",
+    },
+    {
+        "id": "prag_08",
+        "category": "Funções",
+        "text": "A criança utiliza a comunicação para fazer perguntas ou investigar?",
+    },
+    {
+        "id": "prag_09",
+        "category": "Funções",
+        "text": "A criança utiliza a comunicação em brincadeiras simbólicas ou imaginativas?",
+    },
+    {
+        "id": "prag_10",
+        "category": "Meios",
+        "text": "A criança utiliza adequadamente recursos verbais?",
+    },
+    {
+        "id": "prag_11",
+        "category": "Meios",
+        "text": "A criança utiliza adequadamente recursos vocais?",
+    },
+    {
+        "id": "prag_12",
+        "category": "Meios",
+        "text": "A criança utiliza adequadamente recursos gestuais?",
+    },
+    {
+        "id": "prag_13",
+        "category": "Narrativa",
+        "text": "A criança organiza os acontecimentos em sequência ao narrar?",
+    },
+    {
+        "id": "prag_14",
+        "category": "Narrativa",
+        "text": "A criança mantém coerência com o tema durante a narrativa?",
+    },
+    {
+        "id": "prag_15",
+        "category": "Narrativa",
+        "text": "A criança faz referência a personagens e às ações deles durante a narrativa?",
+    },
 ]
 
 
