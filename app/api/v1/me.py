@@ -32,6 +32,7 @@ def _to_response(p: Professional) -> ProfessionalResponse:
         avatar_color=p.avatar_color,
         is_staff=p.is_staff,
         email_verified=p.email_verified_at is not None,
+        signup_payment_required=p.signup_payment_required,
     )
 
 

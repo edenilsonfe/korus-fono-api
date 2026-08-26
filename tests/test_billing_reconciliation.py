@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.billing.errors import PaymentGatewayError
 from app.models.billing import Plan, Subscription
 from app.models.professional import Professional
 from app.services.billing_reconciliation_service import BillingReconciliationService
@@ -107,6 +108,9 @@ async def test_reconcile_paid_annual_checkout_activates_twelve_month_access(db_s
 
     paid_at = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
     gateway = AsyncMock()
+    gateway.get_payment = AsyncMock(
+        side_effect=PaymentGatewayError("Cobrança não encontrada", status_code=404)
+    )
     gateway.list_checkout_payments = AsyncMock(
         return_value=[
             {

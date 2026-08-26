@@ -73,6 +73,21 @@ Para o fluxo de recuperação de senha (`/auth/forgot-password` → `/auth/reset
 - API: `GET /api/v1/...`
 - Docs: `GET /docs` (Swagger — debug local; contrato = `app/schemas/` + `app/api/v1/`)
 
+### Checkout da assinatura
+
+O cadastro pago usa `POST /api/v1/auth/register-checkout`. Essas contas mantêm
+`signup_payment_required=true`: `/me`, auth e billing continuam acessíveis para recuperação, mas
+dashboard e rotas do produto respondem `403` até um evento `PAYMENT_SUCCEEDED` confirmar a
+cobrança. `SUBSCRIPTION_CREATED` e checkout apenas criado não liberam acesso. A sessão local
+persistida é devolvida por `GET /api/v1/billing/me` para o frontend retomar o mesmo pagamento.
+Nessa variante, o link de verificação de e-mail só é criado e enviado após o pagamento ser
+confirmado; login e reenvio manual não antecipam essa etapa enquanto a cobrança estiver pendente.
+
+O cartão é processado no formulário do KorusFono: o frontend envia PAN/CVV por HTTPS ao endpoint
+autenticado de billing, que os repassa imediatamente ao Asaas sem persistir ou registrar esses
+campos. Essa arquitetura exige operação em conformidade com PCI DSS SAQ-D; não habilite o Asaas em
+produção antes de concluir os controles e a validação de compliance aplicáveis.
+
 ### Financeiro interno da clínica
 
 O domínio `/api/v1/finance/*` controla contas a receber/pagar, baixas parciais,
@@ -151,7 +166,7 @@ Checklist no painel (projeto com Postgres + Redis + serviços `api` e `worker`):
 1. Conectar o repo / deploy via `railway up` (Dockerfile + `railway.toml`).
 2. Serviço **api**: start e release já no `railway.toml` (`alembic upgrade head` + uvicorn).
 3. Serviço **worker**: mesma imagem; start command `arq worker.WorkerSettings`.
-4. Variáveis: ver bloco Railway em `.env.example` (obrigatórias: `DEBUG=false`, `JWT_SECRET`, `DATABASE_URL`, `REDIS_URL`, `CORS_ORIGINS`, `FRONTEND_URL`, S3 AWS com `S3_ENDPOINT` vazio/omitido, Evolution se `WHATSAPP_PROVIDER=evolution`).
+4. Variáveis: ver bloco Railway em `.env.example` (obrigatórias: `DEBUG=false`, `JWT_SECRET`, `DATABASE_URL`, `REDIS_URL`, `CORS_ORIGINS`, `FRONTEND_URL`, S3 AWS com `S3_ENDPOINT` vazio/omitido, Evolution se `WHATSAPP_PROVIDER=evolution`; `POSTHOG_PROJECT_TOKEN` é opcional e habilita `purchase` autoritativo no webhook).
 5. Após a URL pública da API: setar `APP_PUBLIC_URL` e no Cloudflare Worker `API_ORIGIN` (origin sem path).
 
 Migrations: o `CMD` do Dockerfile roda `alembic upgrade head` antes do uvicorn (o `releaseCommand` do `railway.toml` pode não executar em todos os deploys CLI — o start garante o schema).

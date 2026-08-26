@@ -46,6 +46,10 @@ class Subscription(Base, TimestampMixin):
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="incomplete")
     provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    checkout_session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), unique=True, nullable=True, index=True
+    )
+    checkout_charge_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     external_subscription_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     external_checkout_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     billing_document: Mapped[str] = mapped_column(String(14), default="", nullable=False)

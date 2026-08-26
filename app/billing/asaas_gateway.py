@@ -88,6 +88,9 @@ class AsaasPaymentGateway:
     @staticmethod
     def _pick_payment(payments: list[dict[str, Any]]) -> dict[str, Any] | None:
         for payment in payments:
+            if str(payment.get("status", "")).upper() in _PAYMENT_SUCCESS_STATUSES:
+                return payment
+        for payment in payments:
             if str(payment.get("status", "")).upper() in _PAYMENT_PENDING_STATUSES:
                 return payment
         return None
@@ -207,6 +210,132 @@ class AsaasPaymentGateway:
         if isinstance(data, list):
             return [payment for payment in data if isinstance(payment, dict)]
         return []
+
+    async def list_payments_by_external_reference(
+        self, external_reference: str
+    ) -> list[dict[str, Any]]:
+        query = urlencode({"externalReference": external_reference, "limit": 100})
+        data = await request_json(
+            "GET",
+            f"{self._base_url}/payments?{query}",
+            headers=self._headers(),
+        )
+        if isinstance(data, dict) and isinstance(data.get("data"), list):
+            return [payment for payment in data["data"] if isinstance(payment, dict)]
+        return []
+
+    async def list_subscriptions_by_external_reference(
+        self, external_reference: str
+    ) -> list[dict[str, Any]]:
+        query = urlencode({"externalReference": external_reference, "limit": 100})
+        data = await request_json(
+            "GET",
+            f"{self._base_url}/subscriptions?{query}",
+            headers=self._headers(),
+        )
+        if isinstance(data, dict) and isinstance(data.get("data"), list):
+            return [subscription for subscription in data["data"] if isinstance(subscription, dict)]
+        return []
+
+    async def create_credit_card_subscription(
+        self,
+        *,
+        customer_id: str,
+        account_id: str,
+        plan_slug: str,
+        plan_name: str,
+        value_cents: int,
+        checkout_reference: str,
+        credit_card: dict[str, str],
+        holder_info: dict[str, Any],
+        remote_ip: str,
+    ) -> dict[str, Any]:
+        """Create a recurring card subscription and charge the first cycle today."""
+        external_reference = f"{account_id}:{plan_slug}:{checkout_reference}"
+        payload = {
+            "customer": customer_id,
+            "billingType": "CREDIT_CARD",
+            "nextDueDate": date.today().isoformat(),
+            "value": round(value_cents / 100, 2),
+            "cycle": "MONTHLY",
+            "description": f"Assinatura {plan_name} — KorusFono",
+            "externalReference": external_reference,
+            "creditCard": credit_card,
+            "creditCardHolderInfo": holder_info,
+            "remoteIp": remote_ip,
+        }
+        subscription = await request_json(
+            "POST",
+            f"{self._base_url}/subscriptions",
+            headers=self._headers(),
+            json_body=payload,
+            timeout=60.0,
+        )
+        subscription_id = subscription.get("id")
+        if not subscription_id:
+            raise PaymentGatewayError("Asaas não retornou id da assinatura com cartão")
+        payment = await self._get_first_payment(str(subscription_id), retries=5)
+        return {
+            "external_subscription_id": str(subscription_id),
+            "payment": payment,
+        }
+
+    async def create_credit_card_payment(
+        self,
+        *,
+        customer_id: str,
+        account_id: str,
+        plan_slug: str,
+        description: str,
+        value_cents: int,
+        installments: int,
+        checkout_reference: str,
+        credit_card: dict[str, str],
+        holder_info: dict[str, Any],
+        remote_ip: str,
+    ) -> dict[str, Any]:
+        """Create and immediately process a one-off or installment card charge."""
+        payload: dict[str, Any] = {
+            "customer": customer_id,
+            "billingType": "CREDIT_CARD",
+            "dueDate": date.today().isoformat(),
+            "description": description,
+            "externalReference": f"{account_id}:{plan_slug}:{checkout_reference}",
+            "creditCard": credit_card,
+            "creditCardHolderInfo": holder_info,
+            "remoteIp": remote_ip,
+        }
+        if installments == 1:
+            payload["value"] = round(value_cents / 100, 2)
+        else:
+            payload["installmentCount"] = installments
+            payload["totalValue"] = round(value_cents / 100, 2)
+
+        payment = await request_json(
+            "POST",
+            f"{self._base_url}/payments",
+            headers=self._headers(),
+            json_body=payload,
+            timeout=60.0,
+        )
+        payment_id = payment.get("id")
+        if not payment_id:
+            raise PaymentGatewayError("Asaas não retornou id da cobrança com cartão")
+        return {"payment_id": str(payment_id), "payment": payment}
+
+    async def cancel_checkout(self, checkout_id: str) -> None:
+        await request_json(
+            "POST",
+            f"{self._base_url}/checkouts/{checkout_id}/cancel",
+            headers=self._headers(),
+        )
+
+    async def delete_payment(self, payment_id: str) -> None:
+        await request_json(
+            "DELETE",
+            f"{self._base_url}/payments/{payment_id}",
+            headers=self._headers(),
+        )
 
     async def create_hosted_annual_checkout(
         self,

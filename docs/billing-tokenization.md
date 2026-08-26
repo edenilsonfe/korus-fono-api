@@ -1,5 +1,11 @@
 # Spike: cartão tokenizado / fora do escopo PCI (plano 031 — Fase A)
 
+> **Decisão posterior — 2026-08-25:** a recomendação histórica abaixo foi substituída por decisão
+> explícita de adotar o cartão transparente e assumir o escopo PCI DSS SAQ-D. A implementação atual
+> usa `POST /billing/checkout/{session_id}/credit-card`, exige HTTPS fora de debug, limita tentativas
+> e mantém PAN/CVV somente em memória durante a chamada ao Asaas, sem persistência ou logs. O texto
+> restante permanece como registro do trade-off que motivou a decisão.
+
 **Status:** APPROVED (opção A) — Fase B implemented (hosted invoice)  
 **Branch alvo:** `advisor/031-pci-tokenize-spike`  
 **Data:** 2026-07-21  

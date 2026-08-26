@@ -24,6 +24,7 @@ class ProfessionalResponse(CamelModel):
     avatar_color: str
     is_staff: bool = False
     email_verified: bool = False
+    signup_payment_required: bool = False
 
 
 class ProfessionalUpdate(CamelModel):

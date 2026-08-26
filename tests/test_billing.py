@@ -1,6 +1,6 @@
 """Billing webhook and reconciliation tests."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,9 +12,13 @@ from app.billing.types import InternalBillingEventType
 from app.billing.webhook_normalizer import AsaasWebhookNormalizer, StubWebhookNormalizer
 from app.models.billing import Plan, Subscription
 from app.models.professional import Professional
+from app.schemas.billing import CreditCardPaymentRequest
 from app.services.billing_checkout_service import BillingCheckoutService
 from app.services.plan_catalog_seed import COMMERCIAL_PLAN_SEEDS
-from app.services.saas_billing_service import SaasBillingService
+from app.services.saas_billing_service import (
+    SaasBillingService,
+    purchase_deduplication_id,
+)
 
 
 @pytest.mark.asyncio
@@ -601,13 +605,29 @@ async def test_asaas_yearly_checkout_builds_sandbox_link_when_response_has_only_
 
 
 @pytest.mark.asyncio
-async def test_stub_webhook_activates_subscription(db_session):
+async def test_stub_webhook_activates_subscription(db_session, monkeypatch):
+    meta_purchase = AsyncMock(return_value=True)
+    posthog_purchase = AsyncMock(return_value=True)
+    verification_send = MagicMock()
+    monkeypatch.setattr(
+        "app.services.saas_billing_service.MetaPixelService.track_purchase",
+        meta_purchase,
+    )
+    monkeypatch.setattr(
+        "app.services.saas_billing_service.PostHogAnalyticsService.track_purchase",
+        posthog_purchase,
+    )
+    monkeypatch.setattr(
+        "app.services.saas_billing_service.send_email_verification_email_sync",
+        verification_send,
+    )
     plan = Plan(**COMMERCIAL_PLAN_SEEDS[0])
     professional = Professional(
         email="billing@test.com",
         password_hash="hash",
         name="Billing User",
         subscription_status="trialing",
+        signup_payment_required=True,
         trial_started_at=datetime.now(UTC),
         trial_ends_at=datetime.now(UTC),
     )
@@ -619,6 +639,8 @@ async def test_stub_webhook_activates_subscription(db_session):
         plan_id=plan.id,
         status="incomplete",
         provider="stub",
+        checkout_session_id=professional.id,
+        checkout_charge_cents=9300,
         external_subscription_id="stub_sub_test",
         external_checkout_id="stub_pay_test",
     )
@@ -654,7 +676,58 @@ async def test_stub_webhook_activates_subscription(db_session):
     await db_session.refresh(professional)
     await db_session.refresh(sub)
     assert professional.subscription_status == "active"
+    assert professional.signup_payment_required is False
     assert sub.status == "active"
+    verification_send.assert_called_once()
+    assert verification_send.call_args.args[:2] == (professional.email, professional.name)
+    posthog_purchase.assert_awaited_once_with(
+        professional_id=professional_id,
+        plan_slug=plan.slug,
+        value_cents=9300,
+        currency=plan.currency,
+        billing_event_id="stub-evt-1",
+        session_id=str(professional.id),
+    )
+
+
+@pytest.mark.asyncio
+async def test_subscription_created_does_not_unlock_paid_signup(db_session):
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[0])
+    professional = Professional(
+        email="pending-paid-signup@test.com",
+        password_hash="hash",
+        name="Pending Paid Signup",
+        subscription_status="trialing",
+        signup_payment_required=True,
+    )
+    db_session.add_all([plan, professional])
+    await db_session.flush()
+    sub = Subscription(
+        professional_id=professional.id,
+        plan_id=plan.id,
+        status="incomplete",
+        provider="stub",
+        external_subscription_id="stub_sub_created_only",
+    )
+    db_session.add(sub)
+    await db_session.commit()
+
+    events = StubWebhookNormalizer().normalize(
+        {
+            "id": "evt-subscription-created-only",
+            "event_type": InternalBillingEventType.SUBSCRIPTION_CREATED.value,
+            "professional_id": str(professional.id),
+            "plan_slug": plan.slug,
+            "provider": "stub",
+            "external_subscription_id": sub.external_subscription_id,
+            "subscription_status": "active",
+        },
+        {},
+    )
+    await SaasBillingService(db_session).apply_normalized_events(events)
+
+    await db_session.refresh(professional)
+    assert professional.signup_payment_required is True
 
 
 def test_asaas_payment_webhook_preserves_checkout_session_id():
@@ -674,6 +747,30 @@ def test_asaas_payment_webhook_preserves_checkout_session_id():
     assert len(events) == 1
     assert events[0].payload["external_checkout_id"] == "chk_annual_12x"
     assert events[0].payload["checkout_session_id"] == "chk_annual_12x"
+
+
+def test_asaas_success_webhooks_share_purchase_deduplication_id():
+    normalizer = AsaasWebhookNormalizer()
+    payload = {
+        "payment": {
+            "id": "pay_same_charge",
+            "externalReference": "account-1:korusfono_pro_monthly:checkout-local-1",
+            "status": "CONFIRMED",
+        }
+    }
+
+    confirmed = normalizer.normalize(
+        {"event": "PAYMENT_CONFIRMED", **payload},
+        {},
+    )[0]
+    received = normalizer.normalize(
+        {"event": "PAYMENT_RECEIVED", **payload},
+        {},
+    )[0]
+
+    assert confirmed.external_event_id != received.external_event_id
+    assert purchase_deduplication_id(confirmed) == "asaas-pay_same_charge"
+    assert purchase_deduplication_id(received) == "asaas-pay_same_charge"
 
 
 @pytest.mark.asyncio
@@ -895,27 +992,386 @@ async def test_get_session_annual_uses_hosted_checkout_instead_of_payment(db_ses
 
 
 @pytest.mark.asyncio
-async def test_credit_card_pan_route_removed():
-    from httpx import ASGITransport, AsyncClient
+async def test_credit_card_checkout_processes_authenticated_request_without_echoing_pan(
+    api_client,
+    auth_headers,
+    monkeypatch,
+):
+    service = AsyncMock()
+    service.pay_credit_card = AsyncMock(
+        return_value={
+            "session_id": "checkout-local-1",
+            "provider": "asaas",
+            "status": "pending",
+            "message": "Pagamento em processamento.",
+        }
+    )
+    monkeypatch.setattr(
+        "app.api.v1.billing.BillingCheckoutService",
+        lambda _db: service,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.billing.enforce_card_payment_rate_limit",
+        lambda **_kwargs: None,
+    )
 
-    from app.main import app
+    response = await api_client.post(
+        "/api/v1/billing/checkout/checkout-local-1/credit-card",
+        headers={**auth_headers, "x-forwarded-for": "203.0.113.10, 198.51.100.2"},
+        json={
+            "holderName": "Maria da Silva",
+            "number": "4111 1111 1111 1111",
+            "expiryMonth": "05",
+            "expiryYear": "2030",
+            "ccv": "123",
+            "holderEmail": "maria@example.com",
+            "holderDocument": "249.715.637-92",
+            "postalCode": "01310-100",
+            "addressNumber": "100",
+            "addressComplement": "Sala 2",
+            "phone": "(11) 99999-0000",
+            "installments": 1,
+        },
+    )
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.post(
-            "/api/v1/billing/checkout/any/credit-card",
-            json={
-                "holderName": "X",
-                "number": "5162306219378829",
-                "expiryMonth": "05",
-                "expiryYear": "2030",
-                "ccv": "123",
-                "postalCode": "01310100",
-                "addressNumber": "100",
-                "phone": "11999990000",
-            },
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {
+        "sessionId": "checkout-local-1",
+        "provider": "asaas",
+        "status": "pending",
+        "message": "Pagamento em processamento.",
+    }
+    assert "4111111111111111" not in response.text
+    assert "123" not in response.text
+    request_payload = service.pay_credit_card.await_args.kwargs["payload"]
+    assert request_payload.number.get_secret_value() == "4111111111111111"
+    assert request_payload.ccv.get_secret_value() == "123"
+    assert service.pay_credit_card.await_args.kwargs["remote_ip"] == "203.0.113.10"
+
+
+@pytest.mark.asyncio
+async def test_credit_card_checkout_rejects_invalid_pan_before_gateway(
+    api_client,
+    auth_headers,
+    monkeypatch,
+):
+    service = AsyncMock()
+    monkeypatch.setattr(
+        "app.api.v1.billing.BillingCheckoutService",
+        lambda _db: service,
+    )
+
+    response = await api_client.post(
+        "/api/v1/billing/checkout/checkout-local-1/credit-card",
+        headers=auth_headers,
+        json={
+            "holderName": "Maria da Silva",
+            "number": "4111111111111112",
+            "expiryMonth": "05",
+            "expiryYear": "2030",
+            "ccv": "123",
+            "holderEmail": "maria@example.com",
+            "holderDocument": "24971563792",
+            "postalCode": "01310100",
+            "addressNumber": "100",
+            "phone": "11999990000",
+            "installments": 1,
+        },
+    )
+
+    assert response.status_code == 422
+    service.pay_credit_card.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_asaas_creates_monthly_subscription_with_card_and_immediate_first_charge(
+    monkeypatch,
+):
+    gateway = object.__new__(AsaasPaymentGateway)
+    gateway._api_key = "test-key"
+    gateway._base_url = "https://api-sandbox.asaas.com/v3"
+    captured: dict = {}
+
+    async def fake_request_json(method, url, **kwargs):
+        if method == "POST" and url.endswith("/subscriptions"):
+            captured.update(kwargs["json_body"])
+            assert kwargs["timeout"] == 60.0
+            return {"id": "sub_card_monthly", "status": "ACTIVE"}
+        if method == "GET" and url.endswith("/subscriptions/sub_card_monthly/payments"):
+            return {
+                "data": [
+                    {
+                        "id": "pay_card_monthly",
+                        "status": "CONFIRMED",
+                        "externalReference": "account-1:korusfono_pro_monthly:checkout-1",
+                    }
+                ]
+            }
+        raise AssertionError(f"Unexpected Asaas call: {method} {url}")
+
+    monkeypatch.setattr("app.billing.asaas_gateway.request_json", fake_request_json)
+
+    result = await gateway.create_credit_card_subscription(
+        customer_id="cus_card",
+        account_id="account-1",
+        plan_slug="korusfono_pro_monthly",
+        plan_name="KorusFono Pro",
+        value_cents=9790,
+        checkout_reference="checkout-1",
+        credit_card={
+            "holderName": "Maria da Silva",
+            "number": "4111111111111111",
+            "expiryMonth": "05",
+            "expiryYear": "2030",
+            "ccv": "123",
+        },
+        holder_info={
+            "name": "Maria da Silva",
+            "email": "maria@example.com",
+            "cpfCnpj": "24971563792",
+            "postalCode": "01310100",
+            "addressNumber": "100",
+            "addressComplement": None,
+            "phone": "11999990000",
+            "mobilePhone": "11999990000",
+        },
+        remote_ip="203.0.113.10",
+    )
+
+    assert captured["billingType"] == "CREDIT_CARD"
+    assert captured["nextDueDate"] == date.today().isoformat()
+    assert captured["value"] == 97.9
+    assert captured["cycle"] == "MONTHLY"
+    assert captured["externalReference"] == (
+        "account-1:korusfono_pro_monthly:checkout-1"
+    )
+    assert captured["creditCard"]["number"] == "4111111111111111"
+    assert captured["remoteIp"] == "203.0.113.10"
+    assert result["external_subscription_id"] == "sub_card_monthly"
+    assert result["payment"]["id"] == "pay_card_monthly"
+
+
+@pytest.mark.asyncio
+async def test_asaas_creates_annual_card_payment_with_selected_installments(monkeypatch):
+    gateway = object.__new__(AsaasPaymentGateway)
+    gateway._api_key = "test-key"
+    gateway._base_url = "https://api-sandbox.asaas.com/v3"
+    captured: dict = {}
+
+    async def fake_request_json(method, url, **kwargs):
+        assert method == "POST"
+        assert url.endswith("/payments")
+        assert kwargs["timeout"] == 60.0
+        captured.update(kwargs["json_body"])
+        return {
+            "id": "pay_card_annual",
+            "installment": "ins_card_annual",
+            "status": "CONFIRMED",
+        }
+
+    monkeypatch.setattr("app.billing.asaas_gateway.request_json", fake_request_json)
+
+    result = await gateway.create_credit_card_payment(
+        customer_id="cus_card",
+        account_id="account-1",
+        plan_slug="korusfono_pro_yearly",
+        description="KorusFono Pro — 12 meses",
+        value_cents=97000,
+        installments=12,
+        checkout_reference="checkout-annual-1",
+        credit_card={
+            "holderName": "Maria da Silva",
+            "number": "4111111111111111",
+            "expiryMonth": "05",
+            "expiryYear": "2030",
+            "ccv": "123",
+        },
+        holder_info={
+            "name": "Maria da Silva",
+            "email": "maria@example.com",
+            "cpfCnpj": "24971563792",
+            "postalCode": "01310100",
+            "addressNumber": "100",
+            "phone": "11999990000",
+            "mobilePhone": "11999990000",
+        },
+        remote_ip="203.0.113.10",
+    )
+
+    assert captured["billingType"] == "CREDIT_CARD"
+    assert captured["installmentCount"] == 12
+    assert captured["totalValue"] == 970.0
+    assert "value" not in captured
+    assert captured["externalReference"] == (
+        "account-1:korusfono_pro_yearly:checkout-annual-1"
+    )
+    assert result["payment_id"] == "pay_card_annual"
+
+
+def _valid_credit_card_payload(*, installments: int = 1) -> CreditCardPaymentRequest:
+    return CreditCardPaymentRequest.model_validate(
+        {
+            "holderName": "Maria da Silva",
+            "number": "4111111111111111",
+            "expiryMonth": "05",
+            "expiryYear": "2030",
+            "ccv": "123",
+            "holderEmail": "maria@example.com",
+            "holderDocument": "24971563792",
+            "postalCode": "01310100",
+            "addressNumber": "100",
+            "phone": "11999990000",
+            "installments": installments,
+        }
+    )
+
+
+def test_credit_card_schema_masks_pan_and_cvv_in_repr():
+    payload = _valid_credit_card_payload()
+
+    rendered = repr(payload)
+
+    assert "4111111111111111" not in rendered
+    assert "ccv=SecretStr('**********')" in rendered
+    assert "number=SecretStr('**********')" in rendered
+
+
+@pytest.mark.asyncio
+async def test_annual_transparent_card_replaces_hosted_checkout_and_keeps_discounted_charge(
+    db_session,
+):
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[1])
+    professional = Professional(
+        email="transparent-annual@test.com",
+        password_hash="hash",
+        name="Transparent Annual",
+        phone="11999990000",
+        cpf="24971563792",
+        subscription_status="trialing",
+        trial_started_at=datetime.now(UTC),
+        trial_ends_at=datetime.now(UTC),
+    )
+    db_session.add_all([plan, professional])
+    await db_session.flush()
+    sub = Subscription(
+        professional_id=professional.id,
+        plan_id=plan.id,
+        status="incomplete",
+        provider="asaas",
+        checkout_session_id=professional.id,
+        checkout_charge_cents=93000,
+        external_checkout_id="chk_hosted_old",
+        billing_document="24971563792",
+    )
+    db_session.add(sub)
+    await db_session.commit()
+
+    gateway = AsyncMock()
+    gateway.list_payments_by_external_reference = AsyncMock(return_value=[])
+    gateway.create_credit_card_payment = AsyncMock(
+        return_value={
+            "payment_id": "pay_transparent_annual",
+            "payment": {"id": "pay_transparent_annual", "status": "AWAITING_RISK_ANALYSIS"},
+        }
+    )
+    gateway.cancel_checkout = AsyncMock(return_value=None)
+    customer_service = AsyncMock()
+    customer_service.ensure_customer = AsyncMock(return_value="cus_transparent")
+
+    with (
+        patch(
+            "app.services.billing_checkout_service.AsaasPaymentGateway",
+            return_value=gateway,
+        ),
+        patch(
+            "app.services.billing_checkout_service.BillingCustomerService",
+            return_value=customer_service,
+        ),
+    ):
+        result = await BillingCheckoutService(db_session).pay_credit_card(
+            session_id=str(professional.id),
+            professional=professional,
+            payload=_valid_credit_card_payload(installments=12),
+            remote_ip="203.0.113.10",
         )
-    assert response.status_code == 404
+
+    assert result["status"] == "pending"
+    assert sub.external_checkout_id == "pay_transparent_annual"
+    gateway.create_credit_card_payment.assert_awaited_once()
+    create_kwargs = gateway.create_credit_card_payment.await_args.kwargs
+    assert create_kwargs["value_cents"] == 93000
+    assert create_kwargs["installments"] == 12
+    assert create_kwargs["remote_ip"] == "203.0.113.10"
+    gateway.cancel_checkout.assert_awaited_once_with("chk_hosted_old")
+
+
+@pytest.mark.asyncio
+async def test_monthly_transparent_card_creates_recurring_subscription_and_cancels_old_one(
+    db_session,
+):
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[0])
+    professional = Professional(
+        email="transparent-monthly@test.com",
+        password_hash="hash",
+        name="Transparent Monthly",
+        phone="11999990000",
+        cpf="24971563792",
+        subscription_status="trialing",
+        trial_started_at=datetime.now(UTC),
+        trial_ends_at=datetime.now(UTC),
+    )
+    db_session.add_all([plan, professional])
+    await db_session.flush()
+    sub = Subscription(
+        professional_id=professional.id,
+        plan_id=plan.id,
+        status="incomplete",
+        provider="asaas",
+        checkout_session_id=professional.id,
+        checkout_charge_cents=9790,
+        external_subscription_id="sub_hosted_old",
+        external_checkout_id="pay_hosted_old",
+        billing_document="24971563792",
+    )
+    db_session.add(sub)
+    await db_session.commit()
+
+    gateway = AsyncMock()
+    gateway.list_subscriptions_by_external_reference = AsyncMock(return_value=[])
+    gateway.create_credit_card_subscription = AsyncMock(
+        return_value={
+            "external_subscription_id": "sub_transparent_new",
+            "payment": {"id": "pay_transparent_new", "status": "AWAITING_RISK_ANALYSIS"},
+        }
+    )
+    gateway.cancel_subscription = AsyncMock(return_value={"status": "canceled"})
+    customer_service = AsyncMock()
+    customer_service.ensure_customer = AsyncMock(return_value="cus_transparent")
+
+    with (
+        patch(
+            "app.services.billing_checkout_service.AsaasPaymentGateway",
+            return_value=gateway,
+        ),
+        patch(
+            "app.services.billing_checkout_service.BillingCustomerService",
+            return_value=customer_service,
+        ),
+    ):
+        result = await BillingCheckoutService(db_session).pay_credit_card(
+            session_id=str(professional.id),
+            professional=professional,
+            payload=_valid_credit_card_payload(),
+            remote_ip="203.0.113.10",
+        )
+
+    assert result["status"] == "pending"
+    assert sub.external_subscription_id == "sub_transparent_new"
+    assert sub.external_checkout_id == "pay_transparent_new"
+    gateway.cancel_subscription.assert_awaited_once_with(
+        external_subscription_id="sub_hosted_old"
+    )
 
 
 @pytest.mark.asyncio

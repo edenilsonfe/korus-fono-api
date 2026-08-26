@@ -42,6 +42,13 @@ _SENSITIVE_EXTRA_KEYS = frozenset(
         "billingcnpj",
         "email",
         "phone",
+        "number",
+        "card_number",
+        "cardnumber",
+        "ccv",
+        "cvv",
+        "credit_card",
+        "creditcard",
     }
 )
 

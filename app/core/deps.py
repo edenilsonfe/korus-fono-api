@@ -13,6 +13,9 @@ from app.models.patient import Patient
 from app.models.professional import Professional
 
 bearer_scheme = HTTPBearer(auto_error=False)
+PAYMENT_REQUIRED_DETAIL = (
+    "Pagamento pendente. Conclua a assinatura para acessar o KorusFono."
+)
 
 
 def _bind_sentry_user(professional: Professional) -> None:
@@ -99,6 +102,11 @@ async def get_optional_professional(
 async def require_verified_professional(
     professional: Professional = Depends(get_current_professional),
 ) -> Professional:
+    if professional.signup_payment_required:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=PAYMENT_REQUIRED_DETAIL,
+        )
     if professional.email_verified_at is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

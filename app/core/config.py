@@ -106,7 +106,7 @@ class Settings(BaseSettings):
 
     billing_provider: str = "stub"
     asaas_api_key: str = ""
-    asaas_api_base_url: str = "https://sandbox.asaas.com/api/v3"
+    asaas_api_base_url: str = "https://api-sandbox.asaas.com/v3"
     asaas_webhook_token: str = ""
     frontend_url: str = "http://localhost:5173"
     trial_days: int = 7
@@ -117,6 +117,10 @@ class Settings(BaseSettings):
     # Código de evento de teste gerado em Event Manager > Test Events (só dev).
     meta_capi_test_event_code: str = ""
     meta_graph_api_version: str = "v21.0"
+
+    # Project token público para eventos de conversão server-side. Vazio desliga.
+    posthog_project_token: str = ""
+    posthog_host: str = "https://us.i.posthog.com"
 
     instrument_packages_root: str = ""
 

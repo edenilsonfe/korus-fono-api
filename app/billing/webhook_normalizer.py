@@ -39,7 +39,9 @@ def _parse_external_reference(ref: Any) -> tuple[str | None, str | None]:
     text = str(ref)
     if ":" not in text:
         return text, None
-    professional_id, plan_slug = text.split(":", 1)
+    parts = text.split(":")
+    professional_id = parts[0]
+    plan_slug = parts[1] if len(parts) > 1 else None
     return professional_id or None, plan_slug or None
 
 

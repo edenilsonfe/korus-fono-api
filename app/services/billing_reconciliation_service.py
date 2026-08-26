@@ -213,9 +213,16 @@ class BillingReconciliationService:
                 ):
                     payments.append(await gateway.get_payment(str(sub.external_checkout_id)))
             else:
-                payments = await gateway.list_checkout_payments(
-                    str(sub.external_checkout_id)
-                )
+                try:
+                    payments = [
+                        await gateway.get_payment(str(sub.external_checkout_id))
+                    ]
+                except PaymentGatewayError as exc:
+                    if exc.status_code != 404:
+                        raise
+                    payments = await gateway.list_checkout_payments(
+                        str(sub.external_checkout_id)
+                    )
         except (PaymentGatewayConfigError, PaymentGatewayError) as exc:
             logger.warning("Asaas reconciliation failed: %s", exc)
             return {"applied": False, "message": str(exc), "payments_checked": 0}

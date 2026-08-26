@@ -19,6 +19,9 @@ class EntitlementService:
     async def can_write(self, professional: Professional) -> bool:
         now = datetime.now(UTC)
 
+        if professional.signup_payment_required:
+            return False
+
         if professional.subscription_status == "trialing":
             if professional.trial_ends_at and now > professional.trial_ends_at:
                 professional.subscription_status = "trial_expired"

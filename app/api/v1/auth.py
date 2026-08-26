@@ -14,7 +14,7 @@ from app.core.auth_cookies import (
 )
 from app.core.client_ip import get_client_ip
 from app.core.config import get_settings
-from app.core.deps import get_current_professional
+from app.core.deps import PAYMENT_REQUIRED_DETAIL, get_current_professional
 from app.core.security import (
     create_access_token,
     hash_password,
@@ -87,6 +87,7 @@ async def track_registration_events_task(
     client_user_agent: str | None,
     fbp: str | None,
     fbc: str | None,
+    starts_trial: bool,
 ) -> None:
     service = MetaPixelService()
     await service.track_registration(
@@ -99,16 +100,17 @@ async def track_registration_events_task(
         fbp=fbp,
         fbc=fbc,
     )
-    await service.track_start_trial(
-        professional_id=professional_id,
-        email=email,
-        name=name,
-        phone=phone,
-        client_ip=client_ip,
-        client_user_agent=client_user_agent,
-        fbp=fbp,
-        fbc=fbc,
-    )
+    if starts_trial:
+        await service.track_start_trial(
+            professional_id=professional_id,
+            email=email,
+            name=name,
+            phone=phone,
+            client_ip=client_ip,
+            client_user_agent=client_user_agent,
+            fbp=fbp,
+            fbc=fbc,
+        )
 
 
 def _request_ip(request: Request) -> str:
@@ -184,14 +186,15 @@ def _resolve_refresh_token(request: Request, body: RefreshRequest) -> str:
     return token
 
 
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(
+async def _register_account(
     body: RegisterRequest,
     request: Request,
     response: Response,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
-):
+    db: AsyncSession,
+    *,
+    signup_payment_required: bool,
+) -> TokenResponse:
     enforce_register_rate_limit(_request_ip(request))
     existing = await db.execute(select(Professional).where(Professional.email == body.email))
     if existing.scalar_one_or_none():
@@ -209,8 +212,9 @@ async def register(
         phone=body.phone,
         cpf=body.cpf or "",
         subscription_status="trialing",
-        trial_started_at=now,
-        trial_ends_at=now + timedelta(days=trial_days),
+        signup_payment_required=signup_payment_required,
+        trial_started_at=None if signup_payment_required else now,
+        trial_ends_at=None if signup_payment_required else now + timedelta(days=trial_days),
         onboarding_started_at=now,
     )
     db.add(professional)
@@ -220,14 +224,15 @@ async def register(
     await ensure_demo_patient(db, professional)
     welcome_log = await queue_whatsapp_welcome_message(db, professional)
     access_token, refresh_token = await _issue_tokens(db, professional)
-    raw_token = await request_email_verification(db, professional, force=True)
-    if raw_token is not None:
-        background_tasks.add_task(
-            send_email_verification_email_task,
-            professional.email,
-            professional.name,
-            raw_token,
-        )
+    if not signup_payment_required:
+        raw_token = await request_email_verification(db, professional, force=True)
+        if raw_token is not None:
+            background_tasks.add_task(
+                send_email_verification_email_task,
+                professional.email,
+                professional.name,
+                raw_token,
+            )
     background_tasks.add_task(
         send_new_account_notification_task,
         professional.name,
@@ -252,8 +257,49 @@ async def register(
         request.headers.get("user-agent"),
         request.cookies.get("_fbp"),
         request.cookies.get("_fbc"),
+        not signup_payment_required,
     )
     return _apply_auth_cookies(response, access_token, refresh_token)
+
+
+@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+async def register(
+    body: RegisterRequest,
+    request: Request,
+    response: Response,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _register_account(
+        body,
+        request,
+        response,
+        background_tasks,
+        db,
+        signup_payment_required=False,
+    )
+
+
+@router.post(
+    "/register-checkout",
+    response_model=TokenResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def register_checkout(
+    body: RegisterRequest,
+    request: Request,
+    response: Response,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _register_account(
+        body,
+        request,
+        response,
+        background_tasks,
+        db,
+        signup_payment_required=True,
+    )
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -272,7 +318,7 @@ async def login(
     if professional.is_disabled:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Conta desativada")
     access_token, refresh_token = await _issue_tokens(db, professional)
-    if professional.email_verified_at is None:
+    if professional.email_verified_at is None and not professional.signup_payment_required:
         raw_token = await request_email_verification(db, professional, force=False)
         if raw_token is not None:
             background_tasks.add_task(
@@ -385,6 +431,11 @@ async def resend_verification(
     professional: Professional = Depends(get_current_professional),
     db: AsyncSession = Depends(get_db),
 ):
+    if professional.signup_payment_required:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=PAYMENT_REQUIRED_DETAIL,
+        )
     raw_token = await request_email_verification(db, professional, force=False)
     if raw_token is not None:
         background_tasks.add_task(

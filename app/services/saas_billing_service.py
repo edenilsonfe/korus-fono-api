@@ -1,5 +1,6 @@
 """Persist webhooks and orchestrate subscription updates."""
 
+import asyncio
 import logging
 import uuid
 from calendar import monthrange
@@ -14,7 +15,12 @@ from app.billing.types import InternalBillingEventType
 from app.billing.webhook_normalizer import NormalizedBillingEvent
 from app.models.billing import BillingEvent, Plan, Subscription
 from app.models.professional import Professional
+from app.services.email_verification import (
+    request_email_verification,
+    send_email_verification_email_sync,
+)
 from app.services.meta_pixel_service import MetaPixelService
+from app.services.posthog_analytics_service import PostHogAnalyticsService
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +32,27 @@ _SUBSCRIPTION_TO_PROFESSIONAL: dict[str, str] = {
     "incomplete": "past_due",
     "expired": "trial_expired",
 }
+
+
+def purchase_deduplication_id(ev: NormalizedBillingEvent) -> str:
+    """Return one stable purchase id for every notification of the same charge."""
+    payload = ev.payload or {}
+    provider = str(payload.get("provider") or "billing").strip().lower() or "billing"
+    resource_id = next(
+        (
+            str(payload[key]).strip()
+            for key in (
+                "id",
+                "payment_id",
+                "paymentId",
+                "checkout_session_id",
+                "external_checkout_id",
+            )
+            if payload.get(key)
+        ),
+        ev.external_event_id,
+    )
+    return f"{provider}-{resource_id}"
 
 
 def _parse_billing_datetime(raw: Any) -> datetime | None:
@@ -226,6 +253,12 @@ class SaasBillingService:
                     ),
                     None,
                 )
+            if target is None and (external_subscription_id or external_checkout_id):
+                logger.info(
+                    "Skipping stale billing event %s: provider resource is no longer current",
+                    ev.external_event_id,
+                )
+                continue
             if target is None:
                 target = subscriptions[0]
                 for sub in subscriptions:
@@ -269,12 +302,21 @@ class SaasBillingService:
 
             professional = (
                 await self.db.execute(
-                    select(Professional).where(Professional.id == professional_uuid)
+                    select(Professional)
+                    .where(Professional.id == professional_uuid)
+                    .with_for_update()
                 )
             ).scalar_one_or_none()
+            should_send_verification = False
             if professional:
                 if sub_status == "active":
                     professional.subscription_status = "active"
+                    if ev.event_type == InternalBillingEventType.PAYMENT_SUCCEEDED:
+                        should_send_verification = (
+                            professional.signup_payment_required
+                            and professional.email_verified_at is None
+                        )
+                        professional.signup_payment_required = False
                 else:
                     professional.subscription_status = _SUBSCRIPTION_TO_PROFESSIONAL.get(
                         sub_status, professional.subscription_status
@@ -288,7 +330,38 @@ class SaasBillingService:
                 sub_status,
             )
 
-            await self._track_purchase_event(ev, sub_status=sub_status, plan_row=plan_row, professional=professional)
+            if should_send_verification and professional:
+                await self._send_signup_verification_email(professional)
+
+            await self._track_purchase_event(
+                ev,
+                sub_status=sub_status,
+                plan_row=plan_row,
+                professional=professional,
+                subscription=target,
+            )
+
+    async def _send_signup_verification_email(self, professional: Professional) -> None:
+        """Send the verification link only after a paid signup is unlocked."""
+        try:
+            raw_token = await request_email_verification(
+                self.db,
+                professional,
+                force=True,
+            )
+            if raw_token is not None:
+                await asyncio.to_thread(
+                    send_email_verification_email_sync,
+                    professional.email,
+                    professional.name,
+                    raw_token,
+                )
+        except Exception:
+            # Payment activation must remain authoritative even when email delivery fails.
+            logger.exception(
+                "Failed to queue post-payment email verification for professional %s",
+                professional.id,
+            )
 
     async def _track_purchase_event(
         self,
@@ -297,19 +370,33 @@ class SaasBillingService:
         sub_status: str | None,
         plan_row: Plan | None,
         professional: Professional | None,
+        subscription: Subscription,
     ) -> None:
-        """Purchase (Meta CAPI) quando um pagamento é confirmado — best-effort."""
+        """Purchase server-side quando um pagamento é confirmado — best-effort."""
         if sub_status != "active" or ev.event_type != InternalBillingEventType.PAYMENT_SUCCEEDED:
             return
         if not professional or not plan_row:
             return
-        service = MetaPixelService()
-        await service.track_purchase(
+        value_cents = subscription.checkout_charge_cents or plan_row.price_cents
+        purchase_id = purchase_deduplication_id(ev)
+        await MetaPixelService().track_purchase(
             professional_id=str(professional.id),
             email=professional.email,
             name=professional.name,
-            value_cents=plan_row.price_cents,
+            value_cents=value_cents,
             currency=plan_row.currency,
             plan_slug=plan_row.slug,
-            billing_event_id=ev.external_event_id,
+            billing_event_id=purchase_id,
+        )
+        await PostHogAnalyticsService().track_purchase(
+            professional_id=str(professional.id),
+            plan_slug=plan_row.slug,
+            value_cents=value_cents,
+            currency=plan_row.currency,
+            billing_event_id=purchase_id,
+            session_id=(
+                str(subscription.checkout_session_id)
+                if subscription.checkout_session_id is not None
+                else None
+            ),
         )

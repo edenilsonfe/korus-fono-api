@@ -54,6 +54,9 @@ def test_scrub_redacts_sensitive_extra_keys():
             "billingDocument": "52998224725",
             "billing_cnpj": "11222333000181",
             "billingCnpj": "11222333000181",
+            "number": "4111111111111111",
+            "ccv": "123",
+            "creditCard": {"number": "4111111111111111"},
             "safe": "ok",
         }
     }
@@ -65,6 +68,9 @@ def test_scrub_redacts_sensitive_extra_keys():
     assert scrubbed["extra"]["billingDocument"] == "[Filtered]"
     assert scrubbed["extra"]["billing_cnpj"] == "[Filtered]"
     assert scrubbed["extra"]["billingCnpj"] == "[Filtered]"
+    assert scrubbed["extra"]["number"] == "[Filtered]"
+    assert scrubbed["extra"]["ccv"] == "[Filtered]"
+    assert scrubbed["extra"]["creditCard"] == "[Filtered]"
     assert scrubbed["extra"]["safe"] == "ok"
 
 

@@ -4,7 +4,7 @@ import hmac
 import json
 import logging
 import re
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy import select
@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.billing import PaymentGatewayConfigError, get_payment_gateway
-from app.billing.checkout_urls import build_checkout_return_urls
+from app.billing.checkout_urls import build_checkout_return_urls, build_in_app_payment_url
 from app.billing.errors import PaymentGatewayError
 from app.billing.webhook_normalizer import get_normalizer
 from app.core.client_ip import get_client_ip
@@ -26,6 +26,8 @@ from app.schemas.billing import (
     CardInvoiceResponse,
     CheckoutRequest,
     CheckoutResponse,
+    CreditCardPaymentRequest,
+    CreditCardPaymentResponse,
     PaymentSessionResponse,
     PixCheckoutResponse,
     PlanChangePreviewResponse,
@@ -36,6 +38,7 @@ from app.schemas.billing import (
     SubscriptionSummary,
 )
 from app.services.billing_checkout_service import BillingCheckoutService
+from app.services.billing_rate_limit import enforce_card_payment_rate_limit
 from app.services.billing_customer_service import BillingCustomerService
 from app.services.billing_profile_service import asaas_customer_profile
 from app.services.billing_reconciliation_service import BillingReconciliationService
@@ -208,10 +211,10 @@ async def _attach_checkout_to_subscription(
     provider: str,
     session: dict,
     billing_document: str,
-) -> None:
+) -> Subscription | None:
     sub = await _latest_subscription(db, professional_id)
     if not sub:
-        return
+        return None
 
     sub.provider = provider
     sub.billing_document = billing_document
@@ -224,6 +227,8 @@ async def _attach_checkout_to_subscription(
         sub.external_checkout_id = str(checkout_id)
 
     await db.commit()
+    await db.refresh(sub)
+    return sub
 
 
 @router.get("/plans", response_model=list[PlanPublicResponse])
@@ -297,6 +302,12 @@ async def get_billing_me(
         trial_started_at=_iso(professional.trial_started_at),
         trial_ends_at=_iso(professional.trial_ends_at),
         can_write=can_write,
+        signup_payment_required=professional.signup_payment_required,
+        checkout_session_id=(
+            str(sub.checkout_session_id)
+            if professional.signup_payment_required and sub and sub.checkout_session_id
+            else None
+        ),
         subscription=subscription_summary,
     )
 
@@ -415,6 +426,16 @@ async def create_billing_checkout(
             document=document,
             provider=provider,
         )
+        if change_result.get("session_id"):
+            changed_sub = await _latest_subscription(db, professional.id)
+            if changed_sub:
+                if not changed_sub.checkout_session_id:
+                    changed_sub.checkout_session_id = uuid4()
+                changed_sub.checkout_charge_cents = change_result.get("charge_cents")
+                await db.commit()
+                local_session_id = str(changed_sub.checkout_session_id)
+                change_result["session_id"] = local_session_id
+                change_result["checkout_url"] = build_in_app_payment_url(local_session_id)
         return CheckoutResponse(**change_result)
 
     await _ensure_subscription(
@@ -527,16 +548,29 @@ async def create_billing_checkout(
         )
         raise _checkout_gateway_error() from exc
 
-    await _attach_checkout_to_subscription(
+    attached_sub = await _attach_checkout_to_subscription(
         db,
         professional_id=professional.id,
         provider=provider,
         session=session,
         billing_document=document,
     )
+    local_session_id = session.get("session_id") or session.get("external_checkout_id")
+    if attached_sub:
+        if not attached_sub.checkout_session_id:
+            attached_sub.checkout_session_id = uuid4()
+        attached_sub.checkout_charge_cents = charge_cents
+        await db.commit()
+        local_session_id = str(attached_sub.checkout_session_id)
 
     if session.get("status") == "completed":
         await BillingReconciliationService(db).reconcile_professional(professional.id)
+        await db.refresh(professional)
+
+    access_granted = (
+        professional.subscription_status == "active"
+        and not professional.signup_payment_required
+    )
 
     background_tasks.add_task(
         track_checkout_started_task,
@@ -553,11 +587,12 @@ async def create_billing_checkout(
     )
 
     return CheckoutResponse(
-        checkout_url=session["checkout_url"],
-        session_id=session.get("session_id") or session.get("external_checkout_id"),
+        checkout_url=build_in_app_payment_url(str(local_session_id)),
+        session_id=str(local_session_id),
         status=session.get("status", "pending"),
         provider=provider,
         message="Continue para escolher PIX ou cartão.",
+        access_granted=access_granted,
     )
 
 
@@ -591,6 +626,40 @@ async def prepare_card_invoice(
     service = BillingCheckoutService(db)
     return await service.prepare_card_invoice(
         session_id=session_id, professional=professional
+    )
+
+
+@router.post(
+    "/checkout/{session_id}/credit-card",
+    response_model=CreditCardPaymentResponse,
+)
+async def pay_checkout_with_credit_card(
+    session_id: str,
+    payload: CreditCardPaymentRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    professional: Professional = Depends(get_current_professional),
+):
+    """Processa cartão sem persistir PAN/CVV; exige HTTPS fora do modo debug."""
+    settings = get_settings()
+    forwarded_proto = (request.headers.get("x-forwarded-proto") or "").lower()
+    if not settings.debug and request.url.scheme != "https" and forwarded_proto != "https":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Pagamento com cartão exige conexão HTTPS.",
+        )
+
+    client_ip = get_client_ip(request)
+    enforce_card_payment_rate_limit(
+        professional_id=str(professional.id),
+        session_id=session_id,
+    )
+    service = BillingCheckoutService(db)
+    return await service.pay_credit_card(
+        session_id=session_id,
+        professional=professional,
+        payload=payload,
+        remote_ip=client_ip,
     )
 
 
