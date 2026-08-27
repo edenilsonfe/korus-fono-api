@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timedelta
+from datetime import date
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
@@ -33,6 +33,7 @@ from app.services.appointment_finance_service import (
 from app.services.appointment_whatsapp_events import (
     resolve_appointment_update_whatsapp_event,
 )
+from app.services.schedule_block_service import ensure_appointment_slot_available
 from app.services.whatsapp_appointment_outbox import create_appointment_event_log
 from app.services.whatsapp_queue import enqueue_whatsapp_appointment_event_log
 
@@ -144,32 +145,6 @@ def _normalize_personalizado_slots(body: AppointmentCreate) -> tuple[list[int], 
     return list(body.weekdays), rules, payload
 
 
-async def _check_conflict(
-    db: AsyncSession,
-    professional_id: UUID,
-    appt_date: date,
-    appt_time: time,
-    duration: int,
-    exclude_id: UUID | None = None,
-) -> None:
-    start = datetime.combine(appt_date, appt_time)
-    end = start + timedelta(minutes=duration)
-    result = await db.execute(
-        select(Appointment).where(
-            Appointment.professional_id == professional_id,
-            Appointment.date == appt_date,
-            Appointment.status.notin_(["cancelado"]),
-        )
-    )
-    for existing in result.scalars().all():
-        if exclude_id and existing.id == exclude_id:
-            continue
-        ex_start = datetime.combine(existing.date, existing.time)
-        ex_end = ex_start + timedelta(minutes=existing.duration)
-        if start < ex_end and end > ex_start:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Conflito de horário")
-
-
 @router.get("", response_model=list[AppointmentResponse])
 async def list_appointments(
     from_date: date = Query(..., alias="from"),
@@ -232,7 +207,9 @@ async def create_appointment(
                 body
             )
 
-    await _check_conflict(db, professional.id, body.date, body.time, body.duration)
+    await ensure_appointment_slot_available(
+        db, professional.id, body.date, body.time, body.duration
+    )
 
     end_time = end_time_from_duration(body.time, body.duration)
     anchor = Appointment(
@@ -265,7 +242,7 @@ async def create_appointment(
             duration=body.duration,
             weekday_rules=weekday_rules,
         ):
-            await _check_conflict(
+            await ensure_appointment_slot_available(
                 db, professional.id, slot.start_date, slot.start_time, slot.duration
             )
             child = Appointment(
@@ -348,7 +325,9 @@ async def update_appointment(
     new_time = data.get("time", appt.time)
     new_duration = data.get("duration", appt.duration)
     if any(k in data for k in ("date", "time", "duration")):
-        await _check_conflict(db, professional.id, new_date, new_time, new_duration, appt.id)
+        await ensure_appointment_slot_available(
+            db, professional.id, new_date, new_time, new_duration, appt.id
+        )
     for field, value in data.items():
         setattr(appt, field, value)
     await db.flush()

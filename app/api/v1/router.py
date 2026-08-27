@@ -26,6 +26,7 @@ from app.api.v1 import (
     patients,
     prontuario,
     resources,
+    schedule_blocks,
     sessions,
     support,
     timeline,
@@ -41,6 +42,7 @@ api_router.include_router(me.router)
 api_router.include_router(catalog.router)
 api_router.include_router(patients.router)
 api_router.include_router(appointments.router)
+api_router.include_router(schedule_blocks.router)
 api_router.include_router(appointment_responses.router)
 api_router.include_router(finance.router)
 api_router.include_router(finance.patient_router)
