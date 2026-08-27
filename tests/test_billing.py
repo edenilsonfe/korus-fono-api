@@ -329,6 +329,126 @@ async def test_checkout_marks_pending_charge_for_replacement_when_document_chang
 
 
 @pytest.mark.asyncio
+async def test_checkout_marks_pending_charge_for_replacement_when_plan_changes(
+    db_session,
+    professional,
+    auth_headers,
+    api_client,
+    monkeypatch,
+):
+    professional.cpf = "24971563792"
+    monthly_plan = Plan(**COMMERCIAL_PLAN_SEEDS[0])
+    yearly_plan = Plan(**COMMERCIAL_PLAN_SEEDS[1])
+    db_session.add_all([monthly_plan, yearly_plan])
+    await db_session.flush()
+    subscription = Subscription(
+        professional_id=professional.id,
+        plan_id=monthly_plan.id,
+        status="incomplete",
+        provider="asaas",
+        external_subscription_id="sub_monthly_pending",
+        external_checkout_id="pay_monthly_pending",
+        billing_document="24971563792",
+    )
+    db_session.add(subscription)
+    await db_session.commit()
+
+    gateway = AsyncMock()
+    gateway.provider_key = "asaas"
+    gateway.create_customer = AsyncMock(return_value={"external_customer_id": "cus_existing"})
+    gateway.create_checkout_session = AsyncMock(
+        return_value={
+            "checkout_url": "/planos/pagamento?sessionId=checkout-yearly-new",
+            "session_id": "checkout-yearly-new",
+            "external_checkout_id": "checkout-yearly-new",
+            "status": "pending",
+        }
+    )
+    monkeypatch.setattr("app.api.v1.billing.get_payment_gateway", lambda: gateway)
+
+    response = await api_client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={
+            "planSlug": yearly_plan.slug,
+            "billingDocumentType": "cpf",
+            "cpf": "24971563792",
+        },
+    )
+
+    assert response.status_code == 200
+    metadata = gateway.create_checkout_session.await_args.kwargs["metadata"]
+    assert metadata["replace_existing_checkout"] is True
+    assert metadata["existing_plan_slug"] == monthly_plan.slug
+    assert metadata["existing_billing_interval"] == "monthly"
+    await db_session.refresh(subscription)
+    assert subscription.plan_id == yearly_plan.id
+
+
+@pytest.mark.asyncio
+async def test_checkout_keeps_original_plan_when_previous_charge_was_paid_during_switch(
+    db_session,
+    professional,
+    auth_headers,
+    api_client,
+    monkeypatch,
+):
+    professional.cpf = "24971563792"
+    monthly_plan = Plan(**COMMERCIAL_PLAN_SEEDS[0])
+    yearly_plan = Plan(**COMMERCIAL_PLAN_SEEDS[1])
+    db_session.add_all([monthly_plan, yearly_plan])
+    await db_session.flush()
+    subscription = Subscription(
+        professional_id=professional.id,
+        plan_id=monthly_plan.id,
+        status="incomplete",
+        provider="asaas",
+        external_subscription_id="sub_monthly_paid",
+        external_checkout_id="pay_monthly_paid",
+        checkout_charge_cents=monthly_plan.price_cents,
+        billing_document="24971563792",
+    )
+    db_session.add(subscription)
+    await db_session.commit()
+
+    gateway = AsyncMock()
+    gateway.provider_key = "asaas"
+    gateway.create_customer = AsyncMock(return_value={"external_customer_id": "cus_existing"})
+    gateway.create_checkout_session = AsyncMock(
+        return_value={
+            "checkout_url": "/planos/pagamento?sessionId=pay_monthly_paid",
+            "session_id": "pay_monthly_paid",
+            "external_subscription_id": "sub_monthly_paid",
+            "external_checkout_id": "pay_monthly_paid",
+            "status": "completed",
+            "preserve_existing_plan": True,
+        }
+    )
+    reconciliation = AsyncMock()
+    monkeypatch.setattr("app.api.v1.billing.get_payment_gateway", lambda: gateway)
+    monkeypatch.setattr(
+        "app.api.v1.billing.BillingReconciliationService",
+        lambda _db: reconciliation,
+    )
+
+    response = await api_client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={
+            "planSlug": yearly_plan.slug,
+            "billingDocumentType": "cpf",
+            "cpf": "24971563792",
+        },
+    )
+
+    assert response.status_code == 200
+    await db_session.refresh(subscription)
+    assert subscription.plan_id == monthly_plan.id
+    assert subscription.checkout_charge_cents == monthly_plan.price_cents
+    reconciliation.reconcile_professional.assert_awaited_once_with(professional.id)
+
+
+@pytest.mark.asyncio
 async def test_asaas_replaces_pending_subscription_before_creating_charge_for_new_document(
     monkeypatch,
 ):
@@ -394,6 +514,109 @@ async def test_asaas_replaces_pending_subscription_before_creating_charge_for_ne
         method == "POST" and url.endswith("/subscriptions/sub_cpf_pending")
         for method, url in calls
     )
+
+
+@pytest.mark.asyncio
+async def test_asaas_cancels_pending_annual_checkout_before_switching_to_monthly(
+    monkeypatch,
+):
+    gateway = object.__new__(AsaasPaymentGateway)
+    gateway._api_key = "test-key"
+    gateway._base_url = "https://api-sandbox.asaas.com/v3"
+    calls: list[tuple[str, str]] = []
+
+    async def fake_request_json(method, url, **kwargs):
+        calls.append((method, url))
+        if method == "GET" and url.endswith("/checkouts/chk_annual_pending"):
+            return {
+                "id": "chk_annual_pending",
+                "status": "ACTIVE",
+                "externalReference": "account-1:korusfono_pro_yearly",
+            }
+        if method == "POST" and url.endswith("/checkouts/chk_annual_pending/cancel"):
+            return {"id": "chk_annual_pending", "status": "CANCELED"}
+        if method == "POST" and url.endswith("/subscriptions"):
+            return {"id": "sub_monthly_new"}
+        if method == "GET" and url.endswith("/subscriptions/sub_monthly_new/payments"):
+            return {
+                "data": [
+                    {
+                        "id": "pay_monthly_new",
+                        "status": "PENDING",
+                        "invoiceUrl": "https://sandbox.asaas.com/i/pay_monthly_new",
+                    }
+                ]
+            }
+        if method == "POST" and url.endswith("/payments/pay_monthly_new"):
+            return {"id": "pay_monthly_new"}
+        raise AssertionError(f"Unexpected Asaas call: {method} {url}")
+
+    monkeypatch.setattr("app.billing.asaas_gateway.request_json", fake_request_json)
+
+    session = await gateway.create_checkout_session(
+        account_id="account-1",
+        plan_slug="korusfono_pro_monthly",
+        success_url="https://app.test/retorno",
+        cancel_url="https://app.test/planos",
+        metadata={
+            "price_cents": 9790,
+            "plan_name": "KorusFono Pro",
+            "billing_interval": "monthly",
+            "customer_external_id": "cus_existing",
+            "customer_document": "24971563792",
+            "customer_document_synced": True,
+            "existing_external_checkout_id": "chk_annual_pending",
+            "existing_plan_slug": "korusfono_pro_yearly",
+            "existing_billing_interval": "yearly",
+            "replace_existing_checkout": True,
+        },
+    )
+
+    assert session["external_subscription_id"] == "sub_monthly_new"
+    assert (
+        "POST",
+        "https://api-sandbox.asaas.com/v3/checkouts/chk_annual_pending/cancel",
+    ) in calls
+
+
+@pytest.mark.asyncio
+async def test_asaas_preserves_paid_annual_checkout_during_plan_switch(monkeypatch):
+    gateway = object.__new__(AsaasPaymentGateway)
+    gateway._api_key = "test-key"
+    gateway._base_url = "https://api-sandbox.asaas.com/v3"
+    calls: list[tuple[str, str]] = []
+
+    async def fake_request_json(method, url, **kwargs):
+        calls.append((method, url))
+        if method == "GET" and url.endswith("/checkouts/chk_annual_paid"):
+            return {
+                "id": "chk_annual_paid",
+                "status": "PAID",
+                "externalReference": "account-1:korusfono_pro_yearly",
+            }
+        raise AssertionError(f"Unexpected Asaas call: {method} {url}")
+
+    monkeypatch.setattr("app.billing.asaas_gateway.request_json", fake_request_json)
+
+    session = await gateway.create_checkout_session(
+        account_id="account-1",
+        plan_slug="korusfono_pro_monthly",
+        success_url="https://app.test/retorno",
+        cancel_url="https://app.test/planos",
+        metadata={
+            "price_cents": 9790,
+            "plan_name": "KorusFono Pro",
+            "billing_interval": "monthly",
+            "existing_external_checkout_id": "chk_annual_paid",
+            "existing_plan_slug": "korusfono_pro_yearly",
+            "existing_billing_interval": "yearly",
+            "replace_existing_checkout": True,
+        },
+    )
+
+    assert session["status"] == "completed"
+    assert session["preserve_existing_plan"] is True
+    assert not any(method == "POST" for method, _url in calls)
 
 
 @pytest.mark.asyncio

@@ -489,13 +489,34 @@ class AsaasPaymentGateway:
                 existing_checkout = await self._get_reusable_annual_checkout(
                     checkout_id=meta.get("existing_external_checkout_id"),
                     account_id=account_id,
-                    plan_slug=plan_slug,
+                    plan_slug=(
+                        str(meta.get("existing_plan_slug") or plan_slug)
+                        if meta.get("replace_existing_checkout")
+                        else plan_slug
+                    ),
                 )
             if existing_checkout:
                 checkout_id = str(existing_checkout["id"])
                 raw_status = str(existing_checkout.get("status", "")).upper()
                 from app.billing.checkout_urls import build_in_app_payment_url
 
+                if meta.get("replace_existing_checkout"):
+                    if raw_status == "PAID":
+                        return {
+                            "external_subscription_id": None,
+                            "external_checkout_id": checkout_id,
+                            "session_id": checkout_id,
+                            "checkout_url": build_in_app_payment_url(checkout_id),
+                            "status": "completed",
+                            "invoice_url": self._hosted_checkout_url(existing_checkout),
+                            "preserve_existing_plan": True,
+                        }
+                    await self.cancel_checkout(checkout_id)
+                    existing_checkout = None
+
+            if existing_checkout:
+                checkout_id = str(existing_checkout["id"])
+                raw_status = str(existing_checkout.get("status", "")).upper()
                 return {
                     "external_subscription_id": None,
                     "external_checkout_id": checkout_id,
@@ -509,7 +530,7 @@ class AsaasPaymentGateway:
                 existing_payment = await self._get_reusable_checkout_payment(
                     payment_id=meta.get("existing_external_checkout_id"),
                     account_id=account_id,
-                    plan_slug=plan_slug,
+                    plan_slug=str(meta.get("existing_plan_slug") or plan_slug),
                 )
                 if (
                     existing_payment
@@ -523,6 +544,9 @@ class AsaasPaymentGateway:
                         "session_id": payment_id,
                         "checkout_url": success_url,
                         "status": "completed",
+                        "preserve_existing_plan": bool(
+                            meta.get("replace_existing_checkout")
+                        ),
                     }
                 try:
                     await self.cancel_subscription(
@@ -561,6 +585,33 @@ class AsaasPaymentGateway:
                 "invoice_url": self._hosted_checkout_url(checkout),
             }
 
+        if (
+            meta.get("replace_existing_checkout")
+            and not existing_sub_id
+            and self._is_yearly_interval(meta.get("existing_billing_interval"))
+        ):
+            existing_checkout = await self._get_reusable_annual_checkout(
+                checkout_id=meta.get("existing_external_checkout_id"),
+                account_id=account_id,
+                plan_slug=str(meta.get("existing_plan_slug") or ""),
+            )
+            if existing_checkout:
+                checkout_id = str(existing_checkout["id"])
+                raw_status = str(existing_checkout.get("status", "")).upper()
+                if raw_status == "PAID":
+                    from app.billing.checkout_urls import build_in_app_payment_url
+
+                    return {
+                        "external_subscription_id": None,
+                        "external_checkout_id": checkout_id,
+                        "session_id": checkout_id,
+                        "checkout_url": build_in_app_payment_url(checkout_id),
+                        "status": "completed",
+                        "invoice_url": self._hosted_checkout_url(existing_checkout),
+                        "preserve_existing_plan": True,
+                    }
+                await self.cancel_checkout(checkout_id)
+
         customer_id = meta.get("customer_external_id")
         customer_document = self._digits_only(meta.get("customer_document"))
         if not customer_id:
@@ -578,7 +629,7 @@ class AsaasPaymentGateway:
             existing_payment = await self._get_reusable_checkout_payment(
                 payment_id=meta.get("existing_external_checkout_id"),
                 account_id=account_id,
-                plan_slug=plan_slug,
+                plan_slug=str(meta.get("existing_plan_slug") or plan_slug),
             )
             if (
                 existing_payment
@@ -593,6 +644,7 @@ class AsaasPaymentGateway:
                     "checkout_url": success_url,
                     "status": "completed",
                     "external_customer_id": str(customer_id),
+                    "preserve_existing_plan": True,
                 }
             try:
                 await self.cancel_subscription(

@@ -373,6 +373,8 @@ async def create_billing_checkout(
         if existing_sub and existing_sub.status in ("incomplete", "trialing", "past_due")
         else None
     )
+    existing_plan = reusable_sub.plan if reusable_sub else None
+    plan_changed = bool(existing_plan and existing_plan.slug != plan_slug)
     previous_checkout_document = ""
     if reusable_sub:
         previous_checkout_document = _digits_only(reusable_sub.billing_document)
@@ -383,13 +385,18 @@ async def create_billing_checkout(
             )
     replace_existing_checkout = bool(
         reusable_sub
-        and reusable_sub.external_subscription_id
-        and previous_checkout_document
-        and previous_checkout_document != document
+        and (reusable_sub.external_subscription_id or reusable_sub.external_checkout_id)
+        and (
+            plan_changed
+            or (
+                previous_checkout_document
+                and previous_checkout_document != document
+            )
+        )
     )
     if replace_existing_checkout:
         logger.info(
-            "Replacing pending billing subscription after document selection changed "
+            "Replacing pending billing checkout after plan or document selection changed "
             "provider=%s professional_id=%s",
             provider,
             professional_id,
@@ -438,13 +445,16 @@ async def create_billing_checkout(
                 change_result["checkout_url"] = build_in_app_payment_url(local_session_id)
         return CheckoutResponse(**change_result)
 
-    await _ensure_subscription(
-        db,
-        professional_id=professional.id,
-        plan=plan,
-        provider=provider,
-    )
-    existing_sub = await _latest_subscription(db, professional.id)
+    if reusable_sub:
+        existing_sub = reusable_sub
+    else:
+        await _ensure_subscription(
+            db,
+            professional_id=professional.id,
+            plan=plan,
+            provider=provider,
+        )
+        existing_sub = await _latest_subscription(db, professional.id)
 
     charge_cents = plan.price_cents
     coupon_code_applied = None
@@ -522,6 +532,9 @@ async def create_billing_checkout(
                 )
                 raise _checkout_gateway_error() from exc
         if existing_sub:
+            if existing_plan:
+                metadata["existing_plan_slug"] = existing_plan.slug
+                metadata["existing_billing_interval"] = existing_plan.billing_interval
             if existing_sub.external_subscription_id:
                 metadata["existing_external_subscription_id"] = existing_sub.external_subscription_id
             if existing_sub.external_checkout_id:
@@ -548,6 +561,19 @@ async def create_billing_checkout(
         )
         raise _checkout_gateway_error() from exc
 
+    preserve_existing_plan = bool(session.get("preserve_existing_plan"))
+    if preserve_existing_plan and existing_sub:
+        charge_cents = (
+            existing_sub.checkout_charge_cents
+            or (existing_plan.price_cents if existing_plan else charge_cents)
+        )
+    if existing_sub and not preserve_existing_plan:
+        existing_sub.plan_id = plan.id
+        existing_sub.provider = provider
+        existing_sub.status = "incomplete"
+        await db.commit()
+        await db.refresh(existing_sub)
+
     attached_sub = await _attach_checkout_to_subscription(
         db,
         professional_id=professional.id,
@@ -572,14 +598,20 @@ async def create_billing_checkout(
         and not professional.signup_payment_required
     )
 
+    effective_plan = (
+        existing_plan
+        if preserve_existing_plan and existing_plan is not None
+        else plan
+    )
+
     background_tasks.add_task(
         track_checkout_started_task,
         professional_id,
         professional.email,
         professional.name,
         charge_cents,
-        plan.currency,
-        plan.slug,
+        effective_plan.currency,
+        effective_plan.slug,
         get_client_ip(request),
         request.headers.get("user-agent"),
         request.cookies.get("_fbp"),
