@@ -1,10 +1,12 @@
 """Billing webhook and reconciliation tests."""
 
 from datetime import UTC, date, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.dialects import postgresql
 
 from app.billing.errors import PaymentGatewayError
 from app.billing.asaas_gateway import AsaasPaymentGateway
@@ -19,6 +21,34 @@ from app.services.saas_billing_service import (
     SaasBillingService,
     purchase_deduplication_id,
 )
+
+
+@pytest.mark.asyncio
+async def test_checkout_lock_does_not_target_nullable_plan_join_on_postgresql():
+    db = SimpleNamespace(
+        execute=AsyncMock(side_effect=RuntimeError("statement captured"))
+    )
+
+    with pytest.raises(RuntimeError, match="statement captured"):
+        await BillingCheckoutService(db)._get_subscription(
+            session_id="checkout-session",
+            professional_id="00000000-0000-0000-0000-000000000001",
+            lock=True,
+        )
+
+    statement = db.execute.await_args.args[0]
+    sql = str(
+        statement.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+    has_nullable_join = "LEFT OUTER JOIN" in sql
+    locks_only_subscriptions = sql.rstrip().endswith(
+        "FOR UPDATE OF subscriptions"
+    )
+
+    assert not has_nullable_join or locks_only_subscriptions
 
 
 @pytest.mark.asyncio

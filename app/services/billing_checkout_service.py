@@ -59,7 +59,7 @@ class BillingCheckoutService:
             .order_by(Subscription.updated_at.desc())
         )
         if lock:
-            statement = statement.with_for_update()
+            statement = statement.with_for_update(of=Subscription)
         result = await self.db.execute(statement)
         sub = result.scalars().first()
         if not sub or not sub.plan:
