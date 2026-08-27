@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -10,6 +10,12 @@ from app.db.base import Base, TimestampMixin, new_uuid
 
 class Professional(Base, TimestampMixin):
     __tablename__ = "professionals"
+    __table_args__ = (
+        CheckConstraint(
+            "admin_role IS NULL OR admin_role IN ('support', 'billing', 'product', 'superadmin')",
+            name="ck_professionals_admin_role",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
@@ -33,6 +39,7 @@ class Professional(Base, TimestampMixin):
     billing_postal_code: Mapped[str] = mapped_column(String(8), default="", nullable=False)
     avatar_color: Mapped[str] = mapped_column(String(64), default="oklch(0.58 0.12 205)", nullable=False)
     is_staff: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    admin_role: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     is_disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     subscription_status: Mapped[str] = mapped_column(String(32), nullable=False, default="trialing")

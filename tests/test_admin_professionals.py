@@ -199,7 +199,7 @@ async def test_self_disable_conflict(db):
         resp = await client.post(
             f"/api/v1/admin/professionals/{staff.id}/disable",
             headers=_auth_headers(staff),
-            json={},
+            json={"reason": "Teste de proteção contra autodesativação"},
         )
         assert resp.status_code == 409
     _clear_override()
@@ -221,7 +221,7 @@ async def test_invalidate_sessions_rejects_old_refresh(db):
         resp = await client.post(
             f"/api/v1/admin/professionals/{target.id}/invalidate-sessions",
             headers=_auth_headers(staff),
-            json={},
+            json={"reason": "Teste de invalidação das sessões"},
         )
         assert resp.status_code == 200
 

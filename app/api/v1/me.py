@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_professional, require_verified_professional
+from app.core.admin_permissions import resolve_admin_role
+from app.core.deps import admin_permissions_for, get_current_professional, require_verified_professional
 from app.core.specialty_catalog import specialty_label
 from app.db.session import get_db
 from app.models.professional import Professional
@@ -31,6 +32,8 @@ def _to_response(p: Professional) -> ProfessionalResponse:
         billing_profile_complete=billing_profile_is_complete(p),
         avatar_color=p.avatar_color,
         is_staff=p.is_staff,
+        admin_role=resolve_admin_role(admin_role=p.admin_role, is_staff=p.is_staff),
+        admin_permissions=admin_permissions_for(p),
         email_verified=p.email_verified_at is not None,
         signup_payment_required=p.signup_payment_required,
     )

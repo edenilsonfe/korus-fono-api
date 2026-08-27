@@ -3,7 +3,8 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import require_staff
+from app.core.admin_permissions import PERMISSION_MESSAGING_READ, PERMISSION_MESSAGING_WRITE
+from app.core.deps import require_admin_permission
 from app.db.session import get_db
 from app.models.professional import Professional
 from app.schemas.admin_trial_email import (
@@ -22,7 +23,7 @@ router = APIRouter(prefix="/admin/trial-emails", tags=["admin-trial-emails"])
 async def preview_trial_email_campaign(
     audience: TrialEmailAudience,
     expires_within_days: int = Query(3, ge=1, le=30, alias="expiresWithinDays"),
-    _: Professional = Depends(require_staff),
+    _: Professional = Depends(require_admin_permission(PERMISSION_MESSAGING_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     return await TrialEmailCampaignService(db).preview(
@@ -34,7 +35,7 @@ async def preview_trial_email_campaign(
 @router.get("/campaigns", response_model=list[TrialEmailCampaignResponse])
 async def list_trial_email_campaigns(
     limit: int = Query(20, ge=1, le=100),
-    _: Professional = Depends(require_staff),
+    _: Professional = Depends(require_admin_permission(PERMISSION_MESSAGING_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     return await TrialEmailCampaignService(db).list_campaigns(limit)
@@ -48,7 +49,7 @@ async def list_trial_email_campaigns(
 async def create_trial_email_campaign(
     body: TrialEmailCampaignCreate,
     background_tasks: BackgroundTasks,
-    actor: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_MESSAGING_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     campaign = await TrialEmailCampaignService(db).create_campaign(

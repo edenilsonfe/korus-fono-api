@@ -5,7 +5,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import require_staff
+from app.core.admin_permissions import PERMISSION_PRODUCT_READ, PERMISSION_PRODUCT_WRITE
+from app.core.deps import require_admin_permission
 from app.db.session import get_db
 from app.models.professional import Professional
 from app.schemas.admin_product import (
@@ -26,7 +27,7 @@ router = APIRouter(prefix="/admin", tags=["admin-feature-flags"])
 
 @router.get("/feature-flags", response_model=list[FeatureFlagItem])
 async def list_feature_flags(
-    _: Professional = Depends(require_staff),
+    _: Professional = Depends(require_admin_permission(PERMISSION_PRODUCT_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     return await FeatureFlagService(db).list_flags()
@@ -35,7 +36,7 @@ async def list_feature_flags(
 @router.post("/feature-flags", response_model=FeatureFlagItem, status_code=status.HTTP_201_CREATED)
 async def create_feature_flag(
     body: FeatureFlagCreate,
-    actor: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_PRODUCT_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -48,7 +49,7 @@ async def create_feature_flag(
 async def update_feature_flag(
     key: str,
     body: FeatureFlagUpdate,
-    actor: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_PRODUCT_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -63,7 +64,7 @@ async def update_feature_flag(
 )
 async def list_professional_feature_flags(
     professional_id: UUID,
-    _: Professional = Depends(require_staff),
+    _: Professional = Depends(require_admin_permission(PERMISSION_PRODUCT_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -80,7 +81,7 @@ async def set_professional_feature_flag(
     professional_id: UUID,
     key: str,
     body: SetFlagOverrideBody,
-    actor: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_PRODUCT_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     try:

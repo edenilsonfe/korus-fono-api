@@ -5,7 +5,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import require_staff
+from app.core.admin_permissions import PERMISSION_PRODUCT_READ, PERMISSION_PRODUCT_WRITE
+from app.core.deps import require_admin_permission
 from app.db.session import get_db
 from app.models.professional import Professional
 from app.schemas.resource import (
@@ -13,11 +14,11 @@ from app.schemas.resource import (
     AdminResourceUpdateBody,
     ResourceResponse,
 )
+from app.services.admin_audit_service import AdminAuditService
 from app.services.resource_service import (
     ResourceNotFoundError,
     ResourceService,
     parse_categories_form,
-    to_resource_response,
 )
 
 router = APIRouter(prefix="/admin/resources", tags=["admin-resources"])
@@ -50,7 +51,7 @@ def _to_admin_response(resource) -> ResourceResponse:
 @router.get("", response_model=list[ResourceResponse])
 @router.get("/", response_model=list[ResourceResponse])
 async def list_admin_resources(
-    _: Professional = Depends(require_staff),
+    _: Professional = Depends(require_admin_permission(PERMISSION_PRODUCT_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     service = ResourceService(db)
@@ -74,7 +75,7 @@ async def create_admin_resource(
     related_protocol: str | None = Form(None),
     difficulty: str | None = Form(None),
     featured: bool = Form(False),
-    _: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_PRODUCT_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     body = AdminResourceCreateBody(
@@ -93,6 +94,11 @@ async def create_admin_resource(
     )
     service = ResourceService(db)
     resource = await service.create_global_admin(file=file, body=body)
+    await AdminAuditService(db).log(
+        actor=actor,
+        action="create_resource",
+        payload={"resource_id": str(resource.id), "title": resource.title},
+    )
     await db.commit()
     await db.refresh(resource)
     return _to_admin_response(resource)
@@ -114,7 +120,7 @@ async def update_admin_resource(
     related_protocol: str | None = Form(None),
     difficulty: str | None = Form(None),
     featured: bool | None = Form(None),
-    _: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_PRODUCT_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     payload_data: dict = {}
@@ -147,6 +153,11 @@ async def update_admin_resource(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Recurso não encontrado",
         ) from exc
+    await AdminAuditService(db).log(
+        actor=actor,
+        action="update_resource",
+        payload={"resource_id": str(resource.id), "title": resource.title},
+    )
     await db.commit()
     await db.refresh(resource)
     return _to_admin_response(resource)
@@ -155,7 +166,7 @@ async def update_admin_resource(
 @router.delete("/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_admin_resource(
     resource_id: UUID,
-    _: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_PRODUCT_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     service = ResourceService(db)
@@ -166,4 +177,9 @@ async def delete_admin_resource(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Recurso não encontrado",
         ) from exc
+    await AdminAuditService(db).log(
+        actor=actor,
+        action="delete_resource",
+        payload={"resource_id": str(resource_id)},
+    )
     await db.commit()

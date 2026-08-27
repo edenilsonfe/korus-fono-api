@@ -1,10 +1,11 @@
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.admin_permissions import ADMIN_ROLE_SUPERADMIN, resolve_admin_role
 from app.models.ai import AIJob
 from app.models.assessment import Assessment
 from app.models.billing import Subscription
@@ -114,6 +115,7 @@ class AdminProfessionalService:
                 subscription_status=p.subscription_status,
                 trial_ends_at=p.trial_ends_at,
                 is_staff=p.is_staff,
+                admin_role=resolve_admin_role(admin_role=p.admin_role, is_staff=p.is_staff),
                 is_disabled=p.is_disabled,
                 created_at=p.created_at,
             )
@@ -186,6 +188,7 @@ class AdminProfessionalService:
             specialty_key=pro.specialty_key,
             council=pro.council,
             is_staff=pro.is_staff,
+            admin_role=resolve_admin_role(admin_role=pro.admin_role, is_staff=pro.is_staff),
             is_disabled=pro.is_disabled,
             subscription_status=pro.subscription_status,
             trial_started_at=pro.trial_started_at,
@@ -242,16 +245,58 @@ class AdminProfessionalService:
     async def set_staff(
         self, *, actor: Professional, professional_id: UUID, is_staff: bool, reason: str | None
     ) -> AdminProfessionalDetail:
-        pro = await self._get(professional_id)
-        if pro.id == actor.id and not is_staff:
-            raise AdminConflictError("Você não pode remover o próprio acesso de staff")
-        before = pro.is_staff
-        pro.is_staff = is_staff
-        await self.audit.log(
-            actor_id=actor.id,
-            target_professional_id=pro.id,
+        return await self.set_admin_role(
+            actor=actor,
+            professional_id=professional_id,
+            admin_role=ADMIN_ROLE_SUPERADMIN if is_staff else None,
+            reason=reason or "Alteração de acesso administrativo legado",
             action="set_staff",
-            payload={"before": before, "after": is_staff, "reason": reason},
+        )
+
+    async def set_admin_role(
+        self,
+        *,
+        actor: Professional,
+        professional_id: UUID,
+        admin_role: str | None,
+        reason: str,
+        action: str = "set_admin_role",
+    ) -> AdminProfessionalDetail:
+        pro = await self._get(professional_id)
+        before = resolve_admin_role(admin_role=pro.admin_role, is_staff=pro.is_staff)
+        if pro.id == actor.id and admin_role != ADMIN_ROLE_SUPERADMIN:
+            raise AdminConflictError("Você não pode reduzir o próprio papel de superadmin")
+        if before == ADMIN_ROLE_SUPERADMIN and admin_role != ADMIN_ROLE_SUPERADMIN:
+            remaining = int(
+                (
+                    await self.db.execute(
+                        select(func.count())
+                        .select_from(Professional)
+                        .where(
+                            Professional.id != pro.id,
+                            Professional.is_disabled.is_(False),
+                            or_(
+                                Professional.admin_role == ADMIN_ROLE_SUPERADMIN,
+                                and_(
+                                    Professional.admin_role.is_(None),
+                                    Professional.is_staff.is_(True),
+                                ),
+                            ),
+                        )
+                    )
+                ).scalar_one()
+            )
+            if remaining == 0:
+                raise AdminConflictError("A plataforma deve manter ao menos um superadmin ativo")
+
+        pro.admin_role = admin_role
+        pro.is_staff = admin_role is not None
+        pro.token_version += 1
+        await self.audit.log(
+            actor=actor,
+            target_professional_id=pro.id,
+            action=action,
+            payload={"before": before, "after": admin_role, "reason": reason},
         )
         await self.db.commit()
         return await self.get_detail(pro.id)

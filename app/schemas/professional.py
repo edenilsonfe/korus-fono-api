@@ -23,6 +23,8 @@ class ProfessionalResponse(CamelModel):
     billing_profile_complete: bool = False
     avatar_color: str
     is_staff: bool = False
+    admin_role: str | None = None
+    admin_permissions: list[str] = Field(default_factory=list)
     email_verified: bool = False
     signup_payment_required: bool = False
 

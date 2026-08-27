@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     admin_announcements,
+    admin_operations,
     admin_billing,
     admin_feature_flags,
     admin_professionals,
@@ -58,6 +59,7 @@ api_router.include_router(whatsapp.router)
 api_router.include_router(webhooks.router)
 api_router.include_router(notifications.router)
 api_router.include_router(admin_announcements.router)
+api_router.include_router(admin_operations.router)
 api_router.include_router(admin_professionals.router)
 api_router.include_router(admin_protocols.router)
 api_router.include_router(admin_feature_flags.router)

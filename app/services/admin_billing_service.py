@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -42,6 +42,7 @@ class AdminBillingService:
         *,
         status: str | None = None,
         plan_slug: str | None = None,
+        query: str | None = None,
         page: int = 1,
         limit: int = 20,
     ) -> AdminSubscriptionsPage:
@@ -50,13 +51,27 @@ class AdminBillingService:
         filters = []
         if status:
             filters.append(Subscription.status == status)
+        if query:
+            normalized_query = f"%{query.strip()}%"
+            filters.append(
+                or_(
+                    Professional.name.ilike(normalized_query),
+                    Professional.email.ilike(normalized_query),
+                    Subscription.external_subscription_id.ilike(normalized_query),
+                )
+            )
 
         stmt = (
             select(Subscription)
             .options(joinedload(Subscription.plan), joinedload(Subscription.professional))
+            .join(Professional, Subscription.professional_id == Professional.id)
             .order_by(Subscription.updated_at.desc())
         )
-        count_stmt = select(func.count()).select_from(Subscription)
+        count_stmt = (
+            select(func.count())
+            .select_from(Subscription)
+            .join(Professional, Subscription.professional_id == Professional.id)
+        )
         if plan_slug:
             stmt = stmt.join(Plan, Subscription.plan_id == Plan.id).where(Plan.slug == plan_slug)
             count_stmt = count_stmt.join(Plan, Subscription.plan_id == Plan.id).where(

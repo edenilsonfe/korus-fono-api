@@ -5,7 +5,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import require_staff
+from app.core.admin_permissions import PERMISSION_PRODUCT_READ, PERMISSION_PRODUCT_WRITE
+from app.core.deps import require_admin_permission
 from app.db.session import get_db
 from app.models.professional import Professional
 from app.schemas.app_notification import (
@@ -14,6 +15,7 @@ from app.schemas.app_notification import (
     AnnouncementStats,
     AnnouncementUpdate,
 )
+from app.services.admin_audit_service import AdminAuditService
 from app.services.notification_service import (
     AnnouncementNotFoundError,
     InvalidStatusTransitionError,
@@ -45,11 +47,16 @@ def _to_announcement(n) -> Announcement:
 @router.post("/", response_model=Announcement, status_code=status.HTTP_201_CREATED)
 async def create_announcement(
     payload: AnnouncementCreate,
-    author: Professional = Depends(require_staff),
+    author: Professional = Depends(require_admin_permission(PERMISSION_PRODUCT_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     service = NotificationService(db)
     notification = await service.create_announcement(author=author, payload=payload)
+    await AdminAuditService(db).log(
+        actor=author,
+        action="create_announcement",
+        payload={"notification_id": str(notification.id), "title": notification.title},
+    )
     await db.commit()
     await db.refresh(notification)
     return _to_announcement(notification)
@@ -59,7 +66,7 @@ async def create_announcement(
 @router.get("/", response_model=list[Announcement])
 async def list_announcements(
     status_filter: str | None = Query(None, alias="status"),
-    _: Professional = Depends(require_staff),
+    _: Professional = Depends(require_admin_permission(PERMISSION_PRODUCT_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     service = NotificationService(db)
@@ -70,7 +77,7 @@ async def list_announcements(
 @router.get("/{notification_id}", response_model=Announcement)
 async def get_announcement(
     notification_id: UUID,
-    _: Professional = Depends(require_staff),
+    _: Professional = Depends(require_admin_permission(PERMISSION_PRODUCT_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     service = NotificationService(db)
@@ -87,7 +94,7 @@ async def get_announcement(
 async def update_announcement(
     notification_id: UUID,
     payload: AnnouncementUpdate,
-    _: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_PRODUCT_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     service = NotificationService(db)
@@ -105,6 +112,11 @@ async def update_announcement(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Transição de status inválida: {exc.current} -> {exc.target}",
         ) from exc
+    await AdminAuditService(db).log(
+        actor=actor,
+        action="update_announcement",
+        payload={"notification_id": str(notification.id), "title": notification.title, "after": notification.status},
+    )
     await db.commit()
     await db.refresh(notification)
     return _to_announcement(notification)
@@ -113,7 +125,7 @@ async def update_announcement(
 @router.delete("/{notification_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_announcement(
     notification_id: UUID,
-    _: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_PRODUCT_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     service = NotificationService(db)
@@ -124,13 +136,18 @@ async def delete_announcement(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Anúncio não encontrado",
         ) from exc
+    await AdminAuditService(db).log(
+        actor=actor,
+        action="delete_announcement",
+        payload={"notification_id": str(notification_id)},
+    )
     await db.commit()
 
 
 @router.get("/{notification_id}/stats", response_model=AnnouncementStats)
 async def announcement_stats(
     notification_id: UUID,
-    _: Professional = Depends(require_staff),
+    _: Professional = Depends(require_admin_permission(PERMISSION_PRODUCT_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     service = NotificationService(db)

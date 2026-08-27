@@ -5,7 +5,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import require_staff
+from app.core.admin_permissions import (
+    PERMISSION_ACCOUNTS_READ,
+    PERMISSION_ACCOUNTS_WRITE,
+    PERMISSION_ADMIN_ROLES_WRITE,
+    PERMISSION_BILLING_WRITE,
+)
+from app.core.deps import require_admin_permission
 from app.db.session import get_db
 from app.models.professional import Professional
 from app.schemas.admin_professional import (
@@ -17,6 +23,7 @@ from app.schemas.admin_professional import (
     SetStaffBody,
     SetSubscriptionStatusBody,
 )
+from app.schemas.admin_operations import SetAdminRoleBody
 from app.services.admin_professional_service import (
     AdminConflictError,
     AdminNotFoundError,
@@ -32,7 +39,7 @@ def _service(db: AsyncSession) -> AdminProfessionalService:
 
 @router.get("/stats", response_model=AdminHubStats)
 async def admin_hub_stats(
-    _: Professional = Depends(require_staff),
+    _: Professional = Depends(require_admin_permission(PERMISSION_ACCOUNTS_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     return await _service(db).hub_stats()
@@ -47,7 +54,7 @@ async def list_professionals(
     specialty_key: str | None = Query(None, alias="specialtyKey"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    _: Professional = Depends(require_staff),
+    _: Professional = Depends(require_admin_permission(PERMISSION_ACCOUNTS_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     return await _service(db).list_professionals(
@@ -64,7 +71,7 @@ async def list_professionals(
 @router.get("/professionals/{professional_id}", response_model=AdminProfessionalDetail)
 async def get_professional(
     professional_id: UUID,
-    _: Professional = Depends(require_staff),
+    _: Professional = Depends(require_admin_permission(PERMISSION_ACCOUNTS_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -77,7 +84,7 @@ async def get_professional(
 async def extend_trial(
     professional_id: UUID,
     body: ExtendTrialBody,
-    actor: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_ACCOUNTS_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -92,7 +99,7 @@ async def extend_trial(
 async def set_staff(
     professional_id: UUID,
     body: SetStaffBody,
-    actor: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_ADMIN_ROLES_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -115,7 +122,7 @@ async def set_staff(
 async def set_subscription_status(
     professional_id: UUID,
     body: SetSubscriptionStatusBody,
-    actor: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_BILLING_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -135,7 +142,7 @@ async def set_subscription_status(
 async def disable_professional(
     professional_id: UUID,
     body: AdminReasonBody,
-    actor: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_ACCOUNTS_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -152,7 +159,7 @@ async def disable_professional(
 async def enable_professional(
     professional_id: UUID,
     body: AdminReasonBody,
-    actor: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_ACCOUNTS_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -170,7 +177,7 @@ async def enable_professional(
 async def invalidate_sessions(
     professional_id: UUID,
     body: AdminReasonBody,
-    actor: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_ACCOUNTS_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -179,3 +186,23 @@ async def invalidate_sessions(
         )
     except AdminNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conta não encontrada") from exc
+
+
+@router.patch("/professionals/{professional_id}/admin-role", response_model=AdminProfessionalDetail)
+async def set_admin_role(
+    professional_id: UUID,
+    body: SetAdminRoleBody,
+    actor: Professional = Depends(require_admin_permission(PERMISSION_ADMIN_ROLES_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await _service(db).set_admin_role(
+            actor=actor,
+            professional_id=professional_id,
+            admin_role=body.admin_role,
+            reason=body.reason,
+        )
+    except AdminNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conta não encontrada") from exc
+    except AdminConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.detail) from exc

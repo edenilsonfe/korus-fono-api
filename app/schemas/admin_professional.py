@@ -3,6 +3,7 @@ from typing import Literal
 
 from pydantic import Field
 
+from app.schemas.admin_operations import AdminRole
 from app.schemas.common import CamelModel, PaginatedResponse
 
 SubscriptionStatus = Literal["trialing", "active", "trial_expired", "past_due", "canceled"]
@@ -16,6 +17,7 @@ class AdminProfessionalListItem(CamelModel):
     subscription_status: str
     trial_ends_at: datetime | None = None
     is_staff: bool
+    admin_role: AdminRole | None = None
     is_disabled: bool
     created_at: datetime
 
@@ -54,6 +56,7 @@ class AdminProfessionalDetail(CamelModel):
     specialty_key: str
     council: str
     is_staff: bool
+    admin_role: AdminRole | None = None
     is_disabled: bool
     subscription_status: str
     trial_started_at: datetime | None = None
@@ -79,19 +82,19 @@ class AdminHubStats(CamelModel):
 
 
 class AdminReasonBody(CamelModel):
-    reason: str | None = None
+    reason: str = Field(min_length=5, max_length=500)
 
 
 class ExtendTrialBody(CamelModel):
     days: int = Field(default=7, ge=1, le=365)
-    reason: str | None = None
+    reason: str = Field(min_length=5, max_length=500)
 
 
 class SetStaffBody(CamelModel):
     is_staff: bool
-    reason: str | None = None
+    reason: str = Field(min_length=5, max_length=500)
 
 
 class SetSubscriptionStatusBody(CamelModel):
     status: SubscriptionStatus
-    reason: str | None = None
+    reason: str = Field(min_length=5, max_length=500)

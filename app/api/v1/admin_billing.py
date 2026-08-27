@@ -5,7 +5,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import require_staff
+from app.core.admin_permissions import PERMISSION_BILLING_READ, PERMISSION_BILLING_WRITE
+from app.core.deps import require_admin_permission
 from app.db.session import get_db
 from app.models.professional import Professional
 from app.schemas.admin_billing import (
@@ -35,7 +36,7 @@ router = APIRouter(prefix="/admin/billing", tags=["admin-billing"])
 @router.get("/metrics", response_model=BillingMetrics)
 async def billing_metrics(
     period_days: int = Query(30, alias="periodDays"),
-    _: Professional = Depends(require_staff),
+    _: Professional = Depends(require_admin_permission(PERMISSION_BILLING_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     return await AdminBillingService(db).metrics(period_days)
@@ -45,20 +46,21 @@ async def billing_metrics(
 async def list_subscriptions(
     status_filter: str | None = Query(None, alias="status"),
     plan_slug: str | None = Query(None, alias="planSlug"),
+    query: str | None = Query(None, alias="q", max_length=120),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    _: Professional = Depends(require_staff),
+    _: Professional = Depends(require_admin_permission(PERMISSION_BILLING_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     return await AdminBillingService(db).list_subscriptions(
-        status=status_filter, plan_slug=plan_slug, page=page, limit=limit
+        status=status_filter, plan_slug=plan_slug, query=query, page=page, limit=limit
     )
 
 
 @router.get("/subscriptions/{subscription_id}", response_model=AdminSubscriptionDetail)
 async def get_subscription(
     subscription_id: UUID,
-    _: Professional = Depends(require_staff),
+    _: Professional = Depends(require_admin_permission(PERMISSION_BILLING_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -73,7 +75,7 @@ async def get_subscription(
 )
 async def reconcile_professional(
     professional_id: UUID,
-    actor: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_BILLING_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -84,7 +86,7 @@ async def reconcile_professional(
 
 @router.get("/plans", response_model=list[AdminPlanItem])
 async def list_admin_plans(
-    _: Professional = Depends(require_staff),
+    _: Professional = Depends(require_admin_permission(PERMISSION_BILLING_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     return await AdminBillingService(db).list_plans()
@@ -93,7 +95,7 @@ async def list_admin_plans(
 @router.post("/plans", response_model=AdminPlanItem, status_code=status.HTTP_201_CREATED)
 async def create_admin_plan(
     body: AdminPlanCreate,
-    actor: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_BILLING_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -106,7 +108,7 @@ async def create_admin_plan(
 async def update_admin_plan(
     plan_id: UUID,
     body: AdminPlanUpdate,
-    actor: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_BILLING_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -117,7 +119,7 @@ async def update_admin_plan(
 
 @router.get("/coupons", response_model=list[CouponItem])
 async def list_coupons(
-    _: Professional = Depends(require_staff),
+    _: Professional = Depends(require_admin_permission(PERMISSION_BILLING_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     return await CouponService(db).list_coupons()
@@ -126,7 +128,7 @@ async def list_coupons(
 @router.post("/coupons", response_model=CouponItem, status_code=status.HTTP_201_CREATED)
 async def create_coupon(
     body: CouponCreate,
-    actor: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_BILLING_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -139,7 +141,7 @@ async def create_coupon(
 async def update_coupon(
     coupon_id: UUID,
     body: CouponUpdate,
-    actor: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_BILLING_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -157,7 +159,7 @@ async def update_coupon(
 async def apply_coupon(
     professional_id: UUID,
     body: ApplyCouponBody,
-    actor: Professional = Depends(require_staff),
+    actor: Professional = Depends(require_admin_permission(PERMISSION_BILLING_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
     try:

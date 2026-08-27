@@ -97,7 +97,16 @@ class FeatureFlagService:
         await self.audit.log(
             actor_id=actor.id,
             action="update_feature_flag",
-            payload={"key": key, "before": before, "reason": body.reason},
+            payload={
+                "key": key,
+                "before": before,
+                "after": {
+                    "description": flag.description,
+                    "enabled_global": flag.enabled_global,
+                    "audience": flag.audience,
+                },
+                "reason": body.reason,
+            },
         )
         await self.db.commit()
         await self.db.refresh(flag)
