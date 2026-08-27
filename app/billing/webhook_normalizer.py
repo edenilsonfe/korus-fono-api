@@ -85,7 +85,6 @@ class AsaasWebhookNormalizer(WebhookNormalizer):
     _PAYMENT_FAILURE = frozenset(
         {
             "PAYMENT_OVERDUE",
-            "PAYMENT_DELETED",
             "PAYMENT_REFUNDED",
             "PAYMENT_CHARGEBACK_REQUESTED",
         }
@@ -185,6 +184,8 @@ class AsaasWebhookNormalizer(WebhookNormalizer):
 
         if event_name in self._PAYMENT_SUCCESS:
             event_type = InternalBillingEventType.PAYMENT_SUCCEEDED
+        elif event_name == "PAYMENT_DELETED":
+            event_type = InternalBillingEventType.PAYMENT_DELETED
         elif event_name in self._PAYMENT_FAILURE:
             event_type = InternalBillingEventType.PAYMENT_FAILED
         else:
@@ -193,7 +194,7 @@ class AsaasWebhookNormalizer(WebhookNormalizer):
         ext_ref = payment.get("externalReference")
         professional_id, plan_slug = _parse_external_reference(ext_ref)
         checkout_session_id = payment.get("checkoutSession")
-        payload = {
+        payload: dict[str, Any] = {
             **payment,
             "provider": "asaas",
             "external_reference": ext_ref,
@@ -202,8 +203,11 @@ class AsaasWebhookNormalizer(WebhookNormalizer):
             "checkout_session_id": checkout_session_id,
             "external_subscription_id": payment.get("subscription"),
             "last_payment_at": payment.get("paymentDate") or payment.get("clientPaymentDate"),
-            "subscription_status": "active" if event_type == InternalBillingEventType.PAYMENT_SUCCEEDED else "past_due",
         }
+        if event_type == InternalBillingEventType.PAYMENT_SUCCEEDED:
+            payload["subscription_status"] = "active"
+        elif event_type == InternalBillingEventType.PAYMENT_FAILED:
+            payload["subscription_status"] = "past_due"
         if professional_id:
             payload["professional_id"] = professional_id
 

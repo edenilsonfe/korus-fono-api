@@ -230,6 +230,7 @@ class BillingReconciliationService:
         normalizer = AsaasWebhookNormalizer()
         applied = False
         payments_checked = len(payments)
+        professional = await self.db.get(Professional, sub.professional_id)
         for payment in payments:
             status = str(payment.get("status", "")).upper()
             if status not in _ASAAS_SUCCESS:
@@ -253,9 +254,17 @@ class BillingReconciliationService:
                     payload=ev.payload,
                     professional_id=ev.professional_hint,
                 )
-                if row:
-                    await self._billing.apply_normalized_events([ev])
-                    await self._billing.mark_processed(row.id)
+                needs_repair = sub.status != "active" or (
+                    professional is not None
+                    and professional.subscription_status != "active"
+                )
+                if row or needs_repair:
+                    await self._billing.apply_normalized_events(
+                        [ev],
+                        track_purchase=row is not None,
+                    )
+                    if row:
+                        await self._billing.mark_processed(row.id)
                     applied = True
 
         professional = await self.db.get(Professional, sub.professional_id)

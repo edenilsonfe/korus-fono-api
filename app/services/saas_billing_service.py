@@ -203,7 +203,12 @@ class SaasBillingService:
             return payload.get("status") or payload.get("new_status")
         return None
 
-    async def apply_normalized_events(self, events: list[NormalizedBillingEvent]) -> None:
+    async def apply_normalized_events(
+        self,
+        events: list[NormalizedBillingEvent],
+        *,
+        track_purchase: bool = True,
+    ) -> None:
         for ev in events:
             professional_id = await self._resolve_professional_id(ev)
             if not professional_id:
@@ -333,13 +338,14 @@ class SaasBillingService:
             if should_send_verification and professional:
                 await self._send_signup_verification_email(professional)
 
-            await self._track_purchase_event(
-                ev,
-                sub_status=sub_status,
-                plan_row=plan_row,
-                professional=professional,
-                subscription=target,
-            )
+            if track_purchase:
+                await self._track_purchase_event(
+                    ev,
+                    sub_status=sub_status,
+                    plan_row=plan_row,
+                    professional=professional,
+                    subscription=target,
+                )
 
     async def _send_signup_verification_email(self, professional: Professional) -> None:
         """Send the verification link only after a paid signup is unlocked."""

@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.compiler import compiles
 
 from app.core.config import get_settings
+from app.core.security import create_access_token
 from app.models.billing import Plan, Subscription
 from app.models.professional import Professional
 from app.services.plan_catalog_seed import COMMERCIAL_PLAN_SEEDS
@@ -143,6 +144,71 @@ async def test_asaas_checkout_paid_activates_the_matching_annual_subscription(
     )
     assert newer_monthly_subscription.plan_id == monthly_plan.id
     assert newer_monthly_subscription.external_checkout_id == "pay-monthly-existing"
+
+
+@pytest.mark.asyncio
+async def test_asaas_deleted_future_payment_does_not_downgrade_paid_monthly_subscription(
+    api_client,
+    db_session,
+    monkeypatch,
+):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "asaas_webhook_token", "correct-token")
+
+    monthly_plan = Plan(**COMMERCIAL_PLAN_SEEDS[0])
+    professional = Professional(
+        email="future-payment-deleted@test.com",
+        password_hash="hash",
+        name="Future Payment Deleted",
+        subscription_status="active",
+    )
+    db_session.add_all([monthly_plan, professional])
+    await db_session.flush()
+    subscription = Subscription(
+        professional_id=professional.id,
+        plan_id=monthly_plan.id,
+        status="active",
+        provider="asaas",
+        external_subscription_id="sub_paid_monthly",
+        external_checkout_id="pay_received_monthly",
+        last_payment_at=datetime(2026, 8, 25, tzinfo=UTC),
+        current_period_end=datetime(2026, 9, 25, tzinfo=UTC),
+    )
+    db_session.add(subscription)
+    await db_session.commit()
+
+    response = await api_client.post(
+        "/api/v1/billing/webhooks/asaas",
+        json={
+            "event": "PAYMENT_DELETED",
+            "payment": {
+                "id": "pay_future_deleted",
+                "status": "PENDING",
+                "deleted": True,
+                "dueDate": "2026-09-26",
+                "subscription": "sub_paid_monthly",
+                "externalReference": (
+                    f"{professional.id}:korusfono_pro_monthly"
+                ),
+            },
+        },
+        headers={"asaas-access-token": "correct-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"received": True, "events": 1}
+
+    token = create_access_token(professional.id)
+    billing_me = await api_client.get(
+        "/api/v1/billing/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert billing_me.status_code == 200
+    assert billing_me.json()["subscriptionStatus"] == "active"
+    assert billing_me.json()["subscription"]["status"] == "active"
+    assert billing_me.json()["subscription"]["currentPeriodEnd"].startswith(
+        "2026-09-25T00:00:00"
+    )
 
 
 @pytest.mark.asyncio
