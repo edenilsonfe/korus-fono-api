@@ -1432,6 +1432,46 @@ async def test_asaas_creates_annual_card_payment_with_selected_installments(monk
     assert result["payment_id"] == "pay_card_annual"
 
 
+@pytest.mark.asyncio
+async def test_asaas_creates_annual_pix_payment_for_in_app_qr_code(monkeypatch):
+    gateway = object.__new__(AsaasPaymentGateway)
+    gateway._api_key = "test-key"
+    gateway._base_url = "https://api-sandbox.asaas.com/v3"
+    captured: dict = {}
+
+    async def fake_request_json(method, url, **kwargs):
+        assert method == "POST"
+        assert url.endswith("/payments")
+        captured.update(kwargs["json_body"])
+        return {"id": "pay_pix_annual", "status": "PENDING"}
+
+    monkeypatch.setattr("app.billing.asaas_gateway.request_json", fake_request_json)
+
+    result = await gateway.create_pix_payment(
+        customer_id="cus_pix",
+        account_id="account-1",
+        plan_slug="korusfono_pro_yearly",
+        description="KorusFono Pro — acesso por 12 meses",
+        value_cents=93000,
+        checkout_reference="checkout-annual-pix-1",
+    )
+
+    assert captured == {
+        "customer": "cus_pix",
+        "billingType": "PIX",
+        "dueDate": date.today().isoformat(),
+        "value": 930.0,
+        "description": "KorusFono Pro — acesso por 12 meses",
+        "externalReference": (
+            "account-1:korusfono_pro_yearly:checkout-annual-pix-1"
+        ),
+    }
+    assert result == {
+        "payment_id": "pay_pix_annual",
+        "payment": {"id": "pay_pix_annual", "status": "PENDING"},
+    }
+
+
 def _valid_credit_card_payload(*, installments: int = 1) -> CreditCardPaymentRequest:
     return CreditCardPaymentRequest.model_validate(
         {
@@ -1527,6 +1567,245 @@ async def test_annual_transparent_card_replaces_hosted_checkout_and_keeps_discou
     assert create_kwargs["installments"] == 12
     assert create_kwargs["remote_ip"] == "203.0.113.10"
     gateway.cancel_checkout.assert_awaited_once_with("chk_hosted_old")
+
+
+@pytest.mark.asyncio
+async def test_annual_pix_is_generated_inside_checkout_and_replaces_hosted_checkout(
+    db_session,
+):
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[1])
+    professional = Professional(
+        email="transparent-annual-pix@test.com",
+        password_hash="hash",
+        name="Transparent Annual PIX",
+        phone="11999990000",
+        cpf="24971563792",
+        subscription_status="trialing",
+        trial_started_at=datetime.now(UTC),
+        trial_ends_at=datetime.now(UTC),
+    )
+    db_session.add_all([plan, professional])
+    await db_session.flush()
+    sub = Subscription(
+        professional_id=professional.id,
+        plan_id=plan.id,
+        status="incomplete",
+        provider="asaas",
+        checkout_session_id=professional.id,
+        checkout_charge_cents=93000,
+        external_checkout_id="chk_hosted_annual_pix",
+        billing_document="24971563792",
+    )
+    db_session.add(sub)
+    await db_session.commit()
+
+    gateway = AsyncMock()
+    gateway.list_payments_by_external_reference = AsyncMock(return_value=[])
+    gateway.create_pix_payment = AsyncMock(
+        return_value={
+            "payment_id": "pay_transparent_annual_pix",
+            "payment": {"id": "pay_transparent_annual_pix", "status": "PENDING"},
+        }
+    )
+    gateway.get_pix_qr_code = AsyncMock(
+        return_value={
+            "encoded_image": "base64-qr-code",
+            "payload": "000201-pix-copia-e-cola",
+            "expiration_date": "2026-08-28T03:00:00Z",
+        }
+    )
+    gateway.cancel_checkout = AsyncMock(return_value=None)
+    customer_service = AsyncMock()
+    customer_service.ensure_customer = AsyncMock(return_value="cus_transparent_pix")
+
+    with (
+        patch(
+            "app.services.billing_checkout_service.AsaasPaymentGateway",
+            return_value=gateway,
+        ),
+        patch(
+            "app.services.billing_checkout_service.BillingCustomerService",
+            return_value=customer_service,
+        ),
+    ):
+        result = await BillingCheckoutService(db_session).generate_pix(
+            session_id=str(professional.id),
+            professional=professional,
+        )
+
+    assert result == {
+        "session_id": str(professional.id),
+        "provider": "asaas",
+        "encoded_image": "base64-qr-code",
+        "payload": "000201-pix-copia-e-cola",
+        "expiration_date": "2026-08-28T03:00:00Z",
+    }
+    assert sub.external_checkout_id == "pay_transparent_annual_pix"
+    gateway.create_pix_payment.assert_awaited_once_with(
+        customer_id="cus_transparent_pix",
+        account_id=str(professional.id),
+        plan_slug="korusfono_pro_yearly",
+        description="KorusFono Pro — acesso por 12 meses",
+        value_cents=93000,
+        checkout_reference=str(professional.id),
+    )
+    gateway.get_pix_qr_code.assert_awaited_once_with("pay_transparent_annual_pix")
+    gateway.cancel_checkout.assert_awaited_once_with("chk_hosted_annual_pix")
+
+
+@pytest.mark.asyncio
+async def test_annual_card_replaces_pending_pix_payment_instead_of_reusing_it(
+    db_session,
+):
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[1])
+    professional = Professional(
+        email="annual-card-after-pix@test.com",
+        password_hash="hash",
+        name="Annual Card After PIX",
+        phone="11999990000",
+        cpf="24971563792",
+        subscription_status="trialing",
+        trial_started_at=datetime.now(UTC),
+        trial_ends_at=datetime.now(UTC),
+    )
+    db_session.add_all([plan, professional])
+    await db_session.flush()
+    sub = Subscription(
+        professional_id=professional.id,
+        plan_id=plan.id,
+        status="incomplete",
+        provider="asaas",
+        checkout_session_id=professional.id,
+        checkout_charge_cents=97000,
+        external_checkout_id="pay_pix_annual_old",
+        billing_document="24971563792",
+    )
+    db_session.add(sub)
+    await db_session.commit()
+
+    gateway = AsyncMock()
+    gateway.list_payments_by_external_reference = AsyncMock(
+        return_value=[
+            {
+                "id": "pay_pix_annual_old",
+                "status": "PENDING",
+                "billingType": "PIX",
+            }
+        ]
+    )
+    gateway.create_credit_card_payment = AsyncMock(
+        return_value={
+            "payment_id": "pay_card_annual_new",
+            "payment": {"id": "pay_card_annual_new", "status": "PENDING"},
+        }
+    )
+    gateway.delete_payment = AsyncMock(return_value=None)
+    gateway.cancel_checkout = AsyncMock(return_value=None)
+    customer_service = AsyncMock()
+    customer_service.ensure_customer = AsyncMock(return_value="cus_card_after_pix")
+
+    with (
+        patch(
+            "app.services.billing_checkout_service.AsaasPaymentGateway",
+            return_value=gateway,
+        ),
+        patch(
+            "app.services.billing_checkout_service.BillingCustomerService",
+            return_value=customer_service,
+        ),
+    ):
+        result = await BillingCheckoutService(db_session).pay_credit_card(
+            session_id=str(professional.id),
+            professional=professional,
+            payload=_valid_credit_card_payload(installments=12),
+            remote_ip="203.0.113.10",
+        )
+
+    assert result["status"] == "pending"
+    assert sub.external_checkout_id == "pay_card_annual_new"
+    gateway.create_credit_card_payment.assert_awaited_once()
+    gateway.delete_payment.assert_awaited_once_with("pay_pix_annual_old")
+    gateway.cancel_checkout.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_annual_pix_replaces_pending_card_payment_without_hosted_checkout(
+    db_session,
+):
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[1])
+    professional = Professional(
+        email="annual-pix-after-card@test.com",
+        password_hash="hash",
+        name="Annual PIX After Card",
+        phone="11999990000",
+        cpf="24971563792",
+        subscription_status="trialing",
+        trial_started_at=datetime.now(UTC),
+        trial_ends_at=datetime.now(UTC),
+    )
+    db_session.add_all([plan, professional])
+    await db_session.flush()
+    sub = Subscription(
+        professional_id=professional.id,
+        plan_id=plan.id,
+        status="incomplete",
+        provider="asaas",
+        checkout_session_id=professional.id,
+        checkout_charge_cents=97000,
+        external_checkout_id="pay_card_annual_old",
+        billing_document="24971563792",
+    )
+    db_session.add(sub)
+    await db_session.commit()
+
+    gateway = AsyncMock()
+    gateway.list_payments_by_external_reference = AsyncMock(
+        return_value=[
+            {
+                "id": "pay_card_annual_old",
+                "status": "PENDING",
+                "billingType": "CREDIT_CARD",
+            }
+        ]
+    )
+    gateway.create_pix_payment = AsyncMock(
+        return_value={
+            "payment_id": "pay_pix_annual_new",
+            "payment": {"id": "pay_pix_annual_new", "status": "PENDING"},
+        }
+    )
+    gateway.get_pix_qr_code = AsyncMock(
+        return_value={
+            "encoded_image": "base64-new-pix",
+            "payload": "000201-new-pix",
+            "expiration_date": "2026-08-28T03:00:00Z",
+        }
+    )
+    gateway.delete_payment = AsyncMock(return_value=None)
+    gateway.cancel_checkout = AsyncMock(return_value=None)
+    customer_service = AsyncMock()
+    customer_service.ensure_customer = AsyncMock(return_value="cus_pix_after_card")
+
+    with (
+        patch(
+            "app.services.billing_checkout_service.AsaasPaymentGateway",
+            return_value=gateway,
+        ),
+        patch(
+            "app.services.billing_checkout_service.BillingCustomerService",
+            return_value=customer_service,
+        ),
+    ):
+        result = await BillingCheckoutService(db_session).generate_pix(
+            session_id=str(professional.id),
+            professional=professional,
+        )
+
+    assert result["payload"] == "000201-new-pix"
+    assert sub.external_checkout_id == "pay_pix_annual_new"
+    gateway.create_pix_payment.assert_awaited_once()
+    gateway.delete_payment.assert_awaited_once_with("pay_card_annual_old")
+    gateway.cancel_checkout.assert_not_awaited()
 
 
 @pytest.mark.asyncio

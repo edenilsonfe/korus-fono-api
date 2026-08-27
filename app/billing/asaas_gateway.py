@@ -323,6 +323,37 @@ class AsaasPaymentGateway:
             raise PaymentGatewayError("Asaas não retornou id da cobrança com cartão")
         return {"payment_id": str(payment_id), "payment": payment}
 
+    async def create_pix_payment(
+        self,
+        *,
+        customer_id: str,
+        account_id: str,
+        plan_slug: str,
+        description: str,
+        value_cents: int,
+        checkout_reference: str,
+    ) -> dict[str, Any]:
+        """Create a one-off PIX charge for an in-app checkout."""
+        payment = await request_json(
+            "POST",
+            f"{self._base_url}/payments",
+            headers=self._headers(),
+            json_body={
+                "customer": customer_id,
+                "billingType": "PIX",
+                "dueDate": date.today().isoformat(),
+                "value": round(value_cents / 100, 2),
+                "description": description,
+                "externalReference": (
+                    f"{account_id}:{plan_slug}:{checkout_reference}"
+                ),
+            },
+        )
+        payment_id = payment.get("id")
+        if not payment_id:
+            raise PaymentGatewayError("Asaas não retornou id da cobrança PIX")
+        return {"payment_id": str(payment_id), "payment": payment}
+
     async def cancel_checkout(self, checkout_id: str) -> None:
         await request_json(
             "POST",

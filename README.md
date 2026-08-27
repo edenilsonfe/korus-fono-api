@@ -88,6 +88,11 @@ autenticado de billing, que os repassa imediatamente ao Asaas sem persistir ou r
 campos. Essa arquitetura exige operação em conformidade com PCI DSS SAQ-D; não habilite o Asaas em
 produção antes de concluir os controles e a validação de compliance aplicáveis.
 
+O PIX também permanece no formulário do KorusFono. No plano anual, a API cria uma cobrança avulsa
+à vista no Asaas e devolve QR Code e copia e cola pela sessão local; no mensal, usa a primeira
+cobrança da assinatura recorrente. Em ambos os casos, somente a confirmação do provedor libera o
+acesso.
+
 ### Financeiro interno da clínica
 
 O domínio `/api/v1/finance/*` controla contas a receber/pagar, baixas parciais,

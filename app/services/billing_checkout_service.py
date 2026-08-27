@@ -278,6 +278,7 @@ class BillingCheckoutService:
             charge_cents = sub.checkout_charge_cents or plan.price_cents
             old_subscription_id = sub.external_subscription_id
             old_checkout_id = sub.external_checkout_id
+            old_checkout_is_payment = False
             external_reference = (
                 f"{professional.id}:{plan.slug}:{checkout_reference}"
             )
@@ -285,6 +286,10 @@ class BillingCheckoutService:
             if yearly:
                 existing_payments = await gateway.list_payments_by_external_reference(
                     external_reference
+                )
+                old_checkout_is_payment = any(
+                    str(candidate.get("id")) == str(old_checkout_id)
+                    for candidate in existing_payments
                 )
                 payment = self._pick_card_attempt(existing_payments)
                 if payment:
@@ -378,7 +383,10 @@ class BillingCheckoutService:
         # turn a successful card authorization into an apparent client-side failure.
         try:
             if yearly and old_checkout_id and old_checkout_id != sub.external_checkout_id:
-                await gateway.cancel_checkout(str(old_checkout_id))
+                if old_checkout_is_payment:
+                    await gateway.delete_payment(str(old_checkout_id))
+                else:
+                    await gateway.cancel_checkout(str(old_checkout_id))
             elif (
                 not yearly
                 and old_subscription_id
@@ -422,6 +430,8 @@ class BillingCheckoutService:
             for payment in payments:
                 if (
                     payment.get("id")
+                    and str(payment.get("billingType", "")).upper()
+                    in {"", "CREDIT_CARD"}
                     and str(payment.get("status", "")).upper() in accepted_statuses
                 ):
                     return payment
@@ -431,28 +441,92 @@ class BillingCheckoutService:
         self, *, session_id: str, professional: Professional
     ) -> dict[str, Any]:
         sub = await self._get_subscription(
-            session_id=session_id, professional_id=str(professional.id)
+            session_id=session_id,
+            professional_id=str(professional.id),
+            lock=True,
         )
         provider = (sub.provider or "stub").lower()
         payment_id = str(sub.external_checkout_id or session_id)
 
         if provider == "asaas":
             display_plan = sub.pending_plan if sub.pending_plan_id and not sub.pending_change_at else sub.plan
-            if (
+            transparent_annual = bool(
                 display_plan
                 and is_yearly_interval(display_plan.billing_interval)
                 and (not sub.external_subscription_id or sub.pending_plan_id)
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        "O plano anual usa o checkout seguro do Asaas. "
-                        "Escolha PIX ou cartão diretamente na página de pagamento."
-                    ),
-                )
+            )
             try:
                 gateway = AsaasPaymentGateway()
-                pix = await gateway.get_pix_qr_code(payment_id)
+                if transparent_annual and display_plan:
+                    billing_document = "".join(
+                        character
+                        for character in (sub.billing_document or "")
+                        if character.isdigit()
+                    )
+                    if not billing_document:
+                        raise HTTPException(
+                            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail=(
+                                "Informe um CPF ou CNPJ de cobrança antes de gerar o PIX."
+                            ),
+                        )
+
+                    customer_id = await BillingCustomerService(self.db).ensure_customer(
+                        professional_id=str(professional.id),
+                        provider="asaas",
+                        email=professional.email,
+                        name=professional.name,
+                        gateway=gateway,
+                        document=billing_document,
+                        profile=asaas_customer_profile(professional),
+                    )
+                    checkout_reference = str(sub.checkout_session_id or sub.id)
+                    external_reference = (
+                        f"{professional.id}:{display_plan.slug}:{checkout_reference}"
+                    )
+                    payments = await gateway.list_payments_by_external_reference(
+                        external_reference
+                    )
+                    payment = self._pick_pix_attempt(payments)
+                    old_checkout_id = sub.external_checkout_id
+                    old_checkout_is_payment = any(
+                        str(candidate.get("id")) == str(old_checkout_id)
+                        for candidate in payments
+                    )
+                    if payment:
+                        payment_id = str(payment["id"])
+                    else:
+                        result = await gateway.create_pix_payment(
+                            customer_id=customer_id,
+                            account_id=str(professional.id),
+                            plan_slug=display_plan.slug,
+                            description=f"{display_plan.name} — acesso por 12 meses",
+                            value_cents=(
+                                sub.checkout_charge_cents or display_plan.price_cents
+                            ),
+                            checkout_reference=checkout_reference,
+                        )
+                        payment_id = str(result["payment_id"])
+
+                    sub.external_checkout_id = payment_id
+                    await self.db.commit()
+                    pix = await gateway.get_pix_qr_code(payment_id)
+
+                    if old_checkout_id and str(old_checkout_id) != payment_id:
+                        try:
+                            if old_checkout_is_payment:
+                                await gateway.delete_payment(str(old_checkout_id))
+                            else:
+                                await gateway.cancel_checkout(str(old_checkout_id))
+                        except PaymentGatewayError as exc:
+                            logger.warning(
+                                "Asaas superseded annual checkout cleanup failed "
+                                "professional_id=%s status_code=%s",
+                                professional.id,
+                                exc.status_code,
+                            )
+                else:
+                    pix = await gateway.get_pix_qr_code(payment_id)
             except (PaymentGatewayConfigError, PaymentGatewayError) as exc:
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
@@ -469,6 +543,18 @@ class BillingCheckoutService:
             "payload": pix.get("payload"),
             "expiration_date": pix.get("expiration_date"),
         }
+
+    @staticmethod
+    def _pick_pix_attempt(payments: list[dict[str, Any]]) -> dict[str, Any] | None:
+        for accepted_statuses in (_PAYMENT_SUCCESS, _PAYMENT_PENDING):
+            for payment in payments:
+                if (
+                    payment.get("id")
+                    and str(payment.get("billingType", "")).upper() == "PIX"
+                    and str(payment.get("status", "")).upper() in accepted_statuses
+                ):
+                    return payment
+        return None
 
     async def prepare_card_invoice(
         self, *, session_id: str, professional: Professional
