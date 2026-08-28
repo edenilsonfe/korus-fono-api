@@ -11,6 +11,7 @@ from app.core.diagnosis_catalog import diagnosis_labels, validate_diagnosis_keys
 from app.core.utils import calculate_age, goal_status_from_progress, guardian_label, utcnow
 from app.db.session import get_db
 from app.models.assessment import Assessment
+from app.models.appointment import Appointment
 from app.models.caregiver import Caregiver
 from app.models.patient import Patient
 from app.models.professional import Professional
@@ -32,6 +33,7 @@ from app.services.patient import (
     get_patient_aggregates_batch,
 )
 from app.services.patient_appointment_service import cancel_future_patient_appointments
+from app.services.google_calendar_service import dispatch_sync_records, queue_appointment_sync
 from app.services.timeline import create_timeline_event
 from app.services.whatsapp_queue import enqueue_whatsapp_appointment_event_log
 
@@ -354,13 +356,17 @@ async def cancel_future_appointments(
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(patient_id, professional, db)
-    appointments, event_logs = await cancel_future_patient_appointments(
+    appointments, event_logs, google_records = await cancel_future_patient_appointments(
         db,
         professional_id=professional.id,
         patient_id=patient.id,
     )
     for event_log in event_logs:
         background_tasks.add_task(enqueue_whatsapp_appointment_event_log, event_log.id)
+    if google_records:
+        background_tasks.add_task(
+            dispatch_sync_records, [record.id for record in google_records]
+        )
     return BulkAppointmentCancellationResponse(cancelled_count=len(appointments))
 
 
@@ -389,6 +395,7 @@ async def update_therapy_plan(
 @router.delete("/{patient_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_patient(
     patient_id: UUID,
+    background_tasks: BackgroundTasks,
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
@@ -410,5 +417,26 @@ async def delete_patient(
                     "e não pode ser removido agora"
                 ),
             )
+    appointments = list(
+        (
+            await db.execute(
+                select(Appointment).where(
+                    Appointment.professional_id == professional.id,
+                    Appointment.patient_id == patient.id,
+                )
+            )
+        ).scalars()
+    )
+    google_records = []
+    for appointment in appointments:
+        record = await queue_appointment_sync(
+            db, appointment, patient.name, operation="delete"
+        )
+        if record:
+            google_records.append(record)
     await db.delete(patient)
-    await db.flush()
+    await db.commit()
+    if google_records:
+        background_tasks.add_task(
+            dispatch_sync_records, [record.id for record in google_records]
+        )

@@ -148,6 +148,9 @@ uv run arq worker.WorkerSettings
 
 Configure `OPENCODE_API_KEY` no `.env` (chave em [opencode.ai/auth](https://opencode.ai/auth)). Modelos disponíveis: [OpenCode Zen](https://opencode.ai/docs/zen/).
 
+O mesmo worker recupera a fila persistida do Google Agenda. Configuração completa
+do OAuth, callback e variáveis: [`docs/google-calendar-setup.md`](docs/google-calendar-setup.md).
+
 Transcrição de áudio usa um provedor separado compatível com `/v1/audio/transcriptions`:
 
 - `AUDIO_TRANSCRIPTION_API_KEY`

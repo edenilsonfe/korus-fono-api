@@ -18,6 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.models.appointment import Appointment
 from app.models.professional import Professional
+from app.models.patient import Patient
+from app.models.google_calendar import GoogleCalendarSyncRecord
+from app.services.google_calendar_service import queue_appointment_sync
 
 APPOINTMENT_RESPONSE_TOKEN_TYPE = "appointment_attendance_response"
 COMPACT_TOKEN_VERSION = 1
@@ -220,7 +223,7 @@ async def preview_appointment_response(
 
 async def submit_appointment_response(
     db: AsyncSession, token: str, action: str
-) -> AppointmentResponseDetails:
+) -> tuple[AppointmentResponseDetails, GoogleCalendarSyncRecord | None]:
     claims = _decode_response_token(token)
     appointment, professional = await _load_appointment(
         db, claims, for_update=True
@@ -234,7 +237,7 @@ async def submit_appointment_response(
         appointment.status = "confirmado"
     elif action == "cancel":
         if appointment.status == "cancelado":
-            return _details(appointment, professional)
+            return _details(appointment, professional), None
         if appointment.status not in ACTIVE_RESPONSE_STATUSES:
             raise AppointmentResponseUnavailable(UNAVAILABLE_RESPONSE_MESSAGE)
         appointment.status = "cancelado"
@@ -242,4 +245,8 @@ async def submit_appointment_response(
         raise AppointmentResponseUnavailable(UNAVAILABLE_RESPONSE_MESSAGE)
 
     await db.flush()
-    return _details(appointment, professional)
+    patient_name = (
+        await db.execute(select(Patient.name).where(Patient.id == appointment.patient_id))
+    ).scalar_one()
+    google_record = await queue_appointment_sync(db, appointment, patient_name)
+    return _details(appointment, professional), google_record

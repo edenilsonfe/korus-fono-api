@@ -98,6 +98,9 @@ class Settings(BaseSettings):
     # após o cadastro (vazio = recurso desativado). Envia com a chave global.
     evolution_welcome_instance_name: str = ""
     clinic_timezone: str = "America/Sao_Paulo"
+    google_calendar_client_id: str = ""
+    google_calendar_client_secret: str = ""
+    google_calendar_credential_encryption_key: str = ""
     whatsapp_scheduler_interval_seconds: int = 900
     whatsapp_reminder_window_hours: int = 24
     whatsapp_reminder_tolerance_minutes: int = 15
@@ -176,6 +179,21 @@ class Settings(BaseSettings):
             return None
         return f"{base.rstrip('/')}/api/v1/webhooks/evolution/whatsapp"
 
+    @property
+    def google_calendar_redirect_uri(self) -> str:
+        base = (self.app_public_url or "").strip().rstrip("/")
+        if not base:
+            base = "http://localhost:8000"
+        return f"{base}/api/v1/google-calendar/oauth/callback"
+
+    @property
+    def google_calendar_configured(self) -> bool:
+        return bool(
+            self.google_calendar_client_id.strip()
+            and self.google_calendar_client_secret.strip()
+            and self.google_calendar_credential_encryption_key.strip()
+        )
+
 
 INSECURE_JWT_SECRETS = frozenset({"change-me-in-production", ""})
 PRODUCTION_SENTRY_ENVS = frozenset({"production", "prod"})
@@ -201,6 +219,18 @@ def is_production_runtime(settings: Settings) -> bool:
 
 
 def validate_settings(settings: Settings) -> None:
+    google_values = (
+        settings.google_calendar_client_id,
+        settings.google_calendar_client_secret,
+        settings.google_calendar_credential_encryption_key,
+    )
+    if any(value.strip() for value in google_values) and not all(
+        value.strip() for value in google_values
+    ):
+        raise RuntimeError(
+            "Configuração Google Calendar incompleta: defina CLIENT_ID, CLIENT_SECRET "
+            "e CREDENTIAL_ENCRYPTION_KEY"
+        )
     if is_production_runtime(settings):
         if settings.debug:
             raise RuntimeError(

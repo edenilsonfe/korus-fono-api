@@ -33,6 +33,10 @@ from app.services.appointment_finance_service import (
 from app.services.appointment_whatsapp_events import (
     resolve_appointment_update_whatsapp_event,
 )
+from app.services.google_calendar_service import (
+    dispatch_sync_records,
+    queue_appointment_sync,
+)
 from app.services.schedule_block_service import ensure_appointment_slot_available
 from app.services.whatsapp_appointment_outbox import create_appointment_event_log
 from app.services.whatsapp_queue import enqueue_whatsapp_appointment_event_log
@@ -231,6 +235,7 @@ async def create_appointment(
     await db.flush()
 
     children_created = 0
+    created_appointments = [anchor]
     if appointment_type == "recorrente" and body.end_date:
         for slot in iter_recurring_child_slots(
             body.frequency,
@@ -262,7 +267,14 @@ async def create_appointment(
                 weekday_slots=weekday_slots_payload,
             )
             db.add(child)
+            created_appointments.append(child)
             children_created += 1
+
+    google_records = []
+    for created_appointment in created_appointments:
+        record = await queue_appointment_sync(db, created_appointment, patient.name)
+        if record:
+            google_records.append(record)
 
     event_log = None
     if anchor.status == "confirmado":
@@ -278,6 +290,10 @@ async def create_appointment(
     if event_log:
         background_tasks.add_task(
             enqueue_whatsapp_appointment_event_log, event_log.id
+        )
+    if google_records:
+        background_tasks.add_task(
+            dispatch_sync_records, [record.id for record in google_records]
         )
 
     response = _to_response(anchor, patient.name, professional.name)
@@ -341,6 +357,7 @@ async def update_appointment(
     event_log = None
     if event:
         event_log = await create_appointment_event_log(db, appt, event)
+    google_record = await queue_appointment_sync(db, appt, patient.name)
 
     await db.commit()
     await db.refresh(appt)
@@ -349,6 +366,8 @@ async def update_appointment(
         background_tasks.add_task(
             enqueue_whatsapp_appointment_event_log, event_log.id
         )
+    if google_record:
+        background_tasks.add_task(dispatch_sync_records, [google_record.id])
 
     return _to_response(appt, patient.name, professional.name)
 
@@ -356,13 +375,23 @@ async def update_appointment(
 @router.delete("/{appointment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_appointment(
     appointment_id: UUID,
+    background_tasks: BackgroundTasks,
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(Appointment).where(Appointment.id == appointment_id, Appointment.professional_id == professional.id)
+        select(Appointment, Patient.name)
+        .join(Patient, Patient.id == Appointment.patient_id)
+        .where(Appointment.id == appointment_id, Appointment.professional_id == professional.id)
     )
-    appt = result.scalar_one_or_none()
-    if not appt:
+    row = result.one_or_none()
+    if not row:
         raise HTTPException(status_code=404, detail="Agendamento não encontrado")
+    appt, patient_name = row
+    google_record = await queue_appointment_sync(
+        db, appt, patient_name, operation="delete"
+    )
     await db.delete(appt)
+    await db.commit()
+    if google_record:
+        background_tasks.add_task(dispatch_sync_records, [google_record.id])

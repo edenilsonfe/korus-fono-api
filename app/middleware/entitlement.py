@@ -35,7 +35,16 @@ EXEMPT_PATH_PREFIXES: tuple[str, ...] = (
     "/api/v1/admin",
 )
 # /docs, /redoc, /openapi.json only exist when debug=True (see create_app).
-EXEMPT_PATHS = frozenset({"/health", "/docs", "/redoc", "/openapi.json"})
+EXEMPT_PATHS = frozenset(
+    {
+        "/health",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+        # Revogação de credencial externa deve permanecer disponível mesmo em read-only.
+        "/api/v1/google-calendar/connection",
+    }
+)
 
 
 class EntitlementMiddleware(BaseHTTPMiddleware):

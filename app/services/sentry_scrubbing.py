@@ -33,6 +33,8 @@ _SENSITIVE_EXTRA_KEYS = frozenset(
         "evolution_global_api_key",
         "evolution_webhook_secret",
         "whatsapp_credential_encryption_key",
+        "google_calendar_client_secret",
+        "google_calendar_credential_encryption_key",
         "authorization",
         "cookie",
         "cpf",

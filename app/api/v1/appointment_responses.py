@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -14,6 +14,7 @@ from app.services.appointment_response_service import (
     preview_appointment_response,
     submit_appointment_response,
 )
+from app.services.google_calendar_service import dispatch_sync_records
 
 router = APIRouter(prefix="/appointment-responses", tags=["appointment-responses"])
 
@@ -37,13 +38,16 @@ async def preview_public_appointment_response(
 @router.post("", response_model=AppointmentAttendanceResponse)
 async def submit_public_appointment_response(
     body: AppointmentAttendanceResponseRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        details = await submit_appointment_response(db, body.token, body.action)
+        details, google_record = await submit_appointment_response(db, body.token, body.action)
     except InvalidAppointmentResponseToken as exc:
         raise HTTPException(status_code=status.HTTP_410_GONE, detail=str(exc)) from exc
     except AppointmentResponseUnavailable as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await db.commit()
+    if google_record:
+        background_tasks.add_task(dispatch_sync_records, [google_record.id])
     return _response(details)

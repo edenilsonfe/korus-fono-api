@@ -30,6 +30,7 @@ from app.models.resource import Resource
 from app.models.caregiver import Caregiver
 from app.models.evolution import Evolution
 from app.models.goal import ClinicalDomainSnapshot, Goal
+from app.models.google_calendar import GoogleCalendarConnection, GoogleCalendarSyncRecord
 from app.models.notification_message_log import NotificationMessageLog
 from app.models.notification_settings import NotificationSettings
 from app.models.password_reset_token import PasswordResetToken
@@ -68,6 +69,8 @@ __all__ = [
     "BatterySessionEvent",
     "Goal",
     "ClinicalDomainSnapshot",
+    "GoogleCalendarConnection",
+    "GoogleCalendarSyncRecord",
     "AIReport",
     "Conversation",
     "ChatMessage",

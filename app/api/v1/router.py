@@ -20,6 +20,7 @@ from app.api.v1 import (
     clinical,
     dashboard,
     finance,
+    google_calendar,
     instruments,
     me,
     notifications,
@@ -46,6 +47,7 @@ api_router.include_router(schedule_blocks.router)
 api_router.include_router(appointment_responses.router)
 api_router.include_router(finance.router)
 api_router.include_router(finance.patient_router)
+api_router.include_router(google_calendar.router)
 api_router.include_router(sessions.router)
 api_router.include_router(sessions.patient_router)
 api_router.include_router(prontuario.router)

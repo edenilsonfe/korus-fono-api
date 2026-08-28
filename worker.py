@@ -77,6 +77,12 @@ async def run_trial_email_campaign(ctx, campaign_id: str) -> None:
         raise
 
 
+async def retry_google_calendar_syncs(ctx) -> None:
+    from app.services.google_calendar_service import retry_pending_syncs
+
+    await retry_pending_syncs(ctx)
+
+
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     functions = [
@@ -85,13 +91,15 @@ class WorkerSettings:
         dispatch_whatsapp_appointment_event,
         dispatch_whatsapp_appointment_event_log,
         run_trial_email_campaign,
+        retry_google_calendar_syncs,
     ]
     cron_jobs = [
         cron(
             run_whatsapp_scheduler,
             minute={0, 15, 30, 45},
             run_at_startup=False,
-        )
+        ),
+        cron(retry_google_calendar_syncs, minute={5, 20, 35, 50}, run_at_startup=False),
     ]
 
     @staticmethod

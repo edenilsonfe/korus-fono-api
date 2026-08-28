@@ -8,7 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.models.appointment import Appointment
 from app.models.notification_message_log import NotificationMessageLog
+from app.models.patient import Patient
+from app.models.google_calendar import GoogleCalendarSyncRecord
 from app.services.whatsapp_appointment_outbox import create_appointment_event_logs
+from app.services.google_calendar_service import queue_appointment_sync
 
 CANCELLABLE_APPOINTMENT_STATUSES = ("pendente", "confirmado")
 
@@ -26,13 +29,18 @@ async def cancel_future_patient_appointments(
     professional_id: UUID,
     patient_id: UUID,
     clinic_now: datetime | None = None,
-) -> tuple[list[Appointment], list[NotificationMessageLog]]:
+) -> tuple[
+    list[Appointment],
+    list[NotificationMessageLog],
+    list[GoogleCalendarSyncRecord],
+]:
     """Cancel eligible future appointments and persist their outbox events atomically."""
     if clinic_now is None:
         clinic_now = datetime.now(ZoneInfo(get_settings().clinic_timezone))
 
     result = await db.execute(
-        select(Appointment)
+        select(Appointment, Patient.name)
+        .join(Patient, Patient.id == Appointment.patient_id)
         .where(
             Appointment.professional_id == professional_id,
             Appointment.patient_id == patient_id,
@@ -41,14 +49,21 @@ async def cancel_future_patient_appointments(
         )
         .order_by(Appointment.date.asc(), Appointment.time.asc())
     )
+    rows = result.all()
     appointments = [
         appointment
-        for appointment in result.scalars().all()
+        for appointment, _patient_name in rows
         if appointment_occurs_in_future(appointment, clinic_now)
     ]
     for appointment in appointments:
         appointment.status = "cancelado"
 
     event_logs = await create_appointment_event_logs(db, appointments, "cancelled")
+    google_records = []
+    patient_name = rows[0][1] if rows else "Paciente"
+    for appointment in appointments:
+        record = await queue_appointment_sync(db, appointment, patient_name)
+        if record:
+            google_records.append(record)
     await db.commit()
-    return appointments, event_logs
+    return appointments, event_logs, google_records
