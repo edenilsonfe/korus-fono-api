@@ -60,6 +60,7 @@ async def db_session(db_engine):
                     description=protocol["description"],
                     age_range=protocol["age_range"],
                     field_templates=protocol.get("field_templates", []),
+                    is_active=protocol.get("is_active", True),
                 )
             )
         await session.commit()

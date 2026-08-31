@@ -28,7 +28,6 @@ async def seed_protocols(session) -> None:
             existing.description = p["description"]
             existing.age_range = p["age_range"]
             existing.field_templates = p["field_templates"]
-            existing.is_active = True
         else:
             session.add(ProtocolCatalog(**p))
 

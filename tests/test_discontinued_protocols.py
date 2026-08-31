@@ -35,6 +35,33 @@ def test_aliases_exclude_discontinued_manifest_slugs():
     assert "sdq" not in CLIENT_SCORED_PROTOCOLS
 
 
+async def test_seed_keeps_abfw_disabled(db_session):
+    abfw = await db_session.get(ProtocolCatalog, "abfw")
+    assert abfw is not None
+    abfw.is_active = False
+    await db_session.commit()
+
+    await seed_protocols(db_session)
+    await db_session.commit()
+
+    await db_session.refresh(abfw)
+    assert abfw.is_active is False
+
+
+async def test_seed_creates_abfw_disabled_by_default(db_session):
+    abfw = await db_session.get(ProtocolCatalog, "abfw")
+    assert abfw is not None
+    await db_session.delete(abfw)
+    await db_session.commit()
+
+    await seed_protocols(db_session)
+    await db_session.commit()
+
+    abfw = await db_session.get(ProtocolCatalog, "abfw")
+    assert abfw is not None
+    assert abfw.is_active is False
+
+
 async def test_seed_deactivates_orphans_with_assessments(db_session, professional, patient):
     db_session.add(
         ProtocolCatalog(

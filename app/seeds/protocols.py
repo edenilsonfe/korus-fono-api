@@ -7,6 +7,7 @@ PROTOCOLS = [
         "full_name": "Teste de Linguagem Infantil ABFW",
         "description": "Avaliação de fonologia, vocabulário, fluência e pragmática.",
         "age_range": "2 a 12 anos",
+        "is_active": False,
         "field_templates": [
             {"key": "fonologia_imitacao", "label": "Fonologia — imitação"},
             {"key": "fonologia_nomeacao", "label": "Fonologia — nomeação"},
