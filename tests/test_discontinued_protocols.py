@@ -15,6 +15,7 @@ from app.seeds.protocols import PROTOCOLS
 
 
 REMOVED_FROM_CATALOG = ("eat10", "masa", "tli", "spm", "tvip", "sdq")
+DISABLED_BY_DEFAULT = ("abfw", "amiofe")
 
 
 def test_protocols_seed_excludes_discontinued():
@@ -35,31 +36,37 @@ def test_aliases_exclude_discontinued_manifest_slugs():
     assert "sdq" not in CLIENT_SCORED_PROTOCOLS
 
 
-async def test_seed_keeps_abfw_disabled(db_session):
-    abfw = await db_session.get(ProtocolCatalog, "abfw")
-    assert abfw is not None
-    abfw.is_active = False
+async def test_seed_keeps_default_disabled_protocols_disabled(db_session):
+    protocols = []
+    for protocol_id in DISABLED_BY_DEFAULT:
+        protocol = await db_session.get(ProtocolCatalog, protocol_id)
+        assert protocol is not None
+        protocol.is_active = False
+        protocols.append(protocol)
     await db_session.commit()
 
     await seed_protocols(db_session)
     await db_session.commit()
 
-    await db_session.refresh(abfw)
-    assert abfw.is_active is False
+    for protocol in protocols:
+        await db_session.refresh(protocol)
+        assert protocol.is_active is False
 
 
-async def test_seed_creates_abfw_disabled_by_default(db_session):
-    abfw = await db_session.get(ProtocolCatalog, "abfw")
-    assert abfw is not None
-    await db_session.delete(abfw)
+async def test_seed_creates_default_disabled_protocols_inactive(db_session):
+    for protocol_id in DISABLED_BY_DEFAULT:
+        protocol = await db_session.get(ProtocolCatalog, protocol_id)
+        assert protocol is not None
+        await db_session.delete(protocol)
     await db_session.commit()
 
     await seed_protocols(db_session)
     await db_session.commit()
 
-    abfw = await db_session.get(ProtocolCatalog, "abfw")
-    assert abfw is not None
-    assert abfw.is_active is False
+    for protocol_id in DISABLED_BY_DEFAULT:
+        protocol = await db_session.get(ProtocolCatalog, protocol_id)
+        assert protocol is not None
+        assert protocol.is_active is False
 
 
 async def test_seed_deactivates_orphans_with_assessments(db_session, professional, patient):

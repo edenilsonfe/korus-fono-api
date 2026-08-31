@@ -214,6 +214,7 @@ PROTOCOLS = [
         "full_name": "AMIOFE-E — Avaliação Miofuncional Orofacial com Escores Expandido",
         "description": "Protocolo Felício et al. (2010) — aparência, mobilidade e funções orofaciais com escores 1–4/1–6.",
         "age_range": "Todas as idades",
+        "is_active": False,
         "field_templates": [
             {"key": "face", "label": "Face e bochechas"},
             {"key": "labios_lingua", "label": "Lábios e língua"},
