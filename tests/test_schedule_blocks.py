@@ -125,6 +125,41 @@ async def test_timed_block_prevents_new_and_rescheduled_appointments(
 
 
 @pytest.mark.asyncio
+async def test_cancelled_appointment_remains_listed_but_releases_the_slot(
+    api_client, auth_headers, patient
+):
+    appointment_date = "2026-09-16"
+    original = await api_client.post(
+        "/api/v1/appointments",
+        headers=auth_headers,
+        json=_appointment_body(str(patient.id), date=appointment_date, time="09:00"),
+    )
+    assert original.status_code == 201
+
+    cancelled = await api_client.patch(
+        f"/api/v1/appointments/{original.json()['id']}",
+        headers=auth_headers,
+        json={"status": "cancelado"},
+    )
+    assert cancelled.status_code == 200
+
+    replacement = await api_client.post(
+        "/api/v1/appointments",
+        headers=auth_headers,
+        json=_appointment_body(str(patient.id), date=appointment_date, time="09:00"),
+    )
+    assert replacement.status_code == 201, replacement.text
+
+    listed = await api_client.get(
+        "/api/v1/appointments",
+        headers=auth_headers,
+        params={"from": appointment_date, "to": appointment_date},
+    )
+    assert listed.status_code == 200
+    assert {item["status"] for item in listed.json()} == {"cancelado", "pendente"}
+
+
+@pytest.mark.asyncio
 async def test_full_day_block_rejects_every_time_on_each_date(
     api_client, auth_headers, patient
 ):
