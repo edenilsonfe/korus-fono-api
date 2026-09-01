@@ -1,8 +1,9 @@
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
 from app.models.ai import AIReport
+from app.models.appointment import Appointment
 from app.models.assessment import Assessment
 from app.models.goal import ClinicalDomainSnapshot
 from app.models.patient import Patient
@@ -131,6 +132,66 @@ async def test_dashboard_retorna_apenas_aniversariantes_do_profissional(
             "avatarColor": birthday_patient.avatar_color,
         }
     ]
+
+
+async def test_dashboard_conta_evolucoes_pendentes_apenas_de_pacientes_ativos(
+    api_client,
+    auth_headers,
+    db_session: AsyncSession,
+    professional: Professional,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.services.dashboard.ZoneInfo", lambda _key: UTC)
+    clinic_today = datetime.now(UTC).date()
+    active_patient = Patient(
+        professional_id=professional.id,
+        name="Paciente ativo com evolução pendente",
+        birth_date=clinic_today.replace(year=clinic_today.year - 4),
+        diagnosis_keys=["linguagem"],
+        status="ativo",
+        start_date=clinic_today - timedelta(days=30),
+        avatar_color="oklch(0.58 0.12 205)",
+    )
+    inactive_patient = Patient(
+        professional_id=professional.id,
+        name="Paciente inativo com evolução pendente",
+        birth_date=clinic_today.replace(year=clinic_today.year - 5),
+        diagnosis_keys=["linguagem"],
+        status="inativo",
+        start_date=clinic_today - timedelta(days=60),
+        avatar_color="oklch(0.60 0.10 160)",
+    )
+    db_session.add_all([active_patient, inactive_patient])
+    await db_session.flush()
+    appointment_date = clinic_today - timedelta(days=1)
+    db_session.add_all(
+        [
+            Appointment(
+                professional_id=professional.id,
+                patient_id=active_patient.id,
+                date=appointment_date,
+                time=time(10, 0),
+                type="Terapia",
+                duration=50,
+                status="confirmado",
+            ),
+            Appointment(
+                professional_id=professional.id,
+                patient_id=inactive_patient.id,
+                date=appointment_date,
+                time=time(11, 0),
+                type="Terapia",
+                duration=50,
+                status="confirmado",
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    response = await api_client.get("/api/v1/dashboard", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["pending"]["evolutions"] == 1
 
 
 async def test_dashboard_exclui_dados_demonstrativos_e_usa_evolucao_real(

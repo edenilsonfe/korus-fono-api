@@ -360,6 +360,7 @@ async def build_dashboard(db: AsyncSession, professional_id) -> dict:
         .where(
             Appointment.professional_id == professional_id,
             Patient.is_demo.is_(False),
+            Patient.status == "ativo",
             Appointment.status.in_(["pendente", "confirmado"]),
             Appointment.date <= today,
         )
