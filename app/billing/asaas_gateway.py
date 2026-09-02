@@ -9,6 +9,7 @@ from datetime import date, timedelta
 from typing import Any
 from urllib.parse import urlencode
 
+from app.billing.constants import MAX_ANNUAL_CARD_INSTALLMENTS
 from app.billing.errors import PaymentGatewayConfigError, PaymentGatewayError
 from app.billing.http_client import request_json
 from app.core.config import get_settings
@@ -387,7 +388,7 @@ class AsaasPaymentGateway:
         payload: dict[str, Any] = {
             "billingTypes": ["PIX", "CREDIT_CARD"],
             "chargeTypes": ["DETACHED", "INSTALLMENT"],
-            "installment": {"maxInstallmentCount": 12},
+            "installment": {"maxInstallmentCount": MAX_ANNUAL_CARD_INSTALLMENTS},
             "minutesToExpire": 1440,
             "callback": {
                 "successUrl": success_url,

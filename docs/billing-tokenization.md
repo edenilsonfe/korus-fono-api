@@ -133,7 +133,7 @@ Rollback: reverter flag para in_app (aceitar regressão PCI temporária).
 
 ## 6. Open questions
 
-1. Parcelamento 2–12× no plano anual é suportado na fatura Asaas da 1ª cobrança da assinatura, ou só via `POST /payments` com `installmentCount` (path atual server-side)?
+1. Parcelamento 2–10× no plano anual é suportado na fatura Asaas da 1ª cobrança da assinatura, ou só via `POST /payments` com `installmentCount` (path atual server-side)?
 2. Domínio de callback/`successUrl` já está cadastrado nas informações comerciais Asaas (prod + sandbox)?
 3. Preferimos redirect full-page ou iframe embutido (CSP + UX)?
 4. Assinatura recorrente: após pagar a 1ª fatura com cartão na UI Asaas, o Asaas tokeniza sozinho para ciclos seguintes, ou precisamos de passo extra?

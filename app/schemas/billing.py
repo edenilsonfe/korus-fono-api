@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import EmailStr, Field, SecretStr, field_validator, model_validator
 
+from app.billing.constants import MAX_ANNUAL_CARD_INSTALLMENTS
 from app.schemas.common import CamelModel
 
 
@@ -247,7 +248,7 @@ class CreditCardPaymentRequest(CamelModel):
     address_number: str = Field(min_length=1, max_length=30)
     address_complement: str | None = Field(default=None, max_length=100)
     phone: str
-    installments: int = Field(default=1, ge=1, le=12)
+    installments: int = Field(default=1, ge=1, le=MAX_ANNUAL_CARD_INSTALLMENTS)
 
     @field_validator("holder_name", "address_number")
     @classmethod

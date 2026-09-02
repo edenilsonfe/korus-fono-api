@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
 
@@ -704,7 +705,7 @@ async def test_asaas_does_not_replace_charge_that_was_paid_during_document_chang
 
 
 @pytest.mark.asyncio
-async def test_asaas_yearly_checkout_is_single_purchase_with_up_to_twelve_installments(
+async def test_asaas_yearly_checkout_is_single_purchase_with_up_to_ten_installments(
     monkeypatch,
 ):
     gateway = object.__new__(AsaasPaymentGateway)
@@ -717,8 +718,8 @@ async def test_asaas_yearly_checkout_is_single_purchase_with_up_to_twelve_instal
         assert url == "https://api-sandbox.asaas.com/v3/checkouts"
         captured.update(kwargs["json_body"])
         return {
-            "id": "chk_yearly_12x",
-            "link": "https://sandbox.asaas.com/checkoutSession/show?id=chk_yearly_12x",
+            "id": "chk_yearly_10x",
+            "link": "https://sandbox.asaas.com/checkoutSession/show?id=chk_yearly_10x",
             "status": "ACTIVE",
         }
 
@@ -739,7 +740,7 @@ async def test_asaas_yearly_checkout_is_single_purchase_with_up_to_twelve_instal
 
     assert captured["billingTypes"] == ["PIX", "CREDIT_CARD"]
     assert captured["chargeTypes"] == ["DETACHED", "INSTALLMENT"]
-    assert captured["installment"] == {"maxInstallmentCount": 12}
+    assert captured["installment"] == {"maxInstallmentCount": 10}
     assert "customer" not in captured
     assert captured["externalReference"] == "account-1:korusfono_pro_yearly"
     assert captured["items"] == [
@@ -756,9 +757,9 @@ async def test_asaas_yearly_checkout_is_single_purchase_with_up_to_twelve_instal
         "expiredUrl": "https://app.test/planos?checkout=cancel",
     }
     assert session["external_subscription_id"] is None
-    assert session["external_checkout_id"] == "chk_yearly_12x"
-    assert session["session_id"] == "chk_yearly_12x"
-    assert session["invoice_url"].endswith("id=chk_yearly_12x")
+    assert session["external_checkout_id"] == "chk_yearly_10x"
+    assert session["session_id"] == "chk_yearly_10x"
+    assert session["invoice_url"].endswith("id=chk_yearly_10x")
     assert session["status"] == "pending"
 
 
@@ -1437,7 +1438,7 @@ async def test_asaas_creates_annual_card_payment_with_selected_installments(monk
         plan_slug="korusfono_pro_yearly",
         description="KorusFono Pro — 12 meses",
         value_cents=97000,
-        installments=12,
+        installments=10,
         checkout_reference="checkout-annual-1",
         credit_card={
             "holderName": "Maria da Silva",
@@ -1459,7 +1460,7 @@ async def test_asaas_creates_annual_card_payment_with_selected_installments(monk
     )
 
     assert captured["billingType"] == "CREDIT_CARD"
-    assert captured["installmentCount"] == 12
+    assert captured["installmentCount"] == 10
     assert captured["totalValue"] == 970.0
     assert "value" not in captured
     assert captured["externalReference"] == (
@@ -1536,6 +1537,11 @@ def test_credit_card_schema_masks_pan_and_cvv_in_repr():
     assert "number=SecretStr('**********')" in rendered
 
 
+def test_credit_card_schema_rejects_more_than_ten_installments():
+    with pytest.raises(ValidationError):
+        _valid_credit_card_payload(installments=11)
+
+
 @pytest.mark.asyncio
 async def test_annual_transparent_card_replaces_hosted_checkout_and_keeps_discounted_charge(
     db_session,
@@ -1591,7 +1597,7 @@ async def test_annual_transparent_card_replaces_hosted_checkout_and_keeps_discou
         result = await BillingCheckoutService(db_session).pay_credit_card(
             session_id=str(professional.id),
             professional=professional,
-            payload=_valid_credit_card_payload(installments=12),
+            payload=_valid_credit_card_payload(installments=10),
             remote_ip="203.0.113.10",
         )
 
@@ -1600,7 +1606,7 @@ async def test_annual_transparent_card_replaces_hosted_checkout_and_keeps_discou
     gateway.create_credit_card_payment.assert_awaited_once()
     create_kwargs = gateway.create_credit_card_payment.await_args.kwargs
     assert create_kwargs["value_cents"] == 93000
-    assert create_kwargs["installments"] == 12
+    assert create_kwargs["installments"] == 10
     assert create_kwargs["remote_ip"] == "203.0.113.10"
     gateway.cancel_checkout.assert_awaited_once_with("chk_hosted_old")
 
@@ -1753,7 +1759,7 @@ async def test_annual_card_replaces_pending_pix_payment_instead_of_reusing_it(
         result = await BillingCheckoutService(db_session).pay_credit_card(
             session_id=str(professional.id),
             professional=professional,
-            payload=_valid_credit_card_payload(installments=12),
+            payload=_valid_credit_card_payload(installments=10),
             remote_ip="203.0.113.10",
         )
 
