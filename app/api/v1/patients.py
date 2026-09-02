@@ -329,10 +329,12 @@ async def get_patient(
 async def update_patient(
     patient_id: UUID,
     body: PatientUpdate,
+    background_tasks: BackgroundTasks,
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(patient_id, professional, db)
+    previous_status = patient.status
     data = body.model_dump(exclude_unset=True)
     if "diagnosis_keys" in data and data["diagnosis_keys"] is not None:
         try:
@@ -341,7 +343,19 @@ async def update_patient(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     for field, value in data.items():
         setattr(patient, field, value)
-    await db.flush()
+    if previous_status != "inativo" and patient.status == "inativo":
+        _appointments, _event_logs, google_records = await cancel_future_patient_appointments(
+            db,
+            professional_id=professional.id,
+            patient_id=patient.id,
+            notify_via_whatsapp=False,
+        )
+        if google_records:
+            background_tasks.add_task(
+                dispatch_sync_records, [record.id for record in google_records]
+            )
+    else:
+        await db.flush()
     return await _build_summary(db, patient, professional)
 
 
