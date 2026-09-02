@@ -93,7 +93,8 @@ O PIX também permanece no formulário do KorusFono. No plano anual, a API cria 
 cobrança da assinatura recorrente. Em ambos os casos, somente a confirmação do provedor libera o
 acesso. Enquanto essa primeira cobrança mensal não for paga, a recorrência fica `INACTIVE` no
 Asaas: a confirmação do primeiro pagamento a reativa com o próximo vencimento para um mês depois,
-e a exclusão da primeira cobrança de uma assinatura nunca paga cancela a recorrência.
+e a exclusão da primeira cobrança de uma assinatura nunca paga cancela a recorrência. Toda nova
+cobrança sai explicitamente como `PIX` ou `CREDIT_CARD`; o tipo genérico `UNDEFINED` não é usado.
 
 ### Financeiro interno da clínica
 

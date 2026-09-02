@@ -502,7 +502,7 @@ class AsaasPaymentGateway:
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "customer": customer_id,
-            "billingType": "UNDEFINED",
+            "billingType": "PIX",
             "value": round(price_cents / 100, 2),
             "nextDueDate": self._next_due_date(),
             "cycle": self._cycle_from_interval(billing_interval),
@@ -890,7 +890,7 @@ class AsaasPaymentGateway:
     ) -> dict[str, Any]:
         payload = {
             "customer": customer_id,
-            "billingType": "UNDEFINED",
+            "billingType": "PIX",
             "value": round(value_cents / 100, 2),
             "dueDate": date.today().isoformat(),
             "description": description,

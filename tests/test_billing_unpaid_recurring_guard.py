@@ -60,6 +60,12 @@ async def test_pending_monthly_checkout_suspends_provider_subscription(monkeypat
     )
 
     assert session["status"] == "pending"
+    subscription_creation = next(
+        body
+        for method, url, body in calls
+        if method == "POST" and url.endswith("/subscriptions")
+    )
+    assert subscription_creation["billingType"] == "PIX"
     assert (
         "PUT",
         "https://api-sandbox.asaas.com/v3/subscriptions/sub_unpaid_monthly",

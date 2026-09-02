@@ -43,7 +43,8 @@ Consequência para a Fase B original (“API recebe `creditCardToken` em vez de 
 
 Fluxo alvo (conceitual):
 
-1. Continuar criando assinatura + 1ª cobrança (`billingType` `UNDEFINED` ou cartão conforme UX).
+1. Criar assinatura + 1ª cobrança somente com `billingType` `PIX` ou `CREDIT_CARD`;
+   `UNDEFINED` não é permitido porque o Asaas o exibe como “Pergunte ao cliente”.
 2. Expor `invoiceUrl` (+ `callback.successUrl` / `autoRedirect` para `/planos/retorno`).
 3. UI: botão “Pagar com cartão” → redirect (top-level) para a fatura; não coletar PAN/CVV.
 4. Remover (ou desligar) `POST .../credit-card` com `number`/`ccv`.

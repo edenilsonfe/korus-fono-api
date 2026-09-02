@@ -1509,6 +1509,31 @@ async def test_asaas_creates_annual_pix_payment_for_in_app_qr_code(monkeypatch):
     }
 
 
+@pytest.mark.asyncio
+async def test_asaas_single_payment_never_uses_undefined_billing_type(monkeypatch):
+    gateway = object.__new__(AsaasPaymentGateway)
+    gateway._api_key = "test-key"
+    gateway._base_url = "https://api-sandbox.asaas.com/v3"
+    captured: dict = {}
+
+    async def fake_request_json(method, url, **kwargs):
+        assert method == "POST"
+        assert url.endswith("/payments")
+        captured.update(kwargs["json_body"])
+        return {"id": "pay_single", "status": "PENDING"}
+
+    monkeypatch.setattr("app.billing.asaas_gateway.request_json", fake_request_json)
+
+    await gateway.create_single_payment(
+        customer_id="cus_single",
+        value_cents=9790,
+        description="KorusFono Pro",
+        external_reference="account-1:korusfono_pro_monthly",
+    )
+
+    assert captured["billingType"] == "PIX"
+
+
 def _valid_credit_card_payload(*, installments: int = 1) -> CreditCardPaymentRequest:
     return CreditCardPaymentRequest.model_validate(
         {
