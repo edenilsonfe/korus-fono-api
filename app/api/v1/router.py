@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     admin_announcements,
+    admin_affiliates,
     admin_operations,
     admin_billing,
     admin_feature_flags,
@@ -11,6 +12,8 @@ from app.api.v1 import (
     admin_trial_emails,
     admin_whatsapp,
     ai,
+    affiliates,
+    affiliate_portal,
     appointment_responses,
     appointments,
     auth,
@@ -38,6 +41,8 @@ from app.api.v1 import (
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
+api_router.include_router(affiliates.router)
+api_router.include_router(affiliate_portal.router)
 api_router.include_router(billing.router)
 api_router.include_router(me.router)
 api_router.include_router(catalog.router)
@@ -63,6 +68,7 @@ api_router.include_router(whatsapp.router)
 api_router.include_router(webhooks.router)
 api_router.include_router(notifications.router)
 api_router.include_router(admin_announcements.router)
+api_router.include_router(admin_affiliates.router)
 api_router.include_router(admin_operations.router)
 api_router.include_router(admin_professionals.router)
 api_router.include_router(admin_protocols.router)

@@ -91,7 +91,9 @@ produção antes de concluir os controles e a validação de compliance aplicáv
 O PIX também permanece no formulário do KorusFono. No plano anual, a API cria uma cobrança avulsa
 à vista no Asaas e devolve QR Code e copia e cola pela sessão local; no mensal, usa a primeira
 cobrança da assinatura recorrente. Em ambos os casos, somente a confirmação do provedor libera o
-acesso.
+acesso. Enquanto essa primeira cobrança mensal não for paga, a recorrência fica `INACTIVE` no
+Asaas: a confirmação do primeiro pagamento a reativa com o próximo vencimento para um mês depois,
+e a exclusão da primeira cobrança de uma assinatura nunca paga cancela a recorrência.
 
 ### Financeiro interno da clínica
 

@@ -49,6 +49,10 @@ class FeatureFlagService:
 
         return flag.enabled_global
 
+    async def is_globally_enabled(self, key: str) -> bool:
+        flag = await self.db.get(FeatureFlag, key)
+        return bool(flag and flag.enabled_global)
+
     async def list_flags(self) -> list[FeatureFlagItem]:
         result = await self.db.execute(select(FeatureFlag).order_by(FeatureFlag.key.asc()))
         return [self._to_item(f) for f in result.scalars().all()]

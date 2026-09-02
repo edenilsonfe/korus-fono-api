@@ -1,4 +1,16 @@
 from app.models.billing import BillingCustomer, BillingEvent, Plan, Subscription
+from app.models.affiliate import (
+    AffiliateCode,
+    AffiliateFiscalProfile,
+    AffiliateLedgerEntry,
+    AffiliateMagicLink,
+    AffiliateParticipant,
+    AffiliatePayoutBatch,
+    AffiliatePayoutRequest,
+    AffiliatePolicy,
+    AffiliateReferral,
+    AffiliateReward,
+)
 from app.models.ai import AIJob, AIReport, ChatMessage, Conversation
 from app.models.admin_audit_log import AdminAuditLog
 from app.models.app_notification import AppNotification, AppNotificationRead
@@ -49,6 +61,16 @@ __all__ = [
     "Subscription",
     "BillingCustomer",
     "BillingEvent",
+    "AffiliatePolicy",
+    "AffiliateParticipant",
+    "AffiliateCode",
+    "AffiliateReferral",
+    "AffiliateReward",
+    "AffiliateLedgerEntry",
+    "AffiliateFiscalProfile",
+    "AffiliatePayoutRequest",
+    "AffiliatePayoutBatch",
+    "AffiliateMagicLink",
     "Professional",
     "PasswordResetToken",
     "RefreshSession",

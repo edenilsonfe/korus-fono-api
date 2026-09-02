@@ -5,12 +5,14 @@ import logging
 import uuid
 from calendar import monthrange
 from datetime import UTC, date, datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.billing.asaas_gateway import AsaasPaymentGateway
 from app.billing.types import InternalBillingEventType
 from app.billing.webhook_normalizer import NormalizedBillingEvent
 from app.models.billing import BillingEvent, Plan, Subscription
@@ -21,6 +23,7 @@ from app.services.email_verification import (
 )
 from app.services.meta_pixel_service import MetaPixelService
 from app.services.posthog_analytics_service import PostHogAnalyticsService
+from app.services.affiliate_service import AffiliateService
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +35,8 @@ _SUBSCRIPTION_TO_PROFESSIONAL: dict[str, str] = {
     "incomplete": "past_due",
     "expired": "trial_expired",
 }
+
+_ASAAS_PAID_PAYMENT_STATUSES = frozenset({"RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"})
 
 
 def purchase_deduplication_id(ev: NormalizedBillingEvent) -> str:
@@ -53,6 +58,17 @@ def purchase_deduplication_id(ev: NormalizedBillingEvent) -> str:
         ev.external_event_id,
     )
     return f"{provider}-{resource_id}"
+
+
+def _payment_value_cents(payload: dict[str, Any], *, fallback_cents: int) -> int:
+    raw = payload.get("value")
+    if raw is None:
+        return fallback_cents
+    try:
+        value = (Decimal(str(raw)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError):
+        return fallback_cents
+    return max(0, int(value))
 
 
 def _parse_billing_datetime(raw: Any) -> datetime | None:
@@ -203,6 +219,77 @@ class SaasBillingService:
             return payload.get("status") or payload.get("new_status")
         return None
 
+    async def _cancel_never_paid_asaas_subscription(
+        self,
+        *,
+        target: Subscription,
+        payload: dict[str, Any],
+    ) -> bool:
+        provider = str(payload.get("provider") or target.provider or "").lower()
+        external_subscription_id = str(
+            payload.get("external_subscription_id")
+            or target.external_subscription_id
+            or ""
+        )
+        if provider != "asaas" or not external_subscription_id:
+            return False
+        if (
+            target.status == "active"
+            or target.last_payment_at is not None
+            or target.current_period_end is not None
+        ):
+            return False
+
+        gateway = AsaasPaymentGateway()
+        payments = await gateway.list_subscription_payments(external_subscription_id)
+        if any(
+            str(payment.get("status", "")).upper() in _ASAAS_PAID_PAYMENT_STATUSES
+            for payment in payments
+        ):
+            return False
+
+        await gateway.cancel_subscription(
+            external_subscription_id=external_subscription_id,
+        )
+        target.status = "canceled"
+        await self.db.commit()
+        logger.info(
+            "Canceled never-paid Asaas subscription %s after first payment deletion",
+            external_subscription_id,
+        )
+        return True
+
+    async def _activate_first_paid_asaas_subscription(
+        self,
+        *,
+        target: Subscription,
+        plan: Plan,
+        payment_at: datetime,
+        was_never_paid: bool,
+    ) -> None:
+        provider = str(target.provider or "").lower()
+        external_subscription_id = str(target.external_subscription_id or "")
+        interval = str(plan.billing_interval or "").lower()
+        if (
+            provider != "asaas"
+            or interval not in {"monthly", "month"}
+            or not external_subscription_id
+            or not was_never_paid
+        ):
+            return
+
+        gateway = AsaasPaymentGateway()
+        provider_subscription = await gateway.get_subscription_status(
+            external_subscription_id=external_subscription_id,
+        )
+        if str(provider_subscription.get("status", "")).lower() != "inactive":
+            return
+
+        await gateway.activate_subscription(
+            external_subscription_id=external_subscription_id,
+            next_due_date=_add_months(payment_at, 1).date().isoformat(),
+        )
+
     async def apply_normalized_events(
         self,
         events: list[NormalizedBillingEvent],
@@ -216,16 +303,6 @@ class SaasBillingService:
                 continue
             professional_uuid = UUID(str(professional_id))
 
-            sub_status = self._target_subscription_status(ev)
-            if not sub_status:
-                logger.info(
-                    "Skipping billing event %s: unmapped type %s",
-                    ev.external_event_id,
-                    ev.event_type,
-                )
-                continue
-
-            sub_status = sub_status.lower()
             payload = ev.payload or {}
 
             sub_result = await self.db.execute(
@@ -271,6 +348,28 @@ class SaasBillingService:
                         target = sub
                         break
 
+            if ev.event_type == InternalBillingEventType.PAYMENT_DELETED:
+                await self._cancel_never_paid_asaas_subscription(
+                    target=target,
+                    payload=payload,
+                )
+                continue
+
+            sub_status = self._target_subscription_status(ev)
+            if not sub_status:
+                logger.info(
+                    "Skipping billing event %s: unmapped type %s",
+                    ev.external_event_id,
+                    ev.event_type,
+                )
+                continue
+            sub_status = sub_status.lower()
+
+            was_never_paid = (
+                target.last_payment_at is None
+                and target.current_period_end is None
+            )
+
             target.status = sub_status
             if payload.get("provider"):
                 target.provider = str(payload["provider"])
@@ -293,6 +392,16 @@ class SaasBillingService:
                 plan_row = await self.db.get(Plan, target.plan_id)
 
             payment_at = _parse_billing_datetime(payload.get("last_payment_at"))
+            if (
+                ev.event_type == InternalBillingEventType.PAYMENT_SUCCEEDED
+                and plan_row
+            ):
+                await self._activate_first_paid_asaas_subscription(
+                    target=target,
+                    plan=plan_row,
+                    payment_at=payment_at or datetime.now(UTC),
+                    was_never_paid=was_never_paid,
+                )
             if payment_at:
                 target.last_payment_at = payment_at
 
@@ -326,6 +435,64 @@ class SaasBillingService:
                     professional.subscription_status = _SUBSCRIPTION_TO_PROFESSIONAL.get(
                         sub_status, professional.subscription_status
                     )
+
+            provider_event = str(payload.get("provider_event") or "")
+            source_payment_id = str(
+                payload.get("id")
+                or payload.get("payment_id")
+                or purchase_deduplication_id(ev)
+            )
+            if ev.event_type == InternalBillingEventType.PAYMENT_SUCCEEDED and plan_row:
+                fallback_revenue_cents = (
+                    target.checkout_charge_cents
+                    if target.checkout_charge_cents is not None
+                    else plan_row.price_cents
+                )
+                external_revenue_cents = _payment_value_cents(
+                    payload,
+                    fallback_cents=fallback_revenue_cents,
+                )
+                await AffiliateService(self.db).record_external_payment(
+                    referred_professional_id=professional_uuid,
+                    external_payment_id=source_payment_id,
+                    external_event_id=ev.external_event_id,
+                    provider_event=provider_event or "PAYMENT_CONFIRMED",
+                    received_revenue_cents=external_revenue_cents,
+                    plan_interval=plan_row.billing_interval,
+                    occurred_at=payment_at or datetime.now(UTC),
+                )
+            elif ev.event_type in {
+                InternalBillingEventType.PAYMENT_FAILED,
+                InternalBillingEventType.PAYMENT_DELETED,
+            }:
+                raw_reversal = payload.get("value") or payload.get("refundedValue")
+                reversed_cents = None
+                if raw_reversal is not None:
+                    try:
+                        reversed_cents = int(round(float(raw_reversal) * 100))
+                    except (TypeError, ValueError):
+                        reversed_cents = None
+                await AffiliateService(self.db).reverse_external_payment(
+                    external_payment_id=source_payment_id,
+                    external_event_id=ev.external_event_id,
+                    reversed_revenue_cents=reversed_cents,
+                )
+                if target.checkout_session_id is not None:
+                    from app.services.affiliate_credit_service import AffiliateCreditService
+
+                    await AffiliateCreditService(self.db).release_checkout_reservation(
+                        reservation_id=str(target.checkout_session_id)
+                    )
+
+            if (
+                provider_event == "PAYMENT_RECEIVED"
+                and target.checkout_session_id is not None
+            ):
+                from app.services.affiliate_credit_service import AffiliateCreditService
+
+                await AffiliateCreditService(self.db).settle_checkout_reservation(
+                    reservation_id=str(target.checkout_session_id)
+                )
 
             await self.db.commit()
             logger.info(
@@ -383,7 +550,11 @@ class SaasBillingService:
             return
         if not professional or not plan_row:
             return
-        value_cents = subscription.checkout_charge_cents or plan_row.price_cents
+        value_cents = (
+            subscription.checkout_charge_cents
+            if subscription.checkout_charge_cents is not None
+            else plan_row.price_cents
+        )
         purchase_id = purchase_deduplication_id(ev)
         await MetaPixelService().track_purchase(
             professional_id=str(professional.id),

@@ -17,6 +17,13 @@ class RegisterRequest(CamelModel):
     council: str = ""
     phone: str
     cpf: str | None = None
+    referral_code: str | None = Field(default=None, max_length=48)
+
+    @field_validator("referral_code")
+    @classmethod
+    def normalize_referral_code(cls, value: str | None) -> str | None:
+        normalized = str(value or "").strip().lower()
+        return normalized or None
 
     @field_validator("email")
     @classmethod

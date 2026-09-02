@@ -131,6 +131,7 @@ class AsaasWebhookNormalizer(WebhookNormalizer):
             payload = {
                 **checkout,
                 "provider": "asaas",
+                "provider_event": event_name,
                 "external_reference": ext_ref,
                 "plan_slug": plan_slug,
                 "external_checkout_id": checkout_id,
@@ -197,6 +198,7 @@ class AsaasWebhookNormalizer(WebhookNormalizer):
         payload: dict[str, Any] = {
             **payment,
             "provider": "asaas",
+            "provider_event": event_name,
             "external_reference": ext_ref,
             "plan_slug": plan_slug,
             "external_checkout_id": checkout_session_id or payment_id,

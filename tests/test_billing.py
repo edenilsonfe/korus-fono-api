@@ -513,6 +513,9 @@ async def test_asaas_replaces_pending_subscription_before_creating_charge_for_ne
             }
         if method == "POST" and url.endswith("/payments/pay_cnpj_new"):
             return {"id": "pay_cnpj_new"}
+        if method == "PUT" and url.endswith("/subscriptions/sub_cnpj_new"):
+            assert kwargs["json_body"] == {"status": "INACTIVE"}
+            return {"id": "sub_cnpj_new", "status": "INACTIVE"}
         raise AssertionError(f"Unexpected Asaas call: {method} {url}")
 
     monkeypatch.setattr("app.billing.asaas_gateway.request_json", fake_request_json)
@@ -579,6 +582,9 @@ async def test_asaas_cancels_pending_annual_checkout_before_switching_to_monthly
             }
         if method == "POST" and url.endswith("/payments/pay_monthly_new"):
             return {"id": "pay_monthly_new"}
+        if method == "PUT" and url.endswith("/subscriptions/sub_monthly_new"):
+            assert kwargs["json_body"] == {"status": "INACTIVE"}
+            return {"id": "sub_monthly_new", "status": "INACTIVE"}
         raise AssertionError(f"Unexpected Asaas call: {method} {url}")
 
     monkeypatch.setattr("app.billing.asaas_gateway.request_json", fake_request_json)

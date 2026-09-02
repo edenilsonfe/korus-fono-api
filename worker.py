@@ -83,6 +83,14 @@ async def retry_google_calendar_syncs(ctx) -> None:
     await retry_pending_syncs(ctx)
 
 
+async def run_affiliate_maintenance(ctx) -> None:
+    from app.services.affiliate_service import AffiliateService
+
+    async with AsyncSessionLocal() as session:
+        await AffiliateService(session).release_due_rewards()
+        await session.commit()
+
+
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     functions = [
@@ -92,6 +100,7 @@ class WorkerSettings:
         dispatch_whatsapp_appointment_event_log,
         run_trial_email_campaign,
         retry_google_calendar_syncs,
+        run_affiliate_maintenance,
     ]
     cron_jobs = [
         cron(
@@ -100,6 +109,7 @@ class WorkerSettings:
             run_at_startup=False,
         ),
         cron(retry_google_calendar_syncs, minute={5, 20, 35, 50}, run_at_startup=False),
+        cron(run_affiliate_maintenance, minute=10, run_at_startup=False),
     ]
 
     @staticmethod

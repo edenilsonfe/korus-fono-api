@@ -5,6 +5,7 @@ compilers so related tables used by get_detail can be created.
 """
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.ext.compiler import compiles
 
 from app.core.security import create_access_token, hash_password
+from app.billing.errors import PaymentGatewayError
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
@@ -26,6 +28,10 @@ from app.models.patient import Patient
 from app.models.professional import Professional
 from app.models.session import Session
 from app.models.whatsapp_connection import WhatsAppConnection
+from app.services.admin_professional_service import (
+    AdminBillingSyncError,
+    AdminProfessionalService,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -190,6 +196,103 @@ async def test_disable_blocks_login(db):
         )
         assert resp.status_code == 401
     _clear_override()
+
+
+async def test_disable_cancels_active_asaas_recurring_subscription(db):
+    staff = await _make_professional(db, email="staff-billing@x.com", is_staff=True)
+    target = await _make_professional(
+        db,
+        email="disable-billing@x.com",
+        subscription_status="active",
+    )
+    plan = Plan(
+        slug="disable-monthly",
+        name="Plano mensal",
+        price_cents=9790,
+        billing_interval="monthly",
+    )
+    db.add(plan)
+    await db.flush()
+    subscription = Subscription(
+        professional_id=target.id,
+        plan_id=plan.id,
+        status="active",
+        provider="asaas",
+        external_subscription_id="sub_disabled_account",
+    )
+    db.add(subscription)
+    await db.commit()
+
+    gateway = AsyncMock()
+    gateway.cancel_subscription = AsyncMock(return_value={"status": "canceled"})
+    with patch(
+        "app.services.admin_professional_service.AsaasPaymentGateway",
+        return_value=gateway,
+        create=True,
+    ):
+        detail = await AdminProfessionalService(db).disable(
+            actor=staff,
+            professional_id=target.id,
+            reason="encerramento da conta",
+        )
+
+    assert detail.is_disabled is True
+    assert detail.subscription_status == "canceled"
+    gateway.cancel_subscription.assert_awaited_once_with(
+        external_subscription_id="sub_disabled_account"
+    )
+    await db.refresh(subscription)
+    assert subscription.status == "canceled"
+    _clear_override()
+
+
+async def test_disable_stops_when_asaas_recurring_cancellation_fails(db):
+    staff = await _make_professional(db, email="staff-sync-failure@x.com", is_staff=True)
+    target = await _make_professional(
+        db,
+        email="disable-sync-failure@x.com",
+        subscription_status="active",
+    )
+    plan = Plan(
+        slug="disable-sync-failure-monthly",
+        name="Plano mensal",
+        price_cents=9790,
+        billing_interval="monthly",
+    )
+    db.add(plan)
+    await db.flush()
+    subscription = Subscription(
+        professional_id=target.id,
+        plan_id=plan.id,
+        status="active",
+        provider="asaas",
+        external_subscription_id="sub_sync_failure",
+    )
+    db.add(subscription)
+    await db.commit()
+
+    gateway = AsyncMock()
+    gateway.cancel_subscription = AsyncMock(
+        side_effect=PaymentGatewayError("Asaas indisponível", status_code=503)
+    )
+    with (
+        patch(
+            "app.services.admin_professional_service.AsaasPaymentGateway",
+            return_value=gateway,
+        ),
+        pytest.raises(AdminBillingSyncError),
+    ):
+        await AdminProfessionalService(db).disable(
+            actor=staff,
+            professional_id=target.id,
+            reason="encerramento da conta",
+        )
+
+    await db.refresh(target)
+    await db.refresh(subscription)
+    assert target.is_disabled is False
+    assert target.subscription_status == "active"
+    assert subscription.status == "active"
 
 
 async def test_self_disable_conflict(db):

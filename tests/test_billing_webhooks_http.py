@@ -1,6 +1,7 @@
 """HTTP-level auth matrix for POST /billing/webhooks/{provider}."""
 
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
@@ -68,6 +69,31 @@ async def test_asaas_webhook_accepts_correct_header(api_client, monkeypatch):
         headers={"asaas-access-token": "correct-token"},
     )
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_asaas_intermediate_transfer_event_does_not_fail_affiliate_payout(
+    api_client, monkeypatch
+):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "asaas_webhook_token", "correct-token")
+    complete_transfer = AsyncMock()
+
+    with patch(
+        "app.services.affiliate_payout_service.AffiliatePayoutService.complete_transfer",
+        new=complete_transfer,
+    ):
+        response = await api_client.post(
+            "/api/v1/billing/webhooks/asaas",
+            json={
+                "event": "TRANSFER_PENDING",
+                "transfer": {"id": "transfer-affiliate-pending"},
+            },
+            headers={"asaas-access-token": "correct-token"},
+        )
+
+    assert response.status_code == 200
+    complete_transfer.assert_not_awaited()
 
 
 @pytest.mark.asyncio

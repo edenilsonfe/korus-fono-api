@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     asaas_api_key: str = ""
     asaas_api_base_url: str = "https://api-sandbox.asaas.com/v3"
     asaas_webhook_token: str = ""
+    affiliate_payout_encryption_key: str = ""
+    affiliate_cash_payouts_enabled: bool = False
+    affiliate_payout_single_operator_pilot: bool = False
     frontend_url: str = "http://localhost:5173"
     trial_days: int = 7
 
@@ -248,6 +251,13 @@ def validate_settings(settings: Settings) -> None:
                 "OPENCODE_API_KEY é obrigatória em produção para impedir respostas simuladas "
                 "nas ferramentas de IA"
             )
+        if settings.affiliate_cash_payouts_enabled:
+            if settings.effective_billing_provider != "asaas":
+                raise RuntimeError("Saques de afiliados exigem BILLING_PROVIDER=asaas")
+            if not settings.affiliate_payout_encryption_key.strip():
+                raise RuntimeError(
+                    "AFFILIATE_PAYOUT_ENCRYPTION_KEY é obrigatória para saques de afiliados"
+                )
     elif settings.debug and not settings.allow_debug:
         raise RuntimeError(
             "DEBUG=true exige ALLOW_DEBUG=true (não defina ALLOW_DEBUG em produção)"

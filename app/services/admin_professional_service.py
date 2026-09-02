@@ -5,6 +5,8 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.billing.asaas_gateway import AsaasPaymentGateway
+from app.billing.errors import PaymentGatewayError
 from app.core.admin_permissions import ADMIN_ROLE_SUPERADMIN, resolve_admin_role
 from app.models.ai import AIJob
 from app.models.assessment import Assessment
@@ -38,6 +40,12 @@ class AdminConflictError(Exception):
 
 class AdminNotFoundError(Exception):
     pass
+
+
+class AdminBillingSyncError(Exception):
+    def __init__(self, detail: str):
+        self.detail = detail
+        super().__init__(detail)
 
 
 def mask_cpf(cpf: str | None) -> str:
@@ -318,19 +326,52 @@ class AdminProfessionalService:
         await self.db.commit()
         return await self.get_detail(pro.id)
 
+    async def _cancel_asaas_subscriptions(self, professional: Professional) -> int:
+        result = await self.db.execute(
+            select(Subscription).where(
+                Subscription.professional_id == professional.id,
+                Subscription.provider == "asaas",
+                Subscription.external_subscription_id.is_not(None),
+                Subscription.status.in_(("active", "trialing", "incomplete", "past_due")),
+            )
+        )
+        subscriptions = list(result.scalars().all())
+        if not subscriptions:
+            return 0
+
+        gateway = AsaasPaymentGateway()
+        for subscription in subscriptions:
+            try:
+                await gateway.cancel_subscription(
+                    external_subscription_id=str(subscription.external_subscription_id)
+                )
+            except PaymentGatewayError as exc:
+                if exc.status_code != 404:
+                    raise AdminBillingSyncError(
+                        "Não foi possível encerrar a recorrência no Asaas; a conta não foi desativada"
+                    ) from exc
+            subscription.status = "canceled"
+        professional.subscription_status = "canceled"
+        return len(subscriptions)
+
     async def disable(
         self, *, actor: Professional, professional_id: UUID, reason: str | None
     ) -> AdminProfessionalDetail:
         pro = await self._get(professional_id)
         if pro.id == actor.id:
             raise AdminConflictError("Você não pode desativar a própria conta")
+        canceled_subscriptions = await self._cancel_asaas_subscriptions(pro)
         pro.is_disabled = True
         pro.token_version += 1
         await self.audit.log(
             actor_id=actor.id,
             target_professional_id=pro.id,
             action="disable",
-            payload={"reason": reason, "token_version": pro.token_version},
+            payload={
+                "reason": reason,
+                "token_version": pro.token_version,
+                "canceled_asaas_subscriptions": canceled_subscriptions,
+            },
         )
         await self.db.commit()
         return await self.get_detail(pro.id)

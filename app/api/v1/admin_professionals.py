@@ -25,6 +25,7 @@ from app.schemas.admin_professional import (
 )
 from app.schemas.admin_operations import SetAdminRoleBody
 from app.services.admin_professional_service import (
+    AdminBillingSyncError,
     AdminConflictError,
     AdminNotFoundError,
     AdminProfessionalService,
@@ -153,6 +154,8 @@ async def disable_professional(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conta não encontrada") from exc
     except AdminConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.detail) from exc
+    except AdminBillingSyncError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.detail) from exc
 
 
 @router.post("/professionals/{professional_id}/enable", response_model=AdminProfessionalDetail)

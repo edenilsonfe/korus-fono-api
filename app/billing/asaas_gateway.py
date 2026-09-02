@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from datetime import date, timedelta
 from typing import Any
@@ -22,6 +23,8 @@ _ASAAS_CYCLE_MAP = {
 
 _PAYMENT_PENDING_STATUSES = frozenset({"PENDING", "OVERDUE", "AWAITING_RISK_ANALYSIS"})
 _PAYMENT_SUCCESS_STATUSES = frozenset({"RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"})
+
+logger = logging.getLogger(__name__)
 
 
 class AsaasPaymentGateway:
@@ -275,6 +278,7 @@ class AsaasPaymentGateway:
         if not subscription_id:
             raise PaymentGatewayError("Asaas não retornou id da assinatura com cartão")
         payment = await self._get_first_payment(str(subscription_id), retries=5)
+        await self._suspend_until_first_payment(str(subscription_id), payment)
         return {
             "external_subscription_id": str(subscription_id),
             "payment": payment,
@@ -465,6 +469,25 @@ class AsaasPaymentGateway:
         raise PaymentGatewayError(
             "Asaas ainda não gerou a primeira cobrança da assinatura. Tente novamente."
         )
+
+    async def _suspend_until_first_payment(
+        self,
+        subscription_id: str,
+        payment: dict[str, Any],
+    ) -> None:
+        if str(payment.get("status", "")).upper() in _PAYMENT_SUCCESS_STATUSES:
+            return
+        try:
+            await self.suspend_subscription(external_subscription_id=subscription_id)
+        except PaymentGatewayError:
+            try:
+                await self.cancel_subscription(external_subscription_id=subscription_id)
+            except PaymentGatewayError:
+                logger.exception(
+                    "Failed to delete Asaas subscription %s after suspension failure",
+                    subscription_id,
+                )
+            raise
 
     async def _create_subscription(
         self,
@@ -742,6 +765,7 @@ class AsaasPaymentGateway:
         payment_id = str(payment.get("id") or subscription_id)
         # Best-effort: redirect back to /planos/retorno after paying on Asaas invoice.
         await self.set_payment_callback(payment_id, success_url=success_url)
+        await self._suspend_until_first_payment(subscription_id, payment)
 
         try:
             invoice_url = self._payment_checkout_url(payment)
@@ -914,6 +938,36 @@ class AsaasPaymentGateway:
             headers=self._headers(),
         )
         return {"status": data.get("status", "canceled")}
+
+    async def suspend_subscription(self, *, external_subscription_id: str) -> dict[str, Any]:
+        data = await request_json(
+            "PUT",
+            f"{self._base_url}/subscriptions/{external_subscription_id}",
+            headers=self._headers(),
+            json_body={"status": "INACTIVE"},
+        )
+        return {
+            "status": str(data.get("status", "inactive")).lower(),
+            "external_subscription_id": external_subscription_id,
+        }
+
+    async def activate_subscription(
+        self,
+        *,
+        external_subscription_id: str,
+        next_due_date: str,
+    ) -> dict[str, Any]:
+        data = await request_json(
+            "PUT",
+            f"{self._base_url}/subscriptions/{external_subscription_id}",
+            headers=self._headers(),
+            json_body={"status": "ACTIVE", "nextDueDate": next_due_date},
+        )
+        return {
+            "status": str(data.get("status", "active")).lower(),
+            "external_subscription_id": external_subscription_id,
+            "next_due_date": next_due_date,
+        }
 
     async def get_subscription_status(self, *, external_subscription_id: str) -> dict[str, Any]:
         data = await request_json(

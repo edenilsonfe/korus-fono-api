@@ -64,5 +64,17 @@ class StubPaymentGateway:
     async def cancel_subscription(self, *, external_subscription_id: str) -> dict[str, Any]:
         return {"status": "canceled"}
 
+    async def suspend_subscription(self, *, external_subscription_id: str) -> dict[str, Any]:
+        return {"status": "inactive", "external_subscription_id": external_subscription_id}
+
+    async def activate_subscription(
+        self, *, external_subscription_id: str, next_due_date: str
+    ) -> dict[str, Any]:
+        return {
+            "status": "active",
+            "external_subscription_id": external_subscription_id,
+            "next_due_date": next_due_date,
+        }
+
     async def get_subscription_status(self, *, external_subscription_id: str) -> dict[str, Any]:
         return {"status": "active", "external_subscription_id": external_subscription_id}

@@ -4,6 +4,7 @@ import hmac
 import json
 import logging
 import re
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
@@ -14,7 +15,8 @@ from sqlalchemy.orm import joinedload
 from app.billing import PaymentGatewayConfigError, get_payment_gateway
 from app.billing.checkout_urls import build_checkout_return_urls, build_in_app_payment_url
 from app.billing.errors import PaymentGatewayError
-from app.billing.webhook_normalizer import get_normalizer
+from app.billing.types import InternalBillingEventType
+from app.billing.webhook_normalizer import NormalizedBillingEvent, get_normalizer
 from app.core.client_ip import get_client_ip
 from app.core.config import get_settings
 from app.core.deps import get_current_professional
@@ -43,6 +45,8 @@ from app.services.billing_customer_service import BillingCustomerService
 from app.services.billing_profile_service import asaas_customer_profile
 from app.services.billing_reconciliation_service import BillingReconciliationService
 from app.services.coupon_service import CouponError, CouponService
+from app.services.affiliate_service import AffiliateService
+from app.services.affiliate_credit_service import AffiliateCreditService
 from app.services.entitlement_service import EntitlementService
 from app.services.plan_change_service import PlanChangeService
 from app.services.plan_catalog_seed import CANONICAL_PLAN_SLUGS
@@ -458,28 +462,41 @@ async def create_billing_checkout(
 
     charge_cents = plan.price_cents
     coupon_code_applied = None
+    affiliate_referral = None
+    affiliate_discount_bps, affiliate_referral = await AffiliateService(db).referral_discount(
+        professional.id
+    )
+    affiliate_charge_cents = max(
+        0,
+        plan.price_cents - (plan.price_cents * affiliate_discount_bps // 10000),
+    )
+    coupon = None
+    coupon_charge_cents = plan.price_cents
     if payload.coupon_code:
         coupon_svc = CouponService(db)
         try:
             coupon = await coupon_svc.get_by_code(payload.coupon_code)
             await coupon_svc.validate_for_professional(coupon, professional.id, plan.slug)
-            charge_cents = coupon_svc.discounted_price_cents(coupon, plan.price_cents)
-            await coupon_svc.redeem(
-                coupon=coupon, professional_id=professional.id, context="checkout"
-            )
-            if coupon.trial_bonus_days > 0:
-                from datetime import UTC, datetime, timedelta
-
-                base = professional.trial_ends_at or datetime.now(UTC)
-                if base.tzinfo is None:
-                    base = base.replace(tzinfo=UTC)
-                if base < datetime.now(UTC):
-                    base = datetime.now(UTC)
-                professional.trial_ends_at = base + timedelta(days=coupon.trial_bonus_days)
-            coupon_code_applied = coupon.code
-            await db.commit()
+            coupon_charge_cents = coupon_svc.discounted_price_cents(coupon, plan.price_cents)
         except CouponError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.detail) from exc
+
+    if affiliate_referral is not None and affiliate_charge_cents < coupon_charge_cents:
+        charge_cents = affiliate_charge_cents
+    elif coupon is not None and coupon_charge_cents < plan.price_cents:
+        charge_cents = coupon_charge_cents
+        await coupon_svc.redeem(
+            coupon=coupon, professional_id=professional.id, context="checkout"
+        )
+        if coupon.trial_bonus_days > 0:
+            base = professional.trial_ends_at or datetime.now(UTC)
+            if base.tzinfo is None:
+                base = base.replace(tzinfo=UTC)
+            if base < datetime.now(UTC):
+                base = datetime.now(UTC)
+            professional.trial_ends_at = base + timedelta(days=coupon.trial_bonus_days)
+        coupon_code_applied = coupon.code
+        await db.commit()
 
     metadata: dict = {
         "professional_id": professional_id,
@@ -497,6 +514,10 @@ async def create_billing_checkout(
     }
     if coupon_code_applied:
         metadata["coupon_code"] = coupon_code_applied
+    if affiliate_referral is not None and charge_cents == affiliate_charge_cents:
+        metadata["affiliate_referral_id"] = str(affiliate_referral.id)
+        metadata["affiliate_mode"] = affiliate_referral.mode
+        metadata["affiliate_discount_bps"] = affiliate_discount_bps
 
     if provider != "stub":
         if document:
@@ -542,6 +563,76 @@ async def create_billing_checkout(
             if replace_existing_checkout:
                 metadata["replace_existing_checkout"] = True
 
+    if existing_sub and not existing_sub.checkout_session_id:
+        existing_sub.checkout_session_id = uuid4()
+        await db.flush()
+    credit_reservation_id = str(
+        existing_sub.checkout_session_id if existing_sub else uuid4()
+    )
+    credit_reservation = await AffiliateCreditService(db).reserve_for_checkout(
+        professional_id=professional.id,
+        charge_cents=charge_cents,
+        reservation_id=credit_reservation_id,
+    )
+    charge_cents = credit_reservation.external_charge_cents
+    metadata["charge_cents"] = charge_cents
+    if credit_reservation.applied_cents:
+        metadata["affiliate_credit_cents"] = credit_reservation.applied_cents
+        metadata["affiliate_credit_reservation_id"] = credit_reservation_id
+
+    if charge_cents == 0 and credit_reservation.applied_cents:
+        if existing_sub is None:
+            await AffiliateCreditService(db).release_checkout_reservation(
+                reservation_id=credit_reservation_id
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Não foi possível vincular o crédito à assinatura",
+            )
+        internal_payment_id = f"credit-{credit_reservation_id}"
+        existing_sub.provider = "internal_credit"
+        existing_sub.external_checkout_id = internal_payment_id
+        existing_sub.checkout_charge_cents = 0
+        await db.commit()
+        event = NormalizedBillingEvent(
+            event_type=InternalBillingEventType.PAYMENT_SUCCEEDED,
+            external_event_id=f"internal-credit-{credit_reservation_id}",
+            payload={
+                "id": internal_payment_id,
+                "provider": "internal_credit",
+                "provider_event": "CREDIT_SETTLED",
+                "professional_id": str(professional.id),
+                "plan_slug": plan.slug,
+                "external_checkout_id": internal_payment_id,
+                "last_payment_at": datetime.now(UTC).isoformat(),
+                "subscription_status": "active",
+            },
+            professional_hint=str(professional.id),
+        )
+        billing_service = SaasBillingService(db)
+        stored = await billing_service.record_webhook_raw(
+            provider="internal_credit",
+            external_event_id=event.external_event_id,
+            event_type=event.event_type.value,
+            payload=event.payload,
+            professional_id=str(professional.id),
+        )
+        await billing_service.apply_normalized_events([event])
+        if stored is not None:
+            await billing_service.mark_processed(stored.id)
+        await AffiliateCreditService(db).settle_checkout_reservation(
+            reservation_id=credit_reservation_id
+        )
+        await db.commit()
+        return CheckoutResponse(
+            checkout_url=None,
+            session_id=str(existing_sub.checkout_session_id),
+            status="completed",
+            provider="internal_credit",
+            message="Assinatura paga integralmente com crédito KorusFono.",
+            access_granted=True,
+        )
+
     try:
         session = await gateway.create_checkout_session(
             account_id=professional_id,
@@ -551,6 +642,10 @@ async def create_billing_checkout(
             metadata=metadata,
         )
     except PaymentGatewayError as exc:
+        await AffiliateCreditService(db).release_checkout_reservation(
+            reservation_id=credit_reservation_id
+        )
+        await db.commit()
         logger.warning(
             "Billing checkout gateway failure provider=%s stage=%s professional_id=%s: %s",
             provider,
@@ -749,6 +844,45 @@ async def billing_webhook(
         body: dict = json.loads(body_bytes.decode() or "{}")
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
+
+    if provider_key == "asaas" and str(body.get("event") or "").startswith("TRANSFER_"):
+        from app.services.affiliate_payout_service import AffiliatePayoutService
+
+        transfer = body.get("transfer") or {}
+        transfer_id = str(transfer.get("id") or body.get("id") or "").strip()
+        event_name = str(body.get("event") or "")
+        if not transfer_id:
+            raise HTTPException(status_code=400, detail="Invalid transfer webhook")
+        billing = SaasBillingService(db)
+        row = await billing.record_webhook_raw(
+            provider="asaas",
+            external_event_id=f"asaas-{event_name}-{transfer_id}",
+            event_type=event_name.lower(),
+            payload={"event": event_name, "transfer": {"id": transfer_id}},
+        )
+        if event_name == "TRANSFER_DONE":
+            await AffiliatePayoutService(db).complete_transfer(
+                provider_transfer_id=transfer_id,
+                succeeded=True,
+            )
+        elif event_name in {"TRANSFER_FAILED", "TRANSFER_CANCELLED"}:
+            failure_reason = str(
+                transfer.get("failReason")
+                or (
+                    "Transferência cancelada pelo provedor"
+                    if event_name == "TRANSFER_CANCELLED"
+                    else "Transferência recusada pelo provedor"
+                )
+            )
+            await AffiliatePayoutService(db).complete_transfer(
+                provider_transfer_id=transfer_id,
+                succeeded=False,
+                failure_reason=failure_reason,
+            )
+        await db.commit()
+        if row:
+            await billing.mark_processed(row.id)
+        return {"received": True, "events": 1}
 
     normalizer = get_normalizer(provider_key)
     events = normalizer.normalize(body, dict(request.headers))

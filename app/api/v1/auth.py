@@ -69,6 +69,13 @@ from app.services.financial_defaults import (
     add_default_financial_categories,
     add_default_payment_methods,
 )
+from app.services.affiliate_service import (
+    AffiliateConflictError,
+    AffiliateForbiddenError,
+    AffiliateNotFoundError,
+    AffiliateService,
+)
+from app.services.feature_flag_service import FeatureFlagService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
@@ -219,6 +226,24 @@ async def _register_account(
     )
     db.add(professional)
     await db.flush()
+    if body.referral_code:
+        try:
+            public_referral = await AffiliateService(db).resolve_public_code(body.referral_code)
+            flag_key = (
+                "affiliate_customer_program"
+                if public_referral["mode"] == "customer"
+                else "affiliate_partner_program"
+            )
+            if not await FeatureFlagService(db).is_enabled(professional, flag_key):
+                raise AffiliateForbiddenError("Programa de indicação ainda não está disponível")
+            await AffiliateService(db).register_referral(
+                code=body.referral_code,
+                referred_professional=professional,
+                request_ip=_request_ip(request),
+                user_agent=request.headers.get("user-agent", ""),
+            )
+        except (AffiliateNotFoundError, AffiliateForbiddenError, AffiliateConflictError) as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.detail) from exc
     add_default_financial_categories(db, professional.id)
     add_default_payment_methods(db, professional.id)
     await ensure_demo_patient(db, professional)
