@@ -1,7 +1,18 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -33,6 +44,12 @@ class Plan(Base, TimestampMixin):
 
 class Subscription(Base, TimestampMixin):
     __tablename__ = "subscriptions"
+    __table_args__ = (
+        CheckConstraint(
+            "payment_method IS NULL OR payment_method IN ('pix', 'credit_card')",
+            name="ck_subscriptions_payment_method",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
     professional_id: Mapped[uuid.UUID] = mapped_column(
@@ -46,6 +63,7 @@ class Subscription(Base, TimestampMixin):
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="incomplete")
     provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    payment_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
     checkout_session_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), unique=True, nullable=True, index=True
     )

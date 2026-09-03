@@ -7,6 +7,14 @@ from app.schemas.admin_operations import AdminRole
 from app.schemas.common import CamelModel, PaginatedResponse
 
 SubscriptionStatus = Literal["trialing", "active", "trial_expired", "past_due", "canceled"]
+SaasPaymentMethod = Literal["pix", "credit_card"]
+
+
+class AdminPlanSummary(CamelModel):
+    slug: str | None = None
+    name: str | None = None
+    status: str | None = None
+    billing_interval: str | None = None
 
 
 class AdminProfessionalListItem(CamelModel):
@@ -20,6 +28,8 @@ class AdminProfessionalListItem(CamelModel):
     admin_role: AdminRole | None = None
     is_disabled: bool
     created_at: datetime
+    plan: AdminPlanSummary | None = None
+    payment_method: SaasPaymentMethod | None = None
 
 
 class AdminProfessionalCounts(CamelModel):
@@ -38,12 +48,6 @@ class AdminAIJobSummary(CamelModel):
     job_type: str
     status: str
     created_at: datetime
-
-
-class AdminPlanSummary(CamelModel):
-    slug: str | None = None
-    name: str | None = None
-    status: str | None = None
 
 
 class AdminProfessionalDetail(CamelModel):

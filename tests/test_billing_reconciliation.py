@@ -239,3 +239,5 @@ async def test_reconcile_reapplies_an_existing_received_payment_to_repair_local_
     assert billing_me.json()["subscription"]["currentPeriodEnd"].startswith(
         "2026-09-25T00:00:00"
     )
+    await db_session.refresh(subscription)
+    assert subscription.payment_method == "pix"

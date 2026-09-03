@@ -130,14 +130,41 @@ async def test_non_staff_forbidden(db):
 
 async def test_staff_list_and_detail(db):
     staff = await _make_professional(db, email="staff@x.com", is_staff=True)
+    staff.email_verified_at = datetime.now(timezone.utc)
     target = await _make_professional(db, email="target@x.com")
+    plan = Plan(
+        slug="korusfono_pro_monthly",
+        name="KorusFono Pro",
+        price_cents=9790,
+        billing_interval="monthly",
+    )
+    db.add(plan)
+    await db.flush()
+    db.add(
+        Subscription(
+            professional_id=target.id,
+            plan_id=plan.id,
+            status="active",
+            provider="asaas",
+            payment_method="credit_card",
+        )
+    )
+    await db.commit()
+
     client = await _client(db)
     async with client:
         resp = await client.get("/api/v1/admin/professionals", headers=_auth_headers(staff))
         assert resp.status_code == 200
         body = resp.json()
         assert body["total"] >= 2
-        assert any(i["email"] == "target@x.com" for i in body["items"])
+        target_item = next(i for i in body["items"] if i["email"] == "target@x.com")
+        assert target_item["plan"] == {
+            "slug": "korusfono_pro_monthly",
+            "name": "KorusFono Pro",
+            "status": "active",
+            "billingInterval": "monthly",
+        }
+        assert target_item["paymentMethod"] == "credit_card"
 
         resp = await client.get(
             f"/api/v1/admin/professionals/{target.id}", headers=_auth_headers(staff)

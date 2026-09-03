@@ -1708,6 +1708,7 @@ async def test_annual_pix_is_generated_inside_checkout_and_replaces_hosted_check
         "expiration_date": "2026-08-28T03:00:00Z",
     }
     assert sub.external_checkout_id == "pay_transparent_annual_pix"
+    assert sub.payment_method == "pix"
     gateway.create_pix_payment.assert_awaited_once_with(
         customer_id="cus_transparent_pix",
         account_id=str(professional.id),
@@ -1938,6 +1939,7 @@ async def test_monthly_transparent_card_creates_recurring_subscription_and_cance
     assert result["status"] == "pending"
     assert sub.external_subscription_id == "sub_transparent_new"
     assert sub.external_checkout_id == "pay_transparent_new"
+    assert sub.payment_method == "credit_card"
     gateway.cancel_subscription.assert_awaited_once_with(
         external_subscription_id="sub_hosted_old"
     )
@@ -1989,6 +1991,7 @@ async def test_prepare_card_invoice_flips_pix_to_credit_card(db_session):
         )
 
     assert result["invoice_url"] == invoice
+    assert sub.payment_method == "credit_card"
     gateway.ensure_card_billing.assert_awaited_once_with("pay_prepare_card")
 
 
@@ -2008,16 +2011,15 @@ async def test_prepare_annual_checkout_returns_hosted_link_without_locking_payme
     )
     db_session.add_all([plan, professional])
     await db_session.flush()
-    db_session.add(
-        Subscription(
-            professional_id=professional.id,
-            plan_id=plan.id,
-            status="incomplete",
-            provider="asaas",
-            external_subscription_id=None,
-            external_checkout_id="chk_prepare_annual",
-        )
+    sub = Subscription(
+        professional_id=professional.id,
+        plan_id=plan.id,
+        status="incomplete",
+        provider="asaas",
+        external_subscription_id=None,
+        external_checkout_id="chk_prepare_annual",
     )
+    db_session.add(sub)
     await db_session.commit()
 
     invoice = "https://sandbox.asaas.com/checkoutSession/show?id=chk_prepare_annual"
@@ -2033,6 +2035,7 @@ async def test_prepare_annual_checkout_returns_hosted_link_without_locking_payme
         )
 
     assert result["invoice_url"] == invoice
+    assert sub.payment_method is None
     gateway.get_checkout.assert_not_awaited()
     gateway._hosted_checkout_url.assert_called_once_with({"id": "chk_prepare_annual"})
     gateway.ensure_card_billing.assert_not_awaited()

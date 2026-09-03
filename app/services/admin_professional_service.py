@@ -55,6 +55,17 @@ def mask_cpf(cpf: str | None) -> str:
     return f"***.***.***-{digits[-2:]}"
 
 
+def _admin_plan_summary(subscription: Subscription | None) -> AdminPlanSummary | None:
+    if not subscription or not subscription.plan:
+        return None
+    return AdminPlanSummary(
+        slug=subscription.plan.slug,
+        name=subscription.plan.name,
+        status=subscription.status,
+        billing_interval=subscription.plan.billing_interval,
+    )
+
+
 class AdminProfessionalService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -114,6 +125,18 @@ class AdminProfessionalService:
         total = int((await self.db.execute(count_stmt)).scalar_one())
         result = await self.db.execute(list_stmt.offset((page - 1) * limit).limit(limit))
         rows = result.scalars().all()
+
+        latest_subscriptions: dict[UUID, Subscription] = {}
+        if rows:
+            subscription_result = await self.db.execute(
+                select(Subscription)
+                .options(selectinload(Subscription.plan))
+                .where(Subscription.professional_id.in_([professional.id for professional in rows]))
+                .order_by(Subscription.updated_at.desc(), Subscription.created_at.desc())
+            )
+            for subscription in subscription_result.scalars().unique().all():
+                latest_subscriptions.setdefault(subscription.professional_id, subscription)
+
         items = [
             AdminProfessionalListItem(
                 id=str(p.id),
@@ -126,6 +149,12 @@ class AdminProfessionalService:
                 admin_role=resolve_admin_role(admin_role=p.admin_role, is_staff=p.is_staff),
                 is_disabled=p.is_disabled,
                 created_at=p.created_at,
+                plan=_admin_plan_summary(latest_subscriptions.get(p.id)),
+                payment_method=(
+                    latest_subscriptions[p.id].payment_method
+                    if p.id in latest_subscriptions
+                    else None
+                ),
             )
             for p in rows
         ]
@@ -182,9 +211,7 @@ class AdminProfessionalService:
             .limit(1)
         )
         sub = sub_result.scalar_one_or_none()
-        plan = None
-        if sub and sub.plan:
-            plan = AdminPlanSummary(slug=sub.plan.slug, name=sub.plan.name, status=sub.status)
+        plan = _admin_plan_summary(sub)
 
         return AdminProfessionalDetail(
             id=str(pro.id),

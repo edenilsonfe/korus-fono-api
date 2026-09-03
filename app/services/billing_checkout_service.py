@@ -356,6 +356,7 @@ class BillingCheckoutService:
                 sub.external_subscription_id = new_subscription_id
                 sub.external_checkout_id = str(payment["id"])
 
+            sub.payment_method = "credit_card"
             await self.db.commit()
         except PaymentGatewayError as exc:
             logger.warning(
@@ -536,6 +537,9 @@ class BillingCheckoutService:
             gateway = StubPaymentGateway()
             pix = await gateway.get_pix_qr_code(payment_id)
 
+        sub.payment_method = "pix"
+        await self.db.commit()
+
         return {
             "session_id": session_id,
             "provider": provider,
@@ -604,6 +608,9 @@ class BillingCheckoutService:
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Asaas não retornou URL da fatura para cartão.",
             )
+
+        sub.payment_method = "credit_card"
+        await self.db.commit()
 
         return {
             "session_id": session_id,

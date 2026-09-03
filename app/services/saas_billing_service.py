@@ -111,6 +111,19 @@ def _next_period_end(value: datetime, billing_interval: str | None) -> datetime 
     return None
 
 
+def _payment_method_from_payload(payload: dict[str, Any]) -> str | None:
+    raw_value = (
+        payload.get("billingType")
+        or payload.get("billing_type")
+        or payload.get("payment_method")
+    )
+    normalized = str(raw_value or "").strip().upper()
+    return {
+        "PIX": "pix",
+        "CREDIT_CARD": "credit_card",
+    }.get(normalized)
+
+
 class SaasBillingService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -377,6 +390,9 @@ class SaasBillingService:
                 target.external_subscription_id = str(payload["external_subscription_id"])
             if payload.get("external_checkout_id"):
                 target.external_checkout_id = str(payload["external_checkout_id"])
+            payment_method = _payment_method_from_payload(payload)
+            if payment_method:
+                target.payment_method = payment_method
 
             plan_slug = payload.get("plan_slug")
             plan_row = None
