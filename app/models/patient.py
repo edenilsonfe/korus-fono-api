@@ -17,6 +17,7 @@ class Patient(Base, TimestampMixin):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     birth_date: Mapped[date] = mapped_column(Date, nullable=False)
+    address: Mapped[str | None] = mapped_column(String(500), nullable=True)
     diagnosis_keys: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="avaliacao")
     start_date: Mapped[date] = mapped_column(Date, nullable=False)

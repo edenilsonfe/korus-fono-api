@@ -79,6 +79,7 @@ def _summary_from_aggregates(
         name=patient.name,
         age=calculate_age(patient.birth_date),
         birth_date=patient.birth_date.isoformat(),
+        address=patient.address,
         guardian=gl,
         guardian_label=gl,
         diagnoses=labels,

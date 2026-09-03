@@ -1,13 +1,24 @@
 from datetime import date as DateType
-from typing import Literal, TypeAlias
+from typing import Annotated, Literal, TypeAlias
 
-from pydantic import EmailStr, Field, TypeAdapter, field_validator
+from pydantic import AfterValidator, EmailStr, Field, TypeAdapter, field_validator
 
 from app.schemas.common import CamelModel
 
 _email_adapter = TypeAdapter(EmailStr)
 
 PatientStatus: TypeAlias = Literal["ativo", "avaliacao", "pausado", "alta", "inativo"]
+
+
+def _normalize_address(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return value.strip() or None
+
+
+PatientAddress: TypeAlias = Annotated[
+    str | None, Field(max_length=500), AfterValidator(_normalize_address)
+]
 
 
 def _normalize_optional_email(value: str | None) -> str:
@@ -69,6 +80,7 @@ class CaregiverResponse(CamelModel):
 class PatientCreate(CamelModel):
     name: str
     birth_date: DateType
+    address: PatientAddress = None
     diagnosis_keys: list[str] = Field(min_length=1)
     status: PatientStatus = "avaliacao"
     guardians: list[CaregiverCreate] = Field(default_factory=list)
@@ -77,6 +89,7 @@ class PatientCreate(CamelModel):
 class PatientUpdate(CamelModel):
     name: str | None = None
     birth_date: DateType | None = None
+    address: PatientAddress = None
     diagnosis_keys: list[str] | None = None
     status: PatientStatus | None = None
 
@@ -185,6 +198,7 @@ class PatientSummary(CamelModel):
     name: str
     age: int
     birth_date: str
+    address: str | None = None
     guardian: str
     guardian_label: str
     diagnoses: list[str]
