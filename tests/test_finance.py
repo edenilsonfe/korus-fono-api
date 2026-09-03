@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.security import create_access_token, hash_password
 from app.models.appointment import Appointment
-from app.models.finance import ServiceOffering
+from app.models.finance import ReceivableItem, ServiceOffering
 from app.models.patient import Patient
 from app.models.professional import Professional
 from app.models.session import Session
@@ -646,6 +646,60 @@ async def test_session_cannot_link_an_appointment_from_another_patient(
     )
 
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_updating_package_price_preserves_existing_financial_records(
+    api_client, db_session, patient, auth_headers
+):
+    package = await api_client.post(
+        "/api/v1/finance/packages",
+        headers=auth_headers,
+        json={"name": "Pacote mensal", "sessionsCount": 4, "priceCents": 40_000, "validityDays": 35},
+    )
+    assert package.status_code == 201, package.text
+    enrollment = await api_client.post(
+        "/api/v1/finance/patient-packages",
+        headers=auth_headers,
+        json={
+            "patientId": str(patient.id),
+            "packageId": package.json()["id"],
+            "startedOn": str(date.today()),
+            "dueDate": str(date.today()),
+            "payerName": "Responsável financeiro",
+        },
+    )
+    assert enrollment.status_code == 201, enrollment.text
+
+    updated = await api_client.patch(
+        f"/api/v1/finance/packages/{package.json()['id']}",
+        headers=auth_headers,
+        json={"priceCents": 50_000},
+    )
+    patient_finance = await api_client.get(
+        f"/api/v1/patients/{patient.id}/finance", headers=auth_headers
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["priceCents"] == 50_000
+    assert patient_finance.status_code == 200, patient_finance.text
+    registered_package = next(
+        item for item in patient_finance.json()["packages"] if item["id"] == enrollment.json()["id"]
+    )
+    registered_receivable = next(
+        item
+        for item in patient_finance.json()["receivables"]
+        if item["id"] == enrollment.json()["receivableId"]
+    )
+    assert registered_package["agreedPriceCents"] == 40_000
+    assert registered_receivable["totalCents"] == 40_000
+    registered_item = await db_session.scalar(
+        select(ReceivableItem).where(
+            ReceivableItem.receivable_id == UUID(enrollment.json()["receivableId"])
+        )
+    )
+    assert registered_item is not None
+    assert registered_item.unit_cents == 40_000
 
 
 @pytest.mark.asyncio
