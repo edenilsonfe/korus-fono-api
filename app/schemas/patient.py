@@ -10,14 +10,17 @@ _email_adapter = TypeAdapter(EmailStr)
 PatientStatus: TypeAlias = Literal["ativo", "avaliacao", "pausado", "alta", "inativo"]
 
 
-def _normalize_address(value: str | None) -> str | None:
+def _normalize_optional_patient_text(value: str | None) -> str | None:
     if value is None:
         return None
     return value.strip() or None
 
 
 PatientAddress: TypeAlias = Annotated[
-    str | None, Field(max_length=500), AfterValidator(_normalize_address)
+    str | None, Field(max_length=500), AfterValidator(_normalize_optional_patient_text)
+]
+PatientNotes: TypeAlias = Annotated[
+    str | None, Field(max_length=5000), AfterValidator(_normalize_optional_patient_text)
 ]
 
 
@@ -81,6 +84,7 @@ class PatientCreate(CamelModel):
     name: str
     birth_date: DateType
     address: PatientAddress = None
+    notes: PatientNotes = None
     diagnosis_keys: list[str] = Field(min_length=1)
     status: PatientStatus = "avaliacao"
     guardians: list[CaregiverCreate] = Field(default_factory=list)
@@ -90,6 +94,7 @@ class PatientUpdate(CamelModel):
     name: str | None = None
     birth_date: DateType | None = None
     address: PatientAddress = None
+    notes: PatientNotes = None
     diagnosis_keys: list[str] | None = None
     status: PatientStatus | None = None
 
@@ -199,6 +204,7 @@ class PatientSummary(CamelModel):
     age: int
     birth_date: str
     address: str | None = None
+    notes: str | None = None
     guardian: str
     guardian_label: str
     diagnoses: list[str]
