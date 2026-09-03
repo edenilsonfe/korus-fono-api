@@ -102,6 +102,8 @@ class Settings(BaseSettings):
     google_calendar_client_secret: str = ""
     google_calendar_credential_encryption_key: str = ""
     whatsapp_scheduler_interval_seconds: int = 900
+    whatsapp_welcome_rate_limit_window_seconds: int = 900
+    whatsapp_welcome_max_messages_per_window: int = 5
     whatsapp_reminder_window_hours: int = 24
     whatsapp_reminder_tolerance_minutes: int = 15
     whatsapp_reminder_reschedule_cooldown_hours: int = 6

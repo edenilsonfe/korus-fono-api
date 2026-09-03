@@ -143,6 +143,17 @@ mapeamento de estados, trava de WhatsApp e aplicação idempotente com manifesto
 local — sem migration no banco de destino — estão em
 [`docs/legacy-clinic-import.md`](docs/legacy-clinic-import.md).
 
+### Boas-vindas por WhatsApp
+
+O cadastro grava a mensagem de boas-vindas em uma fila durável. A instância
+central envia no máximo 5 tentativas em uma janela de 15 minutos
+(`WHATSAPP_WELCOME_MAX_MESSAGES_PER_WINDOW=5` e
+`WHATSAPP_WELCOME_RATE_LIMIT_WINDOW_SECONDS=900`) e o scheduler recupera no
+máximo 5 itens por ciclo, evitando rajadas depois de reconectar/sincronizar a Evolution.
+Se uma tentativa chegou ao provedor ou ficou com resultado ambíguo, ela não é
+reenviada automaticamente; registros que aguardavam uma conexão ativa continuam
+elegíveis sem consumir tentativa.
+
 ## Worker IA (opcional)
 
 ```bash

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import get_settings
 from app.models.notification_message_log import (
     MESSAGE_STATUS_FAILED,
+    MESSAGE_STATUS_QUEUED,
     MESSAGE_STATUS_SENT,
     NotificationMessageLog,
 )
@@ -80,6 +81,8 @@ def welcome_env(monkeypatch):
     monkeypatch.setattr(settings, "app_public_url", "https://api.test")
     monkeypatch.setattr(settings, "evolution_webhook_secret", "evo-secret")
     monkeypatch.setattr(settings, "clinic_timezone", "UTC")
+    monkeypatch.setattr(settings, "whatsapp_welcome_rate_limit_window_seconds", 900)
+    monkeypatch.setattr(settings, "whatsapp_welcome_max_messages_per_window", 5)
     cred._get_fernet.cache_clear()
     yield settings
     cred._get_fernet.cache_clear()
@@ -179,7 +182,7 @@ async def test_offline_platform_connection_does_not_consume_send_attempt(
 
 
 @pytest.mark.asyncio
-async def test_platform_webhook_marks_welcome_failed_and_schedules_retry(
+async def test_platform_webhook_marks_welcome_failed_without_automatic_retry(
     api_client,
     welcome_env,
     db_session,
@@ -216,7 +219,92 @@ async def test_platform_webhook_marks_welcome_failed_and_schedules_retry(
     await db_session.refresh(log)
     assert log.status == MESSAGE_STATUS_FAILED
     assert log.failed_at is not None
-    assert log.next_retry_at is not None
+    assert log.next_retry_at is None
+
+
+@pytest.mark.asyncio
+async def test_scheduler_caps_accumulated_welcome_backlog_at_five_per_window(
+    welcome_env,
+    welcome_session_factory,
+    db_session,
+    professional,
+    monkeypatch,
+):
+    await _active_platform_connection(db_session)
+    fake = _install_fake(monkeypatch, _FakeEvolutionClient())
+    base_time = datetime.now(UTC) - timedelta(minutes=2)
+    backlog = [
+        NotificationMessageLog(
+            professional_id=professional.id,
+            channel="whatsapp",
+            notification_type="registration_welcome",
+            provider="evolution",
+            deduplication_key=f"registration-welcome:backlog-{index}",
+            status=MESSAGE_STATUS_QUEUED,
+            attempt_count=0,
+            created_at=base_time + timedelta(seconds=index),
+            updated_at=base_time + timedelta(seconds=index),
+        )
+        for index in range(6)
+    ]
+    db_session.add_all(backlog)
+    await db_session.commit()
+    monkeypatch.setattr(
+        "app.services.whatsapp_scheduler_service.ZoneInfo", lambda _key: UTC
+    )
+
+    first_totals = await WhatsAppSchedulerService(db_session).run_all()
+    second_totals = await WhatsAppSchedulerService(db_session).run_all()
+
+    for log in backlog:
+        await db_session.refresh(log)
+    assert first_totals["welcome_messages"] == 5
+    assert second_totals["welcome_messages"] == 0
+    assert len(fake.sent) == 5
+    assert all(log.status == MESSAGE_STATUS_SENT for log in backlog[:5])
+    deferred = backlog[5]
+    assert deferred.status == MESSAGE_STATUS_FAILED
+    assert deferred.error_code == "rate_limited"
+    assert deferred.attempt_count == 0
+    assert deferred.next_retry_at is not None
+
+
+@pytest.mark.asyncio
+async def test_scheduler_quarantines_stale_welcome_claim_without_resending(
+    welcome_env,
+    welcome_session_factory,
+    db_session,
+    professional,
+    monkeypatch,
+):
+    await _active_platform_connection(db_session)
+    fake = _install_fake(monkeypatch, _FakeEvolutionClient())
+    stale_at = datetime.now(UTC) - timedelta(minutes=10)
+    log = NotificationMessageLog(
+        professional_id=professional.id,
+        channel="whatsapp",
+        notification_type="registration_welcome",
+        provider="evolution",
+        deduplication_key="registration-welcome:stale-claim",
+        status=MESSAGE_STATUS_QUEUED,
+        attempt_count=1,
+        created_at=stale_at,
+        updated_at=stale_at,
+    )
+    db_session.add(log)
+    await db_session.commit()
+    monkeypatch.setattr(
+        "app.services.whatsapp_scheduler_service.ZoneInfo", lambda _key: UTC
+    )
+
+    totals = await WhatsAppSchedulerService(db_session).run_all()
+
+    await db_session.refresh(log)
+    assert totals["welcome_messages"] == 0
+    assert fake.sent == []
+    assert log.status == MESSAGE_STATUS_FAILED
+    assert log.error_code == "delivery_unknown"
+    assert log.next_retry_at is None
 
 
 @pytest.mark.asyncio
@@ -261,7 +349,7 @@ async def test_platform_webhook_confirms_welcome_delivery(
 
 
 @pytest.mark.asyncio
-async def test_scheduler_retries_due_failed_welcome(
+async def test_scheduler_does_not_retry_failed_accepted_welcome(
     welcome_env,
     welcome_session_factory,
     db_session,
@@ -284,15 +372,15 @@ async def test_scheduler_retries_due_failed_welcome(
     totals = await WhatsAppSchedulerService(db_session).run_all()
 
     await db_session.refresh(log)
-    assert totals["welcome_messages"] == 1
-    assert log.status == MESSAGE_STATUS_SENT
-    assert log.attempt_count == 2
-    assert log.provider_message_id == "welcome-msg-1"
-    assert fake.sent
+    assert totals["welcome_messages"] == 0
+    assert log.status == MESSAGE_STATUS_FAILED
+    assert log.attempt_count == 1
+    assert log.provider_message_id == "failed-message"
+    assert fake.sent == []
 
     totals_again = await WhatsAppSchedulerService(db_session).run_all()
     assert totals_again["welcome_messages"] == 0
-    assert len(fake.sent) == 1
+    assert fake.sent == []
 
 
 @pytest.mark.asyncio

@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 
 WELCOME_NOTIFICATION_TYPE = "registration_welcome"
-MAX_WELCOME_SEND_ATTEMPTS = 3
+MAX_WELCOME_SEND_ATTEMPTS = 1
 
 
 def welcome_retry_at(attempt_count: int, *, now: datetime | None = None) -> datetime:

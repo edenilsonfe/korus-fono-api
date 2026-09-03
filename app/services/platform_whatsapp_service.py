@@ -47,11 +47,7 @@ from app.services.evolution_whatsapp_service import (
     whatsapp_number_candidates,
 )
 from app.services.whatsapp_types import WhatsAppSendResult
-from app.services.whatsapp_welcome_policy import (
-    MAX_WELCOME_SEND_ATTEMPTS,
-    WELCOME_NOTIFICATION_TYPE,
-    welcome_retry_at,
-)
+from app.services.whatsapp_welcome_policy import WELCOME_NOTIFICATION_TYPE
 from app.utils.credential_encryption import (
     CredentialEncryptionError,
     decrypt_secret,
@@ -354,11 +350,10 @@ class PlatformWhatsAppService:
                             or data.get("reason")
                             or "Evolution informou falha na entrega."
                         )
-                        log.next_retry_at = (
-                            welcome_retry_at(log.attempt_count, now=now)
-                            if log.attempt_count < MAX_WELCOME_SEND_ATTEMPTS
-                            else None
-                        )
+                        # The provider had already accepted this message id. A
+                        # second automatic send can duplicate a delivery when
+                        # Evolution callbacks arrive late or out of order.
+                        log.next_retry_at = None
 
         await self.db.commit()
         return True

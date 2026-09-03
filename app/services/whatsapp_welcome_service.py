@@ -4,8 +4,9 @@ The message is sent from the platform's own Evolution number (see
 ``PlatformWhatsAppService``), managed in the admin panel. The copy can be
 customized there; when no custom text is stored, ``DEFAULT_WELCOME_MESSAGE``
 is used. Every registration first creates a durable ``NotificationMessageLog``.
-The provider message id is reconciled by webhook and failed deliveries are
-retried by the WhatsApp scheduler.
+The provider message id is reconciled by webhook. Only attempts that never
+reached the provider (for example, while disconnected) can be recovered; an
+accepted or ambiguous attempt is never sent again automatically.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants.whatsapp_events import DEFAULT_WELCOME_MESSAGE
@@ -25,6 +26,7 @@ from app.db.session import AsyncSessionLocal
 from app.models.notification_message_log import (
     MESSAGE_STATUS_DELIVERED,
     MESSAGE_STATUS_FAILED,
+    MESSAGE_STATUS_PROCESSING,
     MESSAGE_STATUS_QUEUED,
     MESSAGE_STATUS_READ,
     MESSAGE_STATUS_SENT,
@@ -63,12 +65,14 @@ class WelcomeDispatchError(Exception):
         *,
         retryable: bool,
         consumes_attempt: bool = True,
+        retry_at: datetime | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.retryable = retryable
         self.consumes_attempt = consumes_attempt
+        self.retry_at = retry_at
 
 
 def _first_name(full_name: str | None) -> str:
@@ -117,7 +121,7 @@ async def queue_whatsapp_welcome_message(
 
 
 async def _send_with_session(
-    db: AsyncSession, *, user_name: str, phone: str
+    db: AsyncSession, *, user_name: str, phone: str, log_id: UUID | None = None
 ) -> tuple[WhatsAppSendResult, PlatformWhatsAppConnection]:
     settings = get_settings()
     if settings.whatsapp_provider != "evolution":
@@ -150,6 +154,61 @@ async def _send_with_session(
             consumes_attempt=False,
         )
 
+    if log_id is not None:
+        # Serialize all durable welcome attempts on the singleton platform
+        # connection. This prevents separate workers/requests from turning a
+        # recovered backlog into a burst.
+        connection = await db.scalar(
+            select(PlatformWhatsAppConnection)
+            .where(PlatformWhatsAppConnection.id == connection.id)
+            .with_for_update()
+        )
+        if connection is None:
+            raise WelcomeDispatchError(
+                "connection_not_active",
+                "Conexão WhatsApp da plataforma não está ativa.",
+                retryable=True,
+                consumes_attempt=False,
+            )
+
+        window_seconds = max(
+            1, int(settings.whatsapp_welcome_rate_limit_window_seconds)
+        )
+        max_messages = max(
+            1, int(settings.whatsapp_welcome_max_messages_per_window)
+        )
+        window = timedelta(seconds=window_seconds)
+        cutoff = datetime.now(UTC) - window
+        attempted_at = func.coalesce(
+            NotificationMessageLog.sent_at,
+            NotificationMessageLog.failed_at,
+            NotificationMessageLog.updated_at,
+        )
+        rate_limit_result = await db.execute(
+            select(
+                func.count(NotificationMessageLog.id),
+                func.min(attempted_at),
+            ).where(
+                NotificationMessageLog.notification_type
+                == WELCOME_NOTIFICATION_TYPE,
+                NotificationMessageLog.id != log_id,
+                NotificationMessageLog.attempt_count > 0,
+                attempted_at >= cutoff,
+            )
+        )
+        attempts_in_window, oldest_attempt_at = rate_limit_result.one()
+        if int(attempts_in_window or 0) >= max_messages:
+            if oldest_attempt_at.tzinfo is None:
+                oldest_attempt_at = oldest_attempt_at.replace(tzinfo=UTC)
+            retry_at = oldest_attempt_at + window
+            raise WelcomeDispatchError(
+                "rate_limited",
+                "Envio adiado pela proteção anti-spam das boas-vindas.",
+                retryable=True,
+                consumes_attempt=False,
+                retry_at=retry_at,
+            )
+
     template = service.resolve_welcome_message(connection)
     text = _render_welcome_message(template, _first_name(user_name))
     send_result = await service.send_text(connection, phone, text)
@@ -163,17 +222,19 @@ async def _mark_dispatch_failed(
     code: str,
     message: str,
     retryable: bool,
+    retry_at: datetime | None = None,
 ) -> None:
     now = datetime.now(UTC)
     log.status = MESSAGE_STATUS_FAILED
     log.error_code = code
     log.last_error = message
     log.failed_at = now
-    log.next_retry_at = (
-        welcome_retry_at(log.attempt_count, now=now)
-        if retryable and log.attempt_count < MAX_WELCOME_SEND_ATTEMPTS
-        else None
-    )
+    if retryable and log.attempt_count < MAX_WELCOME_SEND_ATTEMPTS:
+        log.next_retry_at = retry_at or welcome_retry_at(
+            log.attempt_count, now=now
+        )
+    else:
+        log.next_retry_at = None
     await db.commit()
 
 
@@ -191,8 +252,6 @@ async def dispatch_whatsapp_welcome_message(log_id: UUID) -> bool:
         )
         if log is None or log.status in _DONE_STATUSES:
             return False
-        if log.attempt_count >= MAX_WELCOME_SEND_ATTEMPTS:
-            return False
 
         now = datetime.now(UTC)
         if log.status == MESSAGE_STATUS_FAILED:
@@ -201,12 +260,29 @@ async def dispatch_whatsapp_welcome_message(log_id: UUID) -> bool:
                 next_retry_at = next_retry_at.replace(tzinfo=UTC)
             if next_retry_at is None or next_retry_at > now:
                 return False
-        elif log.status == MESSAGE_STATUS_QUEUED and log.attempt_count:
+        elif log.status in (
+            MESSAGE_STATUS_QUEUED,
+            MESSAGE_STATUS_PROCESSING,
+        ) and log.attempt_count:
             stamped = log.updated_at or log.created_at
             if stamped.tzinfo is None:
                 stamped = stamped.replace(tzinfo=UTC)
             if now - stamped < _CLAIM_TIMEOUT:
                 return False
+            await _mark_dispatch_failed(
+                db,
+                log,
+                code="delivery_unknown",
+                message=(
+                    "Tentativa anterior foi interrompida; envio não repetido para "
+                    "evitar duplicidade."
+                ),
+                retryable=False,
+            )
+            return False
+
+        if log.attempt_count >= MAX_WELCOME_SEND_ATTEMPTS:
+            return False
 
         professional = (
             await db.get(Professional, log.professional_id)
@@ -223,7 +299,7 @@ async def dispatch_whatsapp_welcome_message(log_id: UUID) -> bool:
             )
             return False
 
-        log.status = MESSAGE_STATUS_QUEUED
+        log.status = MESSAGE_STATUS_PROCESSING
         log.attempt_count = int(log.attempt_count or 0) + 1
         log.next_retry_at = None
         log.error_code = None
@@ -234,7 +310,10 @@ async def dispatch_whatsapp_welcome_message(log_id: UUID) -> bool:
 
         try:
             send_result, connection = await _send_with_session(
-                db, user_name=professional.name, phone=professional.phone
+                db,
+                user_name=professional.name,
+                phone=professional.phone,
+                log_id=log.id,
             )
         except WelcomeDispatchError as exc:
             if not exc.consumes_attempt:
@@ -245,6 +324,7 @@ async def dispatch_whatsapp_welcome_message(log_id: UUID) -> bool:
                 code=exc.code,
                 message=exc.message,
                 retryable=exc.retryable,
+                retry_at=exc.retry_at,
             )
             logger.warning(
                 "WhatsApp welcome attempt failed for %s: %s",
@@ -258,18 +338,18 @@ async def dispatch_whatsapp_welcome_message(log_id: UUID) -> bool:
             await _mark_dispatch_failed(
                 db,
                 log,
-                code="invalid_phone" if permanent else "provider_error",
+                code="invalid_phone" if permanent else "delivery_unknown",
                 message=message,
-                retryable=not permanent,
+                retryable=False,
             )
             return False
         except EvolutionApiError as exc:
             await _mark_dispatch_failed(
                 db,
                 log,
-                code="provider_error",
+                code="delivery_unknown",
                 message=exc.message,
-                retryable=True,
+                retryable=False,
             )
             return False
         except Exception as exc:
@@ -277,9 +357,9 @@ async def dispatch_whatsapp_welcome_message(log_id: UUID) -> bool:
             await _mark_dispatch_failed(
                 db,
                 log,
-                code="unexpected_error",
+                code="delivery_unknown",
                 message=str(exc),
-                retryable=True,
+                retryable=False,
             )
             return False
 
@@ -300,11 +380,39 @@ async def dispatch_whatsapp_welcome_message(log_id: UUID) -> bool:
 
 
 async def retry_due_whatsapp_welcome_messages() -> int:
-    """Dispatch durable queued welcomes and retry provider delivery failures."""
+    """Recover one rate-limited batch of safe welcome attempts."""
     now = datetime.now(UTC)
+    batch_size = max(
+        1, int(get_settings().whatsapp_welcome_max_messages_per_window)
+    )
     async with AsyncSessionLocal() as db:
+        stale_result = await db.scalars(
+            select(NotificationMessageLog).where(
+                NotificationMessageLog.notification_type
+                == WELCOME_NOTIFICATION_TYPE,
+                NotificationMessageLog.status.in_(
+                    (MESSAGE_STATUS_QUEUED, MESSAGE_STATUS_PROCESSING)
+                ),
+                NotificationMessageLog.attempt_count > 0,
+                NotificationMessageLog.updated_at <= now - _CLAIM_TIMEOUT,
+            )
+        )
+        stale_logs = list(stale_result.all())
+        for stale_log in stale_logs:
+            stale_log.status = MESSAGE_STATUS_FAILED
+            stale_log.error_code = "delivery_unknown"
+            stale_log.last_error = (
+                "Tentativa anterior foi interrompida; envio não repetido para "
+                "evitar duplicidade."
+            )
+            stale_log.failed_at = now
+            stale_log.next_retry_at = None
+        if stale_logs:
+            await db.commit()
+
         result = await db.scalars(
-            select(NotificationMessageLog.id).where(
+            select(NotificationMessageLog.id)
+            .where(
                 NotificationMessageLog.notification_type
                 == WELCOME_NOTIFICATION_TYPE,
                 NotificationMessageLog.attempt_count
@@ -312,19 +420,21 @@ async def retry_due_whatsapp_welcome_messages() -> int:
                 or_(
                     and_(
                         NotificationMessageLog.status == MESSAGE_STATUS_QUEUED,
-                        or_(
-                            NotificationMessageLog.attempt_count == 0,
-                            NotificationMessageLog.updated_at
-                            <= now - _CLAIM_TIMEOUT,
-                        ),
+                        NotificationMessageLog.attempt_count == 0,
                     ),
                     and_(
                         NotificationMessageLog.status == MESSAGE_STATUS_FAILED,
+                        NotificationMessageLog.attempt_count == 0,
                         NotificationMessageLog.next_retry_at.is_not(None),
                         NotificationMessageLog.next_retry_at <= now,
                     ),
                 ),
             )
+            .order_by(
+                NotificationMessageLog.created_at.asc(),
+                NotificationMessageLog.id.asc(),
+            )
+            .limit(batch_size)
         )
         log_ids = list(result.all())
 
