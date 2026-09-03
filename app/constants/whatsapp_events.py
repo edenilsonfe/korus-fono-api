@@ -12,8 +12,10 @@ WHATSAPP_EVENT_RESCHEDULED = "appointment_rescheduled"
 WHATSAPP_EVENT_BILLING_REMINDER = "billing_reminder"
 WHATSAPP_EVENT_BILLING_OVERDUE = "billing_overdue"
 WHATSAPP_EVENT_WELCOME = "welcome"
+WHATSAPP_EVENT_BIRTHDAY = "patient_birthday"
 
 WHATSAPP_EVENT_IDS: tuple[str, ...] = (
+    WHATSAPP_EVENT_BIRTHDAY,
     WHATSAPP_EVENT_REMINDER_24H,
     WHATSAPP_EVENT_CONFIRMATION,
     WHATSAPP_EVENT_CANCELLED,
@@ -64,6 +66,11 @@ DEFAULT_WELCOME_MESSAGE = (
 WELCOME_MESSAGE_MAX_LENGTH = 4000
 
 DEFAULT_EVENT_MESSAGE_TEMPLATES: dict[str, str] = {
+    WHATSAPP_EVENT_BIRTHDAY: (
+        "Hoje é um dia especial: aniversário de {{nomePaciente}}! 🎂\n\n"
+        "Desejamos um dia cheio de alegria, carinho e boas descobertas. "
+        "Feliz aniversário! 🎉\n\nCom carinho, {{nomeProfissional}}."
+    ),
     WHATSAPP_EVENT_REMINDER_24H: DEFAULT_APPOINTMENT_REMINDER_MESSAGE,
     WHATSAPP_EVENT_CONFIRMATION: (
         "Olá, {{nomePaciente}}. Tudo bem?\n\n"

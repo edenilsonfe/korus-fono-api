@@ -26,6 +26,7 @@ from app.models.notification_message_log import (
     MESSAGE_STATUS_SKIPPED,
     NotificationMessageLog,
 )
+from app.services.birthday_service import run_birthday_messages
 from app.services.whatsapp_notification_service import (
     MAX_SEND_ATTEMPTS,
     WhatsAppNotificationService,
@@ -66,10 +67,12 @@ class WhatsAppSchedulerService:
         appointment_events = await self.run_queued_appointment_events()
         reminders = await self.run_appointment_reminders_24h()
         welcome_messages = await retry_due_whatsapp_welcome_messages()
+        birthday_messages = await run_birthday_messages(self.db, self._now())
         totals = {
             "appointment_events": appointment_events,
             "appointment_reminders": reminders,
             "welcome_messages": welcome_messages,
+            "birthday_messages": birthday_messages,
             "billing_reminders": 0,
             "billing_overdue": 0,
         }

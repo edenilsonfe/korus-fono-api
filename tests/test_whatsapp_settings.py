@@ -176,6 +176,7 @@ async def test_template_save_preserves_disabled_events_and_dispatches_only_enabl
     reloaded = await api_client.get("/api/v1/whatsapp/settings", headers=auth_headers)
     assert reloaded.status_code == 200
     assert reloaded.json()["whatsappEvents"] == {
+        "patientBirthday": False,
         "appointmentReminder24h": True,
         "appointmentConfirmation": False,
         "appointmentCancelled": False,
@@ -263,6 +264,7 @@ async def test_template_save_preserves_disabled_events_and_dispatches_only_enabl
     }
     for log in sent_logs:
         assert log.payload["dispatch_decision"]["whatsapp_events"] == {
+            "patient_birthday": False,
             "appointment_reminder_24h": True,
             "appointment_confirmation": False,
             "appointment_cancelled": False,

@@ -12,6 +12,7 @@ from urllib.parse import urlencode
 from app.billing.constants import MAX_ANNUAL_CARD_INSTALLMENTS
 from app.billing.errors import PaymentGatewayConfigError, PaymentGatewayError
 from app.billing.http_client import request_json
+from app.billing.payment_methods import payment_method_from_payload
 from app.core.config import get_settings
 
 _ASAAS_CYCLE_MAP = {
@@ -599,6 +600,7 @@ class AsaasPaymentGateway:
                         "session_id": payment_id,
                         "checkout_url": success_url,
                         "status": "completed",
+                        "payment_method": payment_method_from_payload(existing_payment),
                         "preserve_existing_plan": bool(
                             meta.get("replace_existing_checkout")
                         ),
@@ -699,6 +701,7 @@ class AsaasPaymentGateway:
                     "checkout_url": success_url,
                     "status": "completed",
                     "external_customer_id": str(customer_id),
+                    "payment_method": payment_method_from_payload(existing_payment),
                     "preserve_existing_plan": True,
                 }
             try:
@@ -744,6 +747,7 @@ class AsaasPaymentGateway:
                     "checkout_url": success_url,
                     "status": "completed",
                     "external_customer_id": str(customer_id),
+                    "payment_method": payment_method_from_payload(payment),
                 }
             payments = await self.list_subscription_payments(subscription_id)
             payment = payment or self._pick_payment(payments)
@@ -781,6 +785,7 @@ class AsaasPaymentGateway:
             "status": "pending",
             "external_customer_id": str(customer_id),
             "invoice_url": invoice_url,
+            "payment_method": payment_method_from_payload(payment),
         }
 
     async def ensure_pix_billing(self, payment_id: str) -> dict[str, Any]:

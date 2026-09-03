@@ -12,6 +12,7 @@ from app.models.goal import ClinicalDomainSnapshot
 from app.models.patient import Patient
 from app.models.session import Session
 from app.models.ai import AIReport
+from app.services.birthday_service import birthday_conditions
 
 MONTH_NAMES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
 
@@ -149,9 +150,7 @@ async def _get_today_birthdays(
         select(Patient.id, Patient.name, Patient.birth_date, Patient.avatar_color)
         .where(
             Patient.professional_id == professional_id,
-            Patient.is_demo.is_(False),
-            func.extract("month", Patient.birth_date) == today.month,
-            func.extract("day", Patient.birth_date) == today.day,
+            *birthday_conditions(today),
         )
         .order_by(Patient.name.asc())
     )

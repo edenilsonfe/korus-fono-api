@@ -15,6 +15,9 @@ class NotificationSettings(Base, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("professionals.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
     )
     whatsapp_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    birthday_in_app_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     appointment_confirmation_link_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )

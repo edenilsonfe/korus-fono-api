@@ -1,10 +1,7 @@
-"""NotificationService — in-app notification inbox (broadcast announcements).
+"""NotificationService — broadcasts and personal birthday reminders.
 
 Distinct from the outbound WhatsApp ``notification_*`` services. Backs the
 unified inbox described in ``docs/notificacoes-in-app-design.md``.
-
-v1 ships broadcast only. ``personal`` gatilhos are prepared in the schema but
-not emitted by any service yet.
 
 The service is cross-dialect: it works on PostgreSQL (production) and SQLite
 (tests). Audience matching is done in Python (announcement volume is small) to
@@ -29,6 +26,10 @@ from app.schemas.app_notification import (
     NotificationItem,
     NotificationPage,
     UnreadCount,
+)
+from app.services.birthday_service import (
+    birthday_reminder_enabled,
+    ensure_birthday_reminder,
 )
 
 DEFAULT_PAGE_SIZE = 20
@@ -212,8 +213,10 @@ class NotificationService:
         self, notification: AppNotification, professional: Professional, now: datetime
     ) -> bool:
         if notification.kind != "broadcast":
-            # personal (v1.1): would check recipient_professional_id
-            return notification.recipient_professional_id == professional.id
+            return (
+                notification.recipient_professional_id == professional.id
+                and self._is_vigent(notification, now)
+            )
         return self._is_vigent(notification, now) and self._audience_matches(
             notification.audience, professional.specialty_key
         )
@@ -223,6 +226,7 @@ class NotificationService:
     ) -> list[tuple[AppNotification, datetime | None, datetime | None]]:
         ar = AppNotificationRead
         n = AppNotification
+        birthdays_enabled = await ensure_birthday_reminder(self.db, professional.id, now)
 
         stmt = (
             select(
@@ -237,13 +241,23 @@ class NotificationService:
                     ar.professional_id == professional.id,
                 ),
             )
-            .where(n.kind == "broadcast")
+            .where(
+                or_(
+                    n.kind == "broadcast",
+                    and_(
+                        n.kind == "personal",
+                        n.recipient_professional_id == professional.id,
+                    ),
+                )
+            )
             .order_by(func.coalesce(n.publish_at, n.created_at).desc(), n.id.desc())
         )
         result = await self.db.execute(stmt)
         rows = []
         for row in result.all():
             notification: AppNotification = row[0]
+            if notification.type == "birthday" and not birthdays_enabled:
+                continue
             if self._is_visible_to(notification, professional, now):
                 rows.append((notification, row[1], row[2]))
         return rows
@@ -261,14 +275,18 @@ class NotificationService:
 
         rows = await self._fetch_visible_with_reads(professional, now)
 
+        if filter == "broadcast":
+            rows = [row for row in rows if row[0].kind == "broadcast"]
+
         # Cursor pagination over (sort_ts DESC, id DESC).
         if cursor:
             sort_ts, last_id = _decode_cursor(cursor)
             if sort_ts is not None and last_id is not None:
                 def _after(row):
                     notification = row[0]
-                    s = notification.publish_at or notification.created_at
-                    return (s < sort_ts) or (s == sort_ts and notification.id < last_id)
+                    s = _as_aware(notification.publish_at or notification.created_at)
+                    cursor_ts = _as_aware(sort_ts)
+                    return (s < cursor_ts) or (s == cursor_ts and notification.id < last_id)
                 rows = [r for r in rows if _after(r)]
 
         next_cursor = None
@@ -313,6 +331,11 @@ class NotificationService:
         notification: AppNotification | None = result.scalar_one_or_none()
         if notification is None or not self._is_visible_to(
             notification, professional, now
+        ):
+            raise NotificationNotVisibleError(notification_id)
+
+        if notification.type == "birthday" and not await birthday_reminder_enabled(
+            self.db, professional.id
         ):
             raise NotificationNotVisibleError(notification_id)
 

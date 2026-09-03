@@ -42,11 +42,15 @@ class NotificationSettingsService:
         professional_id: UUID,
         *,
         whatsapp_enabled: bool | None = None,
+        birthday_in_app_enabled: bool | None = None,
         appointment_confirmation_link_enabled: bool | None = None,
         whatsapp_events: dict[str, bool | None] | None = None,
         whatsapp_message_templates: dict[str, str | None] | None = None,
     ) -> NotificationSettings:
         settings = await self.get_or_create(professional_id)
+
+        if birthday_in_app_enabled is not None:
+            settings.birthday_in_app_enabled = birthday_in_app_enabled
 
         if whatsapp_enabled is not None:
             settings.whatsapp_enabled = whatsapp_enabled

@@ -5,6 +5,7 @@ from app.schemas.common import CamelModel
 
 
 class WhatsAppEventSettings(CamelModel):
+    patient_birthday: bool = False
     appointment_reminder_24h: bool = False
     appointment_confirmation: bool = False
     appointment_cancelled: bool = False
@@ -23,6 +24,7 @@ class WhatsAppEventSettings(CamelModel):
 
 
 class WhatsAppEventSettingsUpdate(CamelModel):
+    patient_birthday: bool | None = None
     appointment_reminder_24h: bool | None = None
     appointment_confirmation: bool | None = None
     appointment_cancelled: bool | None = None
@@ -39,6 +41,7 @@ class WhatsAppEventSettingsUpdate(CamelModel):
 
 
 class WhatsAppMessageTemplates(CamelModel):
+    patient_birthday: str | None = None
     appointment_reminder_24h: str | None = None
     appointment_confirmation: str | None = None
     appointment_cancelled: str | None = None
@@ -48,6 +51,7 @@ class WhatsAppMessageTemplates(CamelModel):
 
 
 class WhatsAppMessageTemplatesUpdate(CamelModel):
+    patient_birthday: str | None = Field(default=None, max_length=4000)
     appointment_reminder_24h: str | None = Field(default=None)
     appointment_confirmation: str | None = Field(default=None)
     appointment_cancelled: str | None = Field(default=None)

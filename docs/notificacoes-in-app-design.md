@@ -9,6 +9,19 @@
 
 ## Visão geral
 
+### Extensão de aniversários (setembro de 2026)
+
+A caixa agora inclui o tipo pessoal `birthday`: um resumo diário por profissional,
+com link para `/dashboard`, gerado na consulta do sino/lista quando a preferência
+`birthdayInAppEnabled` está ativa. `GET/PATCH /notifications/settings` persiste
+essa escolha (desativada por padrão); ela é independente do evento WhatsApp
+`patientBirthday`. A chave UUID determinística impede duplicação concorrente,
+e visto/lido continua em `app_notification_reads`. A notificação expira à meia-noite
+de `CLINIC_TIMEZONE`, e desativar a preferência a oculta imediatamente.
+`filter=broadcast` continua exclusivo de anúncios; `all` inclui lembretes pessoais
+apenas do destinatário. O resumo não inclui nomes ou informações clínicas.
+As seções v1 abaixo registram o desenho original de anúncios.
+
 ### Problema
 
 O Korus Fono não possui um canal in-app para comunicar aos profissionais **novidades de produto** (funcionalidades novas, tutoriais) nem **avisos operacionais da plataforma** (manutenção programada, mudanças de política). Hoje o único feedback in-app são os **toasts** (Sonner + shadcn), efêmeros e por dispositivo — não servem como histórico consultável e cross-device.

@@ -15,6 +15,7 @@ from sqlalchemy.orm import joinedload
 from app.billing import PaymentGatewayConfigError, get_payment_gateway
 from app.billing.checkout_urls import build_checkout_return_urls, build_in_app_payment_url
 from app.billing.errors import PaymentGatewayError
+from app.billing.payment_methods import payment_method_from_payload
 from app.billing.types import InternalBillingEventType
 from app.billing.webhook_normalizer import NormalizedBillingEvent, get_normalizer
 from app.core.client_ip import get_client_ip
@@ -220,6 +221,7 @@ async def _attach_checkout_to_subscription(
     if not sub:
         return None
 
+    previous_resource = (sub.provider, sub.external_subscription_id, sub.external_checkout_id)
     sub.provider = provider
     sub.billing_document = billing_document
     if "external_subscription_id" in session:
@@ -229,6 +231,11 @@ async def _attach_checkout_to_subscription(
     checkout_id = session.get("external_checkout_id") or session.get("session_id")
     if checkout_id:
         sub.external_checkout_id = str(checkout_id)
+
+    payment_method = payment_method_from_payload(session)
+    current_resource = (sub.provider, sub.external_subscription_id, sub.external_checkout_id)
+    if payment_method or current_resource != previous_resource:
+        sub.payment_method = payment_method
 
     await db.commit()
     await db.refresh(sub)

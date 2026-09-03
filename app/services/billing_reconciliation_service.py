@@ -21,6 +21,7 @@ from app.models.billing import Subscription
 from app.models.professional import Professional
 from app.services.plan_change_service import PlanChangeService
 from app.services.saas_billing_service import SaasBillingService
+from app.services.subscription_payment_method_service import recover_subscription_payment_method
 
 logger = logging.getLogger(__name__)
 
@@ -229,12 +230,15 @@ class BillingReconciliationService:
 
         normalizer = AsaasWebhookNormalizer()
         applied = False
+        payment_method_updated = False
         payments_checked = len(payments)
         professional = await self.db.get(Professional, sub.professional_id)
         for payment in payments:
             status = str(payment.get("status", "")).upper()
             if status not in _ASAAS_SUCCESS:
                 continue
+            if await recover_subscription_payment_method(self.db, sub, payment):
+                payment_method_updated = True
             payment = {
                 **payment,
                 "checkoutSession": payment.get("checkoutSession")
@@ -267,11 +271,17 @@ class BillingReconciliationService:
                         await self._billing.mark_processed(row.id)
                     applied = True
 
+        if payment_method_updated:
+            await self.db.commit()
         professional = await self.db.get(Professional, sub.professional_id)
         await self.db.refresh(sub)
         return {
-            "applied": applied,
-            "message": "Pagamento reconciliado." if applied else "Nenhum pagamento confirmado encontrado.",
+            "applied": applied or payment_method_updated,
+            "message": (
+                "Pagamento reconciliado." if applied
+                else "Método de pagamento atualizado." if payment_method_updated
+                else "Nenhum pagamento confirmado encontrado."
+            ),
             "payments_checked": payments_checked,
             "subscription_status": sub.status,
             "professional_status": professional.subscription_status if professional else None,

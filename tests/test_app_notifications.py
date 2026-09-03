@@ -21,7 +21,10 @@ from app.core.security import create_access_token
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
+from app.models.admin_audit_log import AdminAuditLog
 from app.models.app_notification import AppNotification, AppNotificationRead
+from app.models.notification_settings import NotificationSettings
+from app.models.patient import Patient
 from app.models.professional import Professional
 from app.schemas.app_notification import AnnouncementCreate, AnnouncementUpdate
 from app.services.notification_service import (
@@ -47,6 +50,9 @@ async def engine():
                     Professional.__table__,
                     AppNotification.__table__,
                     AppNotificationRead.__table__,
+                    NotificationSettings.__table__,
+                    Patient.__table__,
+                    AdminAuditLog.__table__,
                 ],
             )
         )
@@ -76,6 +82,7 @@ async def _make_professional(db, *, email, specialty_key="fono", is_staff=False)
         council="CRFa",
         phone="11999990000",
         is_staff=is_staff,
+        email_verified_at=datetime.now(timezone.utc),
     )
     db.add(pro)
     await db.commit()

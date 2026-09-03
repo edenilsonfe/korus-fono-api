@@ -154,6 +154,31 @@ Se uma tentativa chegou ao provedor ou ficou com resultado ambíguo, ela não é
 reenviada automaticamente; registros que aguardavam uma conexão ativa continuam
 elegíveis sem consumir tentativa.
 
+## Aniversariantes do dia
+
+O dashboard exibe os aniversários pela data corrente em `CLINIC_TIMEZONE`, com nome,
+idade e acesso ao paciente. Cadastros de demonstração e pacientes inativos são excluídos.
+O card permanece visível quando não há aniversariantes.
+
+- **Lembrete no KorusFono:** ativado em Configurações → Notificações, via
+  `GET/PATCH /api/v1/notifications/settings` (`birthdayInAppEnabled`). A consulta
+  do sino gera um único resumo por profissional e dia, válido até a meia-noite
+  da clínica, com estado visto/lido persistido e link para o dashboard.
+- **Parabéns por WhatsApp:** ativado separadamente em WhatsApp → Mensagens,
+  evento `patientBirthday` (`patient_birthday` nos templates e logs). Requer
+  canal habilitado, conexão ativa e consentimento do responsável principal.
+  O template é editável. O worker ARQ verifica a cada 15 minutos e envia entre
+  9h e 18h no fuso da clínica, no máximo uma entrega por paciente/dia.
+- As duas opções começam desativadas. O dashboard independe delas. Nascidos em
+  29/02 são considerados somente em 29/02. Não há envio de aniversários atrasados.
+- A fila persiste antes do envio e revalida cadastro, preferência e consentimento.
+  Uma entrega incerta não é repetida. O novo evento não grava texto personalizado
+  ou resposta bruta do provedor no histórico.
+
+Aplicar a migration `v3w4x5y6z7a8` antes de subir a nova API/worker. O envio
+automático por WhatsApp exige o worker em execução; o lembrete no sino é gerado
+ao consultar a caixa de notificações e não exige o worker.
+
 ## Worker IA (opcional)
 
 ```bash

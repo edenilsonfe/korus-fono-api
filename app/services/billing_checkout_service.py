@@ -23,6 +23,7 @@ from app.services.plan_proration import (
     calculate_monthly_to_yearly_upgrade,
     is_yearly_interval,
 )
+from app.services.subscription_payment_method_service import recover_subscription_payment_method
 
 _PAYMENT_SUCCESS = frozenset({"RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"})
 _PAYMENT_PENDING = frozenset({"PENDING", "OVERDUE", "AWAITING_RISK_ANALYSIS"})
@@ -130,6 +131,8 @@ class BillingCheckoutService:
                         invoice_url = gateway._hosted_checkout_url(checkout)
                 else:
                     payment = await gateway.get_payment(str(payment_id))
+                    if await recover_subscription_payment_method(self.db, sub, payment):
+                        await self.db.commit()
                     raw_status = str(payment.get("status", "")).upper()
                     if raw_status in _PAYMENT_SUCCESS:
                         payment_status = "paid"

@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.billing.asaas_gateway import AsaasPaymentGateway
+from app.billing.payment_methods import payment_method_from_payload
 from app.billing.types import InternalBillingEventType
 from app.billing.webhook_normalizer import NormalizedBillingEvent
 from app.models.billing import BillingEvent, Plan, Subscription
@@ -109,19 +110,6 @@ def _next_period_end(value: datetime, billing_interval: str | None) -> datetime 
     if interval in ("quarterly", "quarter"):
         return _add_months(value, 3)
     return None
-
-
-def _payment_method_from_payload(payload: dict[str, Any]) -> str | None:
-    raw_value = (
-        payload.get("billingType")
-        or payload.get("billing_type")
-        or payload.get("payment_method")
-    )
-    normalized = str(raw_value or "").strip().upper()
-    return {
-        "PIX": "pix",
-        "CREDIT_CARD": "credit_card",
-    }.get(normalized)
 
 
 class SaasBillingService:
@@ -390,7 +378,7 @@ class SaasBillingService:
                 target.external_subscription_id = str(payload["external_subscription_id"])
             if payload.get("external_checkout_id"):
                 target.external_checkout_id = str(payload["external_checkout_id"])
-            payment_method = _payment_method_from_payload(payload)
+            payment_method = payment_method_from_payload(payload)
             if payment_method:
                 target.payment_method = payment_method
 

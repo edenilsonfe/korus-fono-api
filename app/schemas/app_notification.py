@@ -18,6 +18,10 @@ AnnouncementStatus = Literal["draft", "scheduled", "published", "archived"]
 NotificationFilter = Literal["all", "broadcast"]
 
 
+class InAppNotificationSettings(CamelModel):
+    birthday_in_app_enabled: bool = False
+
+
 class NotificationItem(CamelModel):
     """A single inbox row with per-professional seen/read state derived from reads."""
 

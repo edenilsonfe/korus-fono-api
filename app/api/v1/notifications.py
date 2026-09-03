@@ -9,6 +9,7 @@ from app.core.deps import require_verified_professional
 from app.db.session import get_db
 from app.models.professional import Professional
 from app.schemas.app_notification import (
+    InAppNotificationSettings,
     NotificationFilter,
     NotificationItem,
     NotificationPage,
@@ -18,8 +19,30 @@ from app.services.notification_service import (
     NotificationNotVisibleError,
     NotificationService,
 )
+from app.services.notification_settings_service import NotificationSettingsService
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
+
+
+@router.get("/settings", response_model=InAppNotificationSettings)
+async def get_notification_settings(
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    settings = await NotificationSettingsService(db).get_or_create(professional.id)
+    return InAppNotificationSettings(birthday_in_app_enabled=settings.birthday_in_app_enabled)
+
+
+@router.patch("/settings", response_model=InAppNotificationSettings)
+async def update_notification_settings(
+    payload: InAppNotificationSettings,
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    settings = await NotificationSettingsService(db).update(
+        professional.id, **payload.model_dump(exclude_unset=True)
+    )
+    return InAppNotificationSettings(birthday_in_app_enabled=settings.birthday_in_app_enabled)
 
 
 @router.get("", response_model=NotificationPage)

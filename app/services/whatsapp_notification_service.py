@@ -6,7 +6,9 @@ import logging
 import uuid
 from datetime import UTC, date, datetime, time, timedelta
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +16,7 @@ from sqlalchemy.orm import joinedload
 
 from app.constants.whatsapp_events import (
     APPOINTMENT_NOTIFICATION_EVENT_MAP,
+    WHATSAPP_EVENT_BIRTHDAY,
     WHATSAPP_EVENT_REMINDER_24H,
     format_event_message,
     normalize_whatsapp_events,
@@ -330,6 +333,7 @@ class WhatsAppNotificationService:
             select(NotificationMessageLog)
             .where(NotificationMessageLog.id == log_id)
             .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
         )
         log = result.scalar_one_or_none()
         if not log or log.status in _DONE_STATUSES:
@@ -468,6 +472,128 @@ class WhatsAppNotificationService:
         log.failed_at = None
         log.next_retry_at = None
         await self.db.commit()
+        return True
+
+    async def dispatch_birthday_log(self, log_id: UUID, *, now: datetime) -> bool:
+        """Recheck eligibility before claiming a birthday message; never send it late."""
+        now = now.astimezone(ZoneInfo(get_settings().clinic_timezone))
+        if not 9 <= now.hour < 18:
+            return False
+        log = await self.db.get(NotificationMessageLog, log_id, populate_existing=True)
+        if not log or log.notification_type != WHATSAPP_EVENT_BIRTHDAY:
+            return False
+        if log.status in _DONE_STATUSES:
+            return False
+        if log.status == MESSAGE_STATUS_PROCESSING:
+            updated_at = log.updated_at
+            if updated_at and updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=UTC)
+            if updated_at and updated_at < now - timedelta(minutes=5):
+                await self._mark_log_failed(
+                    log,
+                    error_code="delivery_unknown",
+                    last_error="Processamento interrompido; entrega não repetida para evitar duplicidade.",
+                    dispatch_decision={},
+                )
+            return False
+        patient = (
+            await self.db.get(Patient, log.patient_id, populate_existing=True)
+            if log.patient_id
+            else None
+        )
+        if (
+            log.scheduled_date != now.date()
+            or not patient
+            or patient.professional_id != log.professional_id
+            or patient.is_demo
+            or patient.status == "inativo"
+            or patient.birth_date > now.date()
+            or (patient.birth_date.month, patient.birth_date.day)
+            != (now.month, now.day)
+        ):
+            await self._mark_log_skipped(
+                log, reason="birthday_no_longer_eligible", superseded=True
+            )
+            return False
+        settings = await self._get_settings(patient.professional_id)
+        if (
+            not settings
+            or not settings.whatsapp_enabled
+            or not normalize_whatsapp_events(settings.whatsapp_events)[
+                WHATSAPP_EVENT_BIRTHDAY
+            ]
+        ):
+            await self._mark_log_skipped(log, reason="event_disabled")
+            return False
+        provider = get_active_whatsapp_provider(self.db)
+        if not await provider.can_send(patient.professional_id):
+            # Preserve the durable row until the connection returns today.
+            return False
+        phone, opt_in, caregiver_name = await _primary_caregiver_contact(
+            self.db, patient.id
+        )
+        if not opt_in:
+            await self._mark_log_skipped(log, reason="whatsapp_opt_in_missing")
+            return False
+        professional = await self.db.get(Professional, patient.professional_id)
+        if professional is None:
+            await self._mark_log_skipped(
+                log, reason="professional_not_found", superseded=True
+            )
+            return False
+        # Resolve current template and contact before the claim's commit.
+        professional_id = professional.id
+        text = format_event_message(
+            WHATSAPP_EVENT_BIRTHDAY,
+            {
+                "patient_name": patient.name,
+                "caregiver_name": caregiver_name,
+                "professional_name": professional.name,
+                "clinic_name": professional.name,
+            },
+            stored_templates=normalize_whatsapp_message_templates(
+                settings.whatsapp_message_templates
+            ),
+        )
+        decision = {"whatsapp_enabled": True, "patient_birthday": True}
+        log = await self._claim_event_log(log_id)
+        if not log:
+            return False
+        if not phone:
+            await self._mark_log_failed(
+                log,
+                error_code="no_phone",
+                last_error="Responsável sem telefone cadastrado.",
+                dispatch_decision=decision,
+            )
+            return False
+        log.to_phone = mask_phone(phone)
+        await self.db.commit()
+        try:
+            result = await provider.send_text_message(professional_id, phone, text)
+        except Exception as exc:  # noqa: BLE001 - persist a safe delivery outcome without provider details
+            # Do not persist provider error bodies, contact details, or custom text.
+            # The provider reports explicit refusal/pre-send failures as HTTPException.
+            # Unexpected errors may happen after acceptance and must not be retried.
+            unknown = not isinstance(exc, HTTPException)
+            await self._mark_log_failed(
+                log,
+                error_code="delivery_unknown" if unknown else "provider_error",
+                last_error=(
+                    "Entrega incerta; envio não repetido automaticamente."
+                    if unknown
+                    else "Não foi possível enviar a mensagem de aniversário."
+                ),
+                dispatch_decision=decision,
+            )
+            return False
+        await self._mark_log_sent(
+            log,
+            provider=result.provider,
+            provider_message_id=result.provider_message_id,
+            payload=None,
+            dispatch_decision=decision,
+        )
         return True
 
     async def dispatch_event_log(self, log_id: UUID) -> bool:
