@@ -17,6 +17,7 @@ from app.core.security import decode_token
 from app.db.session import get_db
 from app.models.patient import Patient
 from app.models.professional import Professional
+from app.services.temporary_access import signup_payment_blocks_access
 
 bearer_scheme = HTTPBearer(auto_error=False)
 PAYMENT_REQUIRED_DETAIL = (
@@ -108,7 +109,7 @@ async def get_optional_professional(
 async def require_verified_professional(
     professional: Professional = Depends(get_current_professional),
 ) -> Professional:
-    if professional.signup_payment_required:
+    if signup_payment_blocks_access(professional):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=PAYMENT_REQUIRED_DETAIL,

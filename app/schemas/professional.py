@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 
 from pydantic import EmailStr, Field, field_validator
 
@@ -27,6 +28,7 @@ class ProfessionalResponse(CamelModel):
     admin_permissions: list[str] = Field(default_factory=list)
     email_verified: bool = False
     signup_payment_required: bool = False
+    temporary_access_ends_at: datetime | None = None
 
 
 class ProfessionalUpdate(CamelModel):

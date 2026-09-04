@@ -26,6 +26,7 @@ from app.schemas.admin_professional import (
     AdminWhatsAppSummary,
 )
 from app.services.admin_audit_service import AdminAuditService
+from app.services.temporary_access import has_temporary_access
 
 ALLOWED_SUBSCRIPTION_STATUSES = frozenset(
     {"trialing", "active", "trial_expired", "past_due", "canceled"}
@@ -228,6 +229,10 @@ class AdminProfessionalService:
             subscription_status=pro.subscription_status,
             trial_started_at=pro.trial_started_at,
             trial_ends_at=pro.trial_ends_at,
+            signup_payment_required=pro.signup_payment_required,
+            email_verified=pro.email_verified_at is not None,
+            temporary_access_ends_at=pro.temporary_access_ends_at,
+            temporary_access_active=has_temporary_access(pro),
             created_at=pro.created_at,
             updated_at=pro.updated_at,
             plan=plan,
@@ -335,6 +340,76 @@ class AdminProfessionalService:
         )
         await self.db.commit()
         return await self.get_detail(pro.id)
+
+    async def grant_temporary_access(
+        self, *, actor: Professional, professional_id: UUID, days: int, reason: str
+    ) -> AdminProfessionalDetail:
+        pro = await self._lock_temporary_access_target(professional_id)
+        if pro.is_disabled or pro.is_staff:
+            raise AdminConflictError("A liberação exige uma conta de cliente habilitada")
+        if has_temporary_access(pro):
+            raise AdminConflictError("A conta já possui acesso temporário. Revogue antes de definir outro prazo")
+        now = datetime.now(UTC)
+        trial_end = pro.trial_ends_at
+        if trial_end and trial_end.tzinfo is None:
+            trial_end = trial_end.replace(tzinfo=UTC)
+        if not pro.signup_payment_required and (
+            pro.subscription_status == "active"
+            or (pro.subscription_status == "trialing" and (trial_end is None or trial_end > now))
+        ):
+            raise AdminConflictError("A conta já possui acesso pelo plano ou período de teste")
+        if not 1 <= days <= 7 or not 5 <= len(reason.strip()) <= 500:
+            raise AdminConflictError("Informe de 1 a 7 dias e um motivo de 5 a 500 caracteres")
+        before = pro.temporary_access_ends_at
+        pro.temporary_access_ends_at = now + timedelta(days=days)
+        await self.audit.log(
+            actor=actor,
+            target_professional_id=pro.id,
+            action="grant_temporary_access",
+            payload={
+                "reason": reason.strip(),
+                "days": days,
+                "temporary_access_ends_at_before": before.isoformat() if before else None,
+                "temporary_access_ends_at_after": pro.temporary_access_ends_at.isoformat(),
+                "subscription_status": pro.subscription_status,
+                "signup_payment_required": pro.signup_payment_required,
+            },
+        )
+        await self.db.commit()
+        return await self.get_detail(pro.id)
+
+    async def revoke_temporary_access(
+        self, *, actor: Professional, professional_id: UUID, reason: str
+    ) -> AdminProfessionalDetail:
+        pro = await self._lock_temporary_access_target(professional_id)
+        before = pro.temporary_access_ends_at
+        if before is not None:
+            pro.temporary_access_ends_at = None
+            await self.audit.log(
+                actor=actor,
+                target_professional_id=pro.id,
+                action="revoke_temporary_access",
+                payload={
+                    "reason": reason.strip(),
+                    "temporary_access_ends_at_before": before.isoformat(),
+                    "temporary_access_ends_at_after": None,
+                },
+            )
+        await self.db.commit()
+        return await self.get_detail(pro.id)
+
+    async def _lock_temporary_access_target(self, professional_id: UUID) -> Professional:
+        pro = (
+            await self.db.execute(
+                select(Professional)
+                .where(Professional.id == professional_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if pro is None:
+            raise AdminNotFoundError()
+        return pro
 
     async def set_subscription_status(
         self, *, actor: Professional, professional_id: UUID, status: str, reason: str | None

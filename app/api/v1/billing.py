@@ -314,6 +314,7 @@ async def get_billing_me(
         trial_ends_at=_iso(professional.trial_ends_at),
         can_write=can_write,
         signup_payment_required=professional.signup_payment_required,
+        temporary_access_ends_at=_iso(professional.temporary_access_ends_at),
         checkout_session_id=(
             str(sub.checkout_session_id)
             if professional.signup_payment_required and sub and sub.checkout_session_id

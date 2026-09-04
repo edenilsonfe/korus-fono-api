@@ -36,6 +36,7 @@ def _to_response(p: Professional) -> ProfessionalResponse:
         admin_permissions=admin_permissions_for(p),
         email_verified=p.email_verified_at is not None,
         signup_payment_required=p.signup_payment_required,
+        temporary_access_ends_at=p.temporary_access_ends_at,
     )
 
 

@@ -23,6 +23,7 @@ from app.core.security import (
 from app.db.session import get_db
 from app.core.specialty_catalog import specialty_label
 from app.models.professional import Professional
+from app.services.temporary_access import signup_payment_blocks_access
 from app.schemas.auth import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
@@ -343,7 +344,7 @@ async def login(
     if professional.is_disabled:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Conta desativada")
     access_token, refresh_token = await _issue_tokens(db, professional)
-    if professional.email_verified_at is None and not professional.signup_payment_required:
+    if professional.email_verified_at is None and not signup_payment_blocks_access(professional):
         raw_token = await request_email_verification(db, professional, force=False)
         if raw_token is not None:
             background_tasks.add_task(
@@ -456,7 +457,7 @@ async def resend_verification(
     professional: Professional = Depends(get_current_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    if professional.signup_payment_required:
+    if signup_payment_blocks_access(professional):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=PAYMENT_REQUIRED_DETAIL,

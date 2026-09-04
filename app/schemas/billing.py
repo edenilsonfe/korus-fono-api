@@ -184,6 +184,7 @@ class BillingMeResponse(CamelModel):
     trial_ends_at: str | None = None
     can_write: bool
     signup_payment_required: bool = False
+    temporary_access_ends_at: str | None = None
     checkout_session_id: str | None = None
     subscription: SubscriptionSummary | None = None
 

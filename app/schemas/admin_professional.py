@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from app.schemas.admin_operations import AdminRole
 from app.schemas.common import CamelModel, PaginatedResponse
@@ -65,6 +65,10 @@ class AdminProfessionalDetail(CamelModel):
     subscription_status: str
     trial_started_at: datetime | None = None
     trial_ends_at: datetime | None = None
+    signup_payment_required: bool = False
+    email_verified: bool = False
+    temporary_access_ends_at: datetime | None = None
+    temporary_access_active: bool = False
     created_at: datetime
     updated_at: datetime
     plan: AdminPlanSummary | None = None
@@ -92,6 +96,19 @@ class AdminReasonBody(CamelModel):
 class ExtendTrialBody(CamelModel):
     days: int = Field(default=7, ge=1, le=365)
     reason: str = Field(min_length=5, max_length=500)
+
+
+class TemporaryAccessReasonBody(CamelModel):
+    reason: str = Field(min_length=5, max_length=500)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def trim_reason(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+class GrantTemporaryAccessBody(TemporaryAccessReasonBody):
+    days: int = Field(default=2, ge=1, le=7, strict=True)
 
 
 class SetStaffBody(CamelModel):

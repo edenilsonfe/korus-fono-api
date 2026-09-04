@@ -10,6 +10,7 @@ from sqlalchemy.orm import joinedload
 from app.models.billing import Subscription
 from app.models.professional import Professional
 from app.services.plan_proration import is_yearly_interval
+from app.services.temporary_access import has_temporary_access
 
 
 class EntitlementService:
@@ -19,11 +20,19 @@ class EntitlementService:
     async def can_write(self, professional: Professional) -> bool:
         now = datetime.now(UTC)
 
+        if professional.is_disabled:
+            return False
+        if has_temporary_access(professional, now=now):
+            return True
+
         if professional.signup_payment_required:
             return False
 
         if professional.subscription_status == "trialing":
-            if professional.trial_ends_at and now > professional.trial_ends_at:
+            trial_end = professional.trial_ends_at
+            if trial_end and trial_end.tzinfo is None:
+                trial_end = trial_end.replace(tzinfo=UTC)
+            if trial_end and now > trial_end:
                 professional.subscription_status = "trial_expired"
                 await self.db.commit()
                 return False

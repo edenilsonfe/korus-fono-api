@@ -1,6 +1,6 @@
 """Guards against recurring Asaas invoices before the first confirmed payment."""
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -314,6 +314,9 @@ async def test_confirmed_payment_reactivates_suspended_monthly_subscription(
         name="Paid After Suspension",
         subscription_status="trial_expired",
         trial_ends_at=datetime(2026, 8, 18, tzinfo=UTC),
+        signup_payment_required=True,
+        email_verified_at=datetime.now(UTC),
+        temporary_access_ends_at=datetime.now(UTC) + timedelta(days=2),
     )
     db_session.add_all([plan, professional])
     await db_session.flush()
@@ -376,3 +379,5 @@ async def test_confirmed_payment_reactivates_suspended_monthly_subscription(
     await db_session.refresh(professional)
     assert subscription.status == "active"
     assert professional.subscription_status == "active"
+    assert professional.signup_payment_required is False
+    assert professional.temporary_access_ends_at is None

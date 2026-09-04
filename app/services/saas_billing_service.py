@@ -435,6 +435,7 @@ class SaasBillingService:
                             and professional.email_verified_at is None
                         )
                         professional.signup_payment_required = False
+                        professional.temporary_access_ends_at = None
                 else:
                     professional.subscription_status = _SUBSCRIPTION_TO_PROFESSIONAL.get(
                         sub_status, professional.subscription_status

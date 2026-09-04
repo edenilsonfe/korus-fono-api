@@ -20,6 +20,8 @@ from app.schemas.admin_professional import (
     AdminProfessionalsPage,
     AdminReasonBody,
     ExtendTrialBody,
+    GrantTemporaryAccessBody,
+    TemporaryAccessReasonBody,
     SetStaffBody,
     SetSubscriptionStatusBody,
 )
@@ -94,6 +96,40 @@ async def extend_trial(
         )
     except AdminNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conta não encontrada") from exc
+
+
+@router.post("/professionals/{professional_id}/temporary-access", response_model=AdminProfessionalDetail)
+async def grant_temporary_access(
+    professional_id: UUID,
+    body: GrantTemporaryAccessBody,
+    actor: Professional = Depends(require_admin_permission(PERMISSION_BILLING_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await _service(db).grant_temporary_access(
+            actor=actor, professional_id=professional_id, days=body.days, reason=body.reason
+        )
+    except AdminNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Conta não encontrada") from exc
+    except AdminConflictError as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
+
+
+@router.post(
+    "/professionals/{professional_id}/temporary-access/revoke", response_model=AdminProfessionalDetail
+)
+async def revoke_temporary_access(
+    professional_id: UUID,
+    body: TemporaryAccessReasonBody,
+    actor: Professional = Depends(require_admin_permission(PERMISSION_BILLING_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await _service(db).revoke_temporary_access(
+            actor=actor, professional_id=professional_id, reason=body.reason
+        )
+    except AdminNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Conta não encontrada") from exc
 
 
 @router.patch("/professionals/{professional_id}/staff", response_model=AdminProfessionalDetail)
