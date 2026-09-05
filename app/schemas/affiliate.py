@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import EmailStr, Field, field_validator
@@ -41,6 +42,14 @@ class AffiliateRewardSummary(CamelModel):
 
 
 class AffiliateDashboardResponse(CamelModel):
+    referral_discount_bps: int = 0
+    customer_reward_monthly_cents: int = 0
+    customer_reward_quarterly_cents: int = 0
+    customer_reward_yearly_cents: int = 0
+    cooling_off_days: int = 14
+    terms_acceptance_required: bool = True
+    payout_minimum_cents: int = 10000
+    cash_enabled: bool = False
     eligible: bool
     terms_version: str
     participant: AffiliateParticipantSummary | None = None
@@ -61,9 +70,10 @@ class AffiliateOptInResponse(CamelModel):
 
 
 class PublicAffiliateCodeResponse(CamelModel):
+    attribution_token: str
     code: str
     mode: str
-    benefit_percent: int
+    benefit_percent: float
     public_name: str | None = None
     expires_in_days: int
 
@@ -217,7 +227,8 @@ class AffiliateFiscalProfileItem(CamelModel):
 
 
 class AffiliatePayoutRequestBody(CamelModel):
-    amount_cents: int = Field(ge=10000)
+    amount_cents: int = Field(gt=0)
+    request_id: str | None = Field(None, min_length=8, max_length=64)
 
 
 class AffiliatePayoutItem(CamelModel):
@@ -257,6 +268,11 @@ class AdminAffiliateTransferBody(CamelModel):
     provider_transfer_id: str = Field(min_length=3, max_length=255)
 
 
+class AdminAffiliatePayoutCancelBody(CamelModel):
+    reason: str = Field(min_length=3, max_length=500)
+    provider_not_sent: Literal[True]
+
+
 class AffiliatePortalLinkRequest(CamelModel):
     email: EmailStr
 
@@ -274,6 +290,10 @@ class AffiliatePortalSession(CamelModel):
 
 
 class AffiliatePortalDashboard(CamelModel):
+    commission_bps: int = 0
+    referral_discount_bps: int = 0
+    payout_minimum_cents: int = 10000
+    cash_enabled: bool = False
     participant: AffiliateParticipantSummary
     code: str | None = None
     balances: AffiliateBalances

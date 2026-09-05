@@ -19,10 +19,13 @@ from app.models.affiliate import (
     AffiliateParticipant,
     AffiliatePayoutBatch,
     AffiliatePayoutRequest,
+    AffiliatePolicy,
     AffiliateReferral,
 )
 from app.models.billing import Subscription
 from app.models.professional import Professional
+from app.schemas.billing import _is_valid_cnpj, _is_valid_cpf
+from app.services.affiliate_accounting import lock_participant
 from app.services.affiliate_notification_service import AffiliateNotificationService
 
 
@@ -131,19 +134,30 @@ class AffiliatePayoutService:
     async def _refresh_batch_status(self, batch_id: UUID | None) -> None:
         if batch_id is None:
             return
-        batch = await self.db.get(AffiliatePayoutBatch, batch_id)
+        batch = await self.db.scalar(
+            select(AffiliatePayoutBatch)
+            .where(AffiliatePayoutBatch.id == batch_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         if batch is None:
             return
         statuses = (
-            await self.db.execute(
-                select(AffiliatePayoutRequest.status).where(
-                    AffiliatePayoutRequest.batch_id == batch_id
+            (
+                await self.db.execute(
+                    select(AffiliatePayoutRequest.status).where(
+                        AffiliatePayoutRequest.batch_id == batch_id
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         if statuses and all(status == "paid" for status in statuses):
             batch.status = "paid"
-        elif statuses and all(status in {"paid", "failed"} for status in statuses):
+        elif statuses and all(
+            status in {"paid", "failed", "canceled"} for status in statuses
+        ):
             batch.status = "failed"
         elif any(status == "processing" for status in statuses):
             batch.status = "processing"
@@ -158,21 +172,31 @@ class AffiliatePayoutService:
         pix_key_type: str,
         pix_key: str,
     ) -> AffiliateFiscalProfile:
+        participant = await lock_participant(self.db, participant.id)
+        if participant is None or participant.status != "active":
+            raise AffiliatePayoutForbiddenError("Participante não está ativo")
         if person_type not in {"pf", "pj"}:
             raise AffiliatePayoutConflictError("Tipo de pessoa inválido")
         normalized_document = _digits(document)
         expected = 11 if person_type == "pf" else 14
-        if len(normalized_document) != expected:
+        validator = _is_valid_cpf if person_type == "pf" else _is_valid_cnpj
+        if len(normalized_document) != expected or not validator(normalized_document):
             raise AffiliatePayoutConflictError("Documento fiscal inválido")
         normalized_pix_type = pix_key_type.strip().lower()
+        if normalized_pix_type == "random":  # Existing portal clients used this label.
+            normalized_pix_type = "evp"
+        if normalized_pix_type not in {"cpf", "cnpj", "email", "phone", "evp"}:
+            raise AffiliatePayoutConflictError("Tipo de chave Pix inválido")
         normalized_pix = (
-            _digits(pix_key) if normalized_pix_type in {"cpf", "cnpj"} else pix_key.strip()
+            _digits(pix_key)
+            if normalized_pix_type in {"cpf", "cnpj"}
+            else pix_key.strip()
         )
         if not normalized_pix:
             raise AffiliatePayoutConflictError("Chave Pix obrigatória")
-        if normalized_pix_type == "cpf" and len(normalized_pix) != 11:
+        if normalized_pix_type == "cpf" and not _is_valid_cpf(normalized_pix):
             raise AffiliatePayoutConflictError("Chave Pix CPF inválida")
-        if normalized_pix_type == "cnpj" and len(normalized_pix) != 14:
+        if normalized_pix_type == "cnpj" and not _is_valid_cnpj(normalized_pix):
             raise AffiliatePayoutConflictError("Chave Pix CNPJ inválida")
         referred_documents = await self._referred_billing_documents(participant.id)
         if normalized_document in referred_documents or (
@@ -183,12 +207,16 @@ class AffiliatePayoutService:
                 "Autoindicação detectada pelo documento fiscal ou titular da chave Pix"
             )
         current = (
-            await self.db.execute(
-                select(AffiliateFiscalProfile)
-                .where(AffiliateFiscalProfile.participant_id == participant.id)
-                .order_by(AffiliateFiscalProfile.version.desc())
+            (
+                await self.db.execute(
+                    select(AffiliateFiscalProfile)
+                    .where(AffiliateFiscalProfile.participant_id == participant.id)
+                    .order_by(AffiliateFiscalProfile.version.desc())
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if current is not None:
             current.status = "superseded"
         version = (current.version if current else 0) + 1
@@ -219,6 +247,15 @@ class AffiliatePayoutService:
         profile = await self.db.get(AffiliateFiscalProfile, profile_id)
         if profile is None:
             raise AffiliatePayoutNotFoundError("Perfil fiscal não encontrado")
+        await lock_participant(self.db, profile.participant_id)
+        await self.db.refresh(profile)
+        latest = await self.db.scalar(
+            select(func.max(AffiliateFiscalProfile.version)).where(
+                AffiliateFiscalProfile.participant_id == profile.participant_id
+            )
+        )
+        if profile.version != latest or profile.status not in {"pending", "approved"}:
+            raise AffiliatePayoutConflictError("Aprove somente o perfil fiscal vigente")
         if not pix_validated:
             raise AffiliatePayoutConflictError("Valide a titularidade da chave Pix")
         profile.status = "approved"
@@ -230,18 +267,31 @@ class AffiliatePayoutService:
 
     async def _approved_profile(self, participant_id: UUID) -> AffiliateFiscalProfile:
         profile = (
-            await self.db.execute(
-                select(AffiliateFiscalProfile)
-                .where(
-                    AffiliateFiscalProfile.participant_id == participant_id,
-                    AffiliateFiscalProfile.status == "approved",
+            (
+                await self.db.execute(
+                    select(AffiliateFiscalProfile)
+                    .where(
+                        AffiliateFiscalProfile.participant_id == participant_id,
+                        AffiliateFiscalProfile.status == "approved",
+                    )
+                    .order_by(AffiliateFiscalProfile.version.desc())
                 )
-                .order_by(AffiliateFiscalProfile.version.desc())
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if profile is None or profile.pix_validated_at is None:
             raise AffiliatePayoutForbiddenError(
                 "Complete e aprove o perfil fiscal antes de sacar"
+            )
+        latest = await self.db.scalar(
+            select(func.max(AffiliateFiscalProfile.version)).where(
+                AffiliateFiscalProfile.participant_id == participant_id
+            )
+        )
+        if profile.version != latest:
+            raise AffiliatePayoutForbiddenError(
+                "O perfil fiscal vigente precisa ser aprovado"
             )
         lock_until = profile.withdrawal_locked_until
         if lock_until and _as_utc(lock_until) > datetime.now(UTC):
@@ -268,6 +318,92 @@ class AffiliatePayoutService:
         )
         return int(value or 0)
 
+    async def minimum_payout(self, participant: AffiliateParticipant | None) -> int:
+        modes = (
+            ["customer"] if participant is None or participant.customer_enabled else []
+        ) + (["partner"] if participant and participant.partner_enabled else [])
+        minimum = await self.db.scalar(
+            select(func.max(AffiliatePolicy.payout_minimum_cents)).where(
+                AffiliatePolicy.mode.in_(modes),
+                AffiliatePolicy.status == "active",
+                AffiliatePolicy.effective_at <= datetime.now(UTC),
+            )
+        )
+        return 10000 if minimum is None else minimum
+
+    async def _validate_payout(self, payout: AffiliatePayoutRequest) -> None:
+        participant = await lock_participant(self.db, payout.participant_id)
+        if not participant or participant.status != "active":
+            raise AffiliatePayoutConflictError("Participante suspenso ou inativo")
+        if await self._available(participant.id) < 0:
+            raise AffiliatePayoutConflictError(
+                "Concilie o saldo negativo antes de pagar"
+            )
+        try:
+            profile = await self._approved_profile(participant.id)
+        except AffiliatePayoutForbiddenError as exc:
+            raise AffiliatePayoutConflictError(exc.detail) from exc
+        if profile.id != payout.fiscal_profile_id:
+            raise AffiliatePayoutConflictError(
+                "O perfil fiscal mudou; cancele e solicite novo saque"
+            )
+
+    async def verify_transfer(self, *, payout_id: UUID, transfer: dict) -> None:
+        """Validate a GET from Asaas; never trust an operator-supplied id alone."""
+        from app.services.affiliate_billing_service import cents
+
+        payout = await self.db.get(AffiliatePayoutRequest, payout_id)
+        if payout is None:
+            raise AffiliatePayoutNotFoundError("Saque não encontrado")
+        profile = await self.db.get(AffiliateFiscalProfile, payout.fiscal_profile_id)
+        bank_account = transfer.get("bankAccount") or {}
+        key = str(
+            bank_account.get("pixAddressKey") or transfer.get("pixAddressKey") or ""
+        ).strip()
+        if profile and profile.pix_key_type in {"cpf", "cnpj"}:
+            key = _digits(key)
+        if (
+            not profile
+            or not key
+            or _fingerprint(key.lower()) != profile.pix_key_fingerprint
+        ):
+            raise AffiliatePayoutConflictError(
+                "A chave Pix da transferência não corresponde ao saque"
+            )
+        if cents(transfer.get("value")) != payout.net_cents:
+            raise AffiliatePayoutConflictError(
+                "O valor da transferência não corresponde ao saque"
+            )
+        if str(transfer.get("externalReference") or "") != str(payout.id):
+            raise AffiliatePayoutConflictError(
+                "A referência externa da transferência deve ser o ID do saque"
+            )
+
+    async def reconcile_transfer(self, *, payout_id: UUID, provider_transfer_id: str):
+        from app.billing.asaas_gateway import AsaasPaymentGateway
+
+        transfer = await AsaasPaymentGateway().get_transfer(provider_transfer_id)
+        if str(transfer.get("id")) != provider_transfer_id:
+            raise AffiliatePayoutConflictError(
+                "Identificador de transferência divergente"
+            )
+        await self.verify_transfer(payout_id=payout_id, transfer=transfer)
+        status = str(transfer.get("status") or "").upper()
+        payout = await self.mark_transfer_processing(
+            payout_id=payout_id,
+            provider_transfer_id=provider_transfer_id,
+            verified_terminal_fact=status in {"DONE", "FAILED", "CANCELLED"},
+        )
+        if status in {"DONE", "FAILED", "CANCELLED"}:
+            return await self.complete_transfer(
+                provider_transfer_id=provider_transfer_id,
+                succeeded=status == "DONE",
+                failure_reason="Transferência não concluída pelo provedor"
+                if status != "DONE"
+                else None,
+            )
+        return payout
+
     async def request_cash_payout(
         self,
         *,
@@ -275,13 +411,33 @@ class AffiliatePayoutService:
         amount_cents: int,
         cash_enabled: bool,
         withholding_cents: int = 0,
+        request_id: str | None = None,
     ) -> AffiliatePayoutRequest:
         if not cash_enabled:
-            raise AffiliatePayoutForbiddenError("Saques em dinheiro ainda não estão disponíveis")
-        if participant.status != "active":
+            raise AffiliatePayoutForbiddenError(
+                "Saques em dinheiro ainda não estão disponíveis"
+            )
+        participant = await lock_participant(self.db, participant.id)
+        if participant is None or participant.status != "active":
             raise AffiliatePayoutForbiddenError("Participante não está ativo")
-        if amount_cents < 10000:
-            raise AffiliatePayoutForbiddenError("O saque mínimo bruto é de R$ 100")
+        if request_id:
+            prior = await self.db.scalar(
+                select(AffiliatePayoutRequest).where(
+                    AffiliatePayoutRequest.participant_id == participant.id,
+                    AffiliatePayoutRequest.request_id == request_id,
+                )
+            )
+            if prior:
+                if prior.gross_cents != amount_cents:
+                    raise AffiliatePayoutConflictError(
+                        "Identificador já utilizado com outro valor"
+                    )
+                return prior
+        minimum = await self.minimum_payout(participant)
+        if amount_cents <= 0 or amount_cents < minimum:
+            raise AffiliatePayoutForbiddenError(
+                f"O saque mínimo bruto é de R$ {minimum / 100:g}"
+            )
         available = await self._available(participant.id)
         if available < 0 or amount_cents > available:
             raise AffiliatePayoutForbiddenError("Saldo disponível insuficiente")
@@ -292,6 +448,7 @@ class AffiliatePayoutService:
         payout = AffiliatePayoutRequest(
             participant_id=participant.id,
             fiscal_profile_id=profile.id,
+            request_id=request_id,
             status="requested",
             gross_cents=amount_cents,
             withholding_cents=withholding_cents,
@@ -326,14 +483,36 @@ class AffiliatePayoutService:
         return payout
 
     async def cancel_payout(
-        self, *, payout_id: UUID, participant_id: UUID, now: datetime | None = None
+        self,
+        *,
+        payout_id: UUID,
+        participant_id: UUID,
+        now: datetime | None = None,
+        admin_override: bool = False,
     ) -> AffiliatePayoutRequest:
         payout = await self.db.get(AffiliatePayoutRequest, payout_id)
         if payout is None or payout.participant_id != participant_id:
             raise AffiliatePayoutNotFoundError("Solicitação de saque não encontrada")
+        await lock_participant(self.db, participant_id)
+        await self.db.refresh(payout)
+        if payout.status == "canceled":
+            return payout
         current = now or datetime.now(UTC)
-        if payout.status != "requested" or _as_utc(payout.cancellable_until) <= _as_utc(current):
-            raise AffiliatePayoutConflictError("O prazo para cancelar este saque terminou")
+        permitted = (
+            (
+                payout.status in {"requested", "batched", "approved"}
+                and not payout.provider_transfer_id
+            )
+            if admin_override
+            else (
+                payout.status == "requested"
+                and _as_utc(payout.cancellable_until) > _as_utc(current)
+            )
+        )
+        if not permitted:
+            raise AffiliatePayoutConflictError(
+                "O prazo para cancelar este saque terminou"
+            )
         payout.status = "canceled"
         self.db.add_all(
             [
@@ -356,21 +535,38 @@ class AffiliatePayoutService:
             ]
         )
         await self.db.flush()
+        await self._refresh_batch_status(payout.batch_id)
         return payout
 
     async def create_weekly_batch(
         self, *, actor: Professional, now: datetime
     ) -> AffiliatePayoutBatch:
         eligible = (
-            await self.db.execute(
-                select(AffiliatePayoutRequest).where(
-                    AffiliatePayoutRequest.status == "requested",
-                    AffiliatePayoutRequest.cancellable_until <= now,
+            (
+                await self.db.execute(
+                    select(AffiliatePayoutRequest).where(
+                        AffiliatePayoutRequest.status == "requested",
+                        AffiliatePayoutRequest.cancellable_until <= now,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         if not eligible:
             raise AffiliatePayoutConflictError("Nenhum saque elegível para o lote")
+        # Consistent participant lock ordering across batches and approvals.
+        for participant_id in sorted({row.participant_id for row in eligible}, key=str):
+            await lock_participant(self.db, participant_id)
+        selected = []
+        for payout in eligible:
+            await self.db.refresh(payout)
+            if payout.status == "requested":
+                selected.append(payout)
+        if not selected:
+            raise AffiliatePayoutConflictError(
+                "Os saques já foram incluídos em outro lote"
+            )
         try:
             sao_paulo = ZoneInfo("America/Sao_Paulo")
         except ZoneInfoNotFoundError:
@@ -384,7 +580,7 @@ class AffiliatePayoutService:
         )
         self.db.add(batch)
         await self.db.flush()
-        for payout in eligible:
+        for payout in selected:
             payout.status = "batched"
             payout.batch_id = batch.id
         await self.db.flush()
@@ -404,27 +600,70 @@ class AffiliatePayoutService:
             raise AffiliatePayoutConflictError("Lote não está aguardando aprovação")
         if batch.prepared_by_id == actor.id and not allow_single_operator:
             raise AffiliatePayoutConflictError("A aprovação exige uma segunda pessoa")
+        payouts = (
+            (
+                await self.db.execute(
+                    select(AffiliatePayoutRequest).where(
+                        AffiliatePayoutRequest.batch_id == batch.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for participant_id in sorted({row.participant_id for row in payouts}, key=str):
+            await lock_participant(self.db, participant_id)
+        await self.db.refresh(batch)
+        if batch.status != "draft":
+            raise AffiliatePayoutConflictError("Lote não está aguardando aprovação")
+        for payout in payouts:
+            await self.db.refresh(payout)
+            if payout.status == "canceled":
+                continue
+            if payout.status != "batched":
+                raise AffiliatePayoutConflictError(
+                    "O lote contém um saque que não pode ser aprovado"
+                )
+            await self._validate_payout(payout)
         batch.status = "approved"
         batch.approved_by_id = actor.id
         batch.approved_at = datetime.now(UTC)
-        payouts = (
-            await self.db.execute(
-                select(AffiliatePayoutRequest).where(
-                    AffiliatePayoutRequest.batch_id == batch.id
-                )
-            )
-        ).scalars().all()
         for payout in payouts:
-            payout.status = "approved"
+            if payout.status == "batched":
+                payout.status = "approved"
         await self.db.flush()
         return batch
 
     async def mark_transfer_processing(
-        self, *, payout_id: UUID, provider_transfer_id: str
+        self,
+        *,
+        payout_id: UUID,
+        provider_transfer_id: str,
+        verified_terminal_fact: bool = False,
     ) -> AffiliatePayoutRequest:
         payout = await self.db.get(AffiliatePayoutRequest, payout_id)
         if payout is None:
             raise AffiliatePayoutNotFoundError("Saque não encontrado")
+        await lock_participant(self.db, payout.participant_id)
+        await self.db.refresh(payout)
+        if (
+            payout.provider_transfer_id == provider_transfer_id.strip()
+            and payout.status in {"processing", "paid", "failed"}
+        ):
+            return payout
+        if not verified_terminal_fact:
+            await self._validate_payout(payout)
+        duplicate = await self.db.scalar(
+            select(AffiliatePayoutRequest.id).where(
+                AffiliatePayoutRequest.provider_transfer_id
+                == provider_transfer_id.strip(),
+                AffiliatePayoutRequest.id != payout.id,
+            )
+        )
+        if duplicate:
+            raise AffiliatePayoutConflictError(
+                "Transferência já vinculada a outro saque"
+            )
         if payout.status != "approved":
             raise AffiliatePayoutConflictError("Saque não está aprovado")
         payout.status = "processing"
@@ -434,7 +673,11 @@ class AffiliatePayoutService:
         return payout
 
     async def complete_transfer(
-        self, *, provider_transfer_id: str, succeeded: bool, failure_reason: str | None = None
+        self,
+        *,
+        provider_transfer_id: str,
+        succeeded: bool,
+        failure_reason: str | None = None,
     ) -> AffiliatePayoutRequest | None:
         payout = (
             await self.db.execute(
@@ -445,6 +688,12 @@ class AffiliatePayoutService:
         ).scalar_one_or_none()
         if payout is None or payout.status in {"paid", "failed"}:
             return payout
+        await lock_participant(self.db, payout.participant_id)
+        await self.db.refresh(payout)
+        if payout.status in {"paid", "failed"}:
+            return payout
+        if payout.status != "processing":
+            raise AffiliatePayoutConflictError("Saque não está em processamento")
         payout.processed_at = datetime.now(UTC)
         if succeeded:
             payout.status = "paid"

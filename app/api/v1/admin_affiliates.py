@@ -4,51 +4,54 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.billing.errors import PaymentGatewayConfigError, PaymentGatewayError
 from app.core.admin_permissions import (
     PERMISSION_AFFILIATES_PAYOUT,
     PERMISSION_AFFILIATES_READ,
     PERMISSION_AFFILIATES_WRITE,
 )
+from app.core.config import get_settings
 from app.core.deps import require_admin_permission
 from app.db.session import get_db
 from app.models.affiliate import (
     AffiliateFiscalProfile,
     AffiliateLedgerEntry,
-    AffiliateParticipant,
+    AffiliatePayoutBatch,
+    AffiliatePayoutRequest,
     AffiliatePolicy,
     AffiliateReferral,
     AffiliateReward,
-    AffiliatePayoutBatch,
-    AffiliatePayoutRequest,
 )
 from app.models.professional import Professional
 from app.schemas.affiliate import (
     AdminAffiliateCorrectionBody,
     AdminAffiliateCorrectionResult,
+    AdminAffiliateFiscalApprovalBody,
     AdminAffiliateOverview,
     AdminAffiliateParticipantItem,
     AdminAffiliateParticipantStatusBody,
     AdminAffiliatePartnerInvite,
+    AdminAffiliatePayoutCancelBody,
     AdminAffiliatePolicyCreate,
     AdminAffiliatePolicyItem,
     AdminAffiliateReviewBody,
-    AffiliateReferralSummary,
-    AffiliateRewardSummary,
+    AdminAffiliateTransferBody,
     AffiliateFiscalProfileItem,
     AffiliatePayoutBatchItem,
     AffiliatePayoutItem,
-    AdminAffiliateFiscalApprovalBody,
-    AdminAffiliateTransferBody,
+    AffiliateReferralSummary,
+    AffiliateRewardSummary,
 )
-from app.core.config import get_settings
+from app.services.admin_audit_service import AdminAuditService
+from app.services.affiliate_accounting import lock_participant
 from app.services.affiliate_payout_service import (
     AffiliatePayoutConflictError,
     AffiliatePayoutNotFoundError,
     AffiliatePayoutService,
 )
-from app.services.admin_audit_service import AdminAuditService
 from app.services.affiliate_service import (
     AffiliateConflictError,
+    AffiliateForbiddenError,
     AffiliateNotFoundError,
     AffiliateService,
 )
@@ -70,12 +73,16 @@ async def list_affiliate_policies(
     db: AsyncSession = Depends(get_db),
 ):
     return (
-        await db.execute(
-            select(AffiliatePolicy).order_by(
-                AffiliatePolicy.mode, AffiliatePolicy.version.desc()
+        (
+            await db.execute(
+                select(AffiliatePolicy).order_by(
+                    AffiliatePolicy.mode, AffiliatePolicy.version.desc()
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
 
 @router.post(
@@ -85,18 +92,27 @@ async def list_affiliate_policies(
 )
 async def create_affiliate_policy(
     body: AdminAffiliatePolicyCreate,
-    actor: Professional = Depends(require_admin_permission(PERMISSION_AFFILIATES_WRITE)),
+    actor: Professional = Depends(
+        require_admin_permission(PERMISSION_AFFILIATES_WRITE)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
-    policy = await AffiliateService(db).create_policy(
-        actor=actor,
-        values=body.model_dump(exclude={"activate"}),
-        activate=body.activate,
-    )
+    try:
+        policy = await AffiliateService(db).create_policy(
+            actor=actor,
+            values=body.model_dump(exclude={"activate"}),
+            activate=body.activate,
+        )
+    except (AffiliateConflictError, AffiliateForbiddenError) as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
     await AdminAuditService(db).log(
         actor=actor,
         action="affiliate.policy.created",
-        payload={"policyId": str(policy.id), "mode": policy.mode, "version": policy.version},
+        payload={
+            "policyId": str(policy.id),
+            "mode": policy.mode,
+            "version": policy.version,
+        },
     )
     await db.commit()
     await db.refresh(policy)
@@ -119,14 +135,19 @@ async def list_affiliate_participants(
 )
 async def invite_affiliate_partner(
     body: AdminAffiliatePartnerInvite,
-    actor: Professional = Depends(require_admin_permission(PERMISSION_AFFILIATES_WRITE)),
+    actor: Professional = Depends(
+        require_admin_permission(PERMISSION_AFFILIATES_WRITE)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
-    participant = await AffiliateService(db).invite_partner(
-        email=str(body.email),
-        public_name=body.public_name,
-        commission_override_bps=body.commission_override_bps,
-    )
+    try:
+        participant = await AffiliateService(db).invite_partner(
+            email=str(body.email),
+            public_name=body.public_name,
+            commission_override_bps=body.commission_override_bps,
+        )
+    except (AffiliateConflictError, AffiliateForbiddenError) as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
     await AdminAuditService(db).log(
         actor=actor,
         action="affiliate.partner.invited",
@@ -144,7 +165,9 @@ async def invite_affiliate_partner(
 async def update_affiliate_participant_status(
     participant_id: UUID,
     body: AdminAffiliateParticipantStatusBody,
-    actor: Professional = Depends(require_admin_permission(PERMISSION_AFFILIATES_WRITE)),
+    actor: Professional = Depends(
+        require_admin_permission(PERMISSION_AFFILIATES_WRITE)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -187,7 +210,9 @@ async def list_affiliate_referrals(
 async def review_affiliate_referral(
     referral_id: UUID,
     body: AdminAffiliateReviewBody,
-    actor: Professional = Depends(require_admin_permission(PERMISSION_AFFILIATES_WRITE)),
+    actor: Professional = Depends(
+        require_admin_permission(PERMISSION_AFFILIATES_WRITE)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -231,18 +256,39 @@ async def list_affiliate_rewards(
 )
 async def create_affiliate_ledger_correction(
     body: AdminAffiliateCorrectionBody,
-    actor: Professional = Depends(require_admin_permission(PERMISSION_AFFILIATES_WRITE)),
+    actor: Professional = Depends(
+        require_admin_permission(PERMISSION_AFFILIATES_WRITE)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
-    participant = await db.get(AffiliateParticipant, body.participant_id)
+    participant = await lock_participant(db, body.participant_id)
     if participant is None:
         raise HTTPException(status_code=404, detail="Participante não encontrado")
+    import hashlib
+
+    legacy_key = f"admin-correction:{actor.id}:{body.evidence_reference}"
+    correction_key = f"admin-correction:{actor.id}:{hashlib.sha256(body.evidence_reference.encode()).hexdigest()}"
+    prior = await db.scalar(
+        select(AffiliateLedgerEntry).where(
+            AffiliateLedgerEntry.idempotency_key.in_([legacy_key, correction_key])
+        )
+    )
+    if prior:
+        if (
+            prior.participant_id != participant.id
+            or prior.account != body.account
+            or prior.amount_cents != body.amount_cents
+        ):
+            raise HTTPException(
+                status_code=409, detail="A evidência já foi usada para outra correção"
+            )
+        return prior
     entry = AffiliateLedgerEntry(
         participant_id=participant.id,
         entry_type="admin_correction",
         account=body.account,
         amount_cents=body.amount_cents,
-        idempotency_key=f"admin-correction:{actor.id}:{body.evidence_reference}",
+        idempotency_key=correction_key,
         metadata_json={
             "reason": body.reason,
             "evidenceReference": body.evidence_reference,
@@ -274,7 +320,9 @@ async def list_affiliate_fiscal_profiles(
     _: Professional = Depends(require_admin_permission(PERMISSION_AFFILIATES_READ)),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(AffiliateFiscalProfile).order_by(AffiliateFiscalProfile.created_at.desc())
+    stmt = select(AffiliateFiscalProfile).order_by(
+        AffiliateFiscalProfile.created_at.desc()
+    )
     if status_filter:
         stmt = stmt.where(AffiliateFiscalProfile.status == status_filter)
     return (await db.execute(stmt)).scalars().all()
@@ -287,7 +335,9 @@ async def list_affiliate_fiscal_profiles(
 async def approve_affiliate_fiscal_profile(
     profile_id: UUID,
     body: AdminAffiliateFiscalApprovalBody,
-    actor: Professional = Depends(require_admin_permission(PERMISSION_AFFILIATES_PAYOUT)),
+    actor: Professional = Depends(
+        require_admin_permission(PERMISSION_AFFILIATES_PAYOUT)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -303,7 +353,10 @@ async def approve_affiliate_fiscal_profile(
     await AdminAuditService(db).log(
         actor=actor,
         action="affiliate.fiscal_profile.approved",
-        payload={"profileId": str(profile.id), "participantId": str(profile.participant_id)},
+        payload={
+            "profileId": str(profile.id),
+            "participantId": str(profile.participant_id),
+        },
     )
     await db.commit()
     await db.refresh(profile)
@@ -316,7 +369,9 @@ async def list_affiliate_payouts(
     _: Professional = Depends(require_admin_permission(PERMISSION_AFFILIATES_READ)),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(AffiliatePayoutRequest).order_by(AffiliatePayoutRequest.requested_at.desc())
+    stmt = select(AffiliatePayoutRequest).order_by(
+        AffiliatePayoutRequest.requested_at.desc()
+    )
     if status_filter:
         stmt = stmt.where(AffiliatePayoutRequest.status == status_filter)
     return (await db.execute(stmt)).scalars().all()
@@ -328,10 +383,16 @@ async def list_affiliate_payout_batches(
     db: AsyncSession = Depends(get_db),
 ):
     return (
-        await db.execute(
-            select(AffiliatePayoutBatch).order_by(AffiliatePayoutBatch.created_at.desc())
+        (
+            await db.execute(
+                select(AffiliatePayoutBatch).order_by(
+                    AffiliatePayoutBatch.created_at.desc()
+                )
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
 
 @router.post(
@@ -340,7 +401,9 @@ async def list_affiliate_payout_batches(
     status_code=status.HTTP_201_CREATED,
 )
 async def create_affiliate_payout_batch(
-    actor: Professional = Depends(require_admin_permission(PERMISSION_AFFILIATES_PAYOUT)),
+    actor: Professional = Depends(
+        require_admin_permission(PERMISSION_AFFILIATES_PAYOUT)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     from datetime import UTC, datetime
@@ -367,7 +430,9 @@ async def create_affiliate_payout_batch(
 )
 async def approve_affiliate_payout_batch(
     batch_id: UUID,
-    actor: Professional = Depends(require_admin_permission(PERMISSION_AFFILIATES_PAYOUT)),
+    actor: Professional = Depends(
+        require_admin_permission(PERMISSION_AFFILIATES_PAYOUT)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -394,14 +459,21 @@ async def approve_affiliate_payout_batch(
 async def mark_affiliate_payout_processing(
     payout_id: UUID,
     body: AdminAffiliateTransferBody,
-    actor: Professional = Depends(require_admin_permission(PERMISSION_AFFILIATES_PAYOUT)),
+    actor: Professional = Depends(
+        require_admin_permission(PERMISSION_AFFILIATES_PAYOUT)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        payout = await AffiliatePayoutService(db).mark_transfer_processing(
+        payout = await AffiliatePayoutService(db).reconcile_transfer(
             payout_id=payout_id,
             provider_transfer_id=body.provider_transfer_id,
         )
+    except (PaymentGatewayError, PaymentGatewayConfigError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Não foi possível verificar a transferência no Asaas",
+        ) from exc
     except AffiliatePayoutNotFoundError as exc:
         raise HTTPException(status_code=404, detail=exc.detail) from exc
     except AffiliatePayoutConflictError as exc:
@@ -409,7 +481,44 @@ async def mark_affiliate_payout_processing(
     await AdminAuditService(db).log(
         actor=actor,
         action="affiliate.payout.processing",
-        payload={"payoutId": str(payout.id), "providerTransferId": body.provider_transfer_id},
+        payload={
+            "payoutId": str(payout.id),
+            "providerTransferId": body.provider_transfer_id,
+        },
+    )
+    await db.commit()
+    await db.refresh(payout)
+    return payout
+
+
+@router.post("/payouts/{payout_id}/cancel", response_model=AffiliatePayoutItem)
+async def cancel_affiliate_payout_reserve(
+    payout_id: UUID,
+    body: AdminAffiliatePayoutCancelBody,
+    actor: Professional = Depends(
+        require_admin_permission(PERMISSION_AFFILIATES_PAYOUT)
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    payout = await db.get(AffiliatePayoutRequest, payout_id)
+    if payout is None:
+        raise HTTPException(status_code=404, detail="Saque não encontrado")
+    try:
+        payout = await AffiliatePayoutService(db).cancel_payout(
+            payout_id=payout_id,
+            participant_id=payout.participant_id,
+            admin_override=True,
+        )
+    except AffiliatePayoutConflictError as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
+    await AdminAuditService(db).log(
+        actor=actor,
+        action="affiliate.payout.canceled",
+        payload={
+            "payoutId": str(payout.id),
+            "reason": body.reason,
+            "providerNotSent": body.provider_not_sent,
+        },
     )
     await db.commit()
     await db.refresh(payout)

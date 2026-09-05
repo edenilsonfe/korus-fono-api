@@ -38,8 +38,13 @@ class AffiliatePortalService:
         self.db = db
 
     async def create_magic_link(self, participant: AffiliateParticipant) -> str:
-        if participant.status not in {"invited", "active"} or not participant.partner_enabled:
-            raise AffiliatePortalForbiddenError("Participante não pode acessar o portal")
+        if (
+            participant.status not in {"invited", "active"}
+            or not participant.partner_enabled
+        ):
+            raise AffiliatePortalForbiddenError(
+                "Participante não pode acessar o portal"
+            )
         now = datetime.now(UTC)
         await self.db.execute(
             update(AffiliateMagicLink)
@@ -60,7 +65,9 @@ class AffiliatePortalService:
         await self.db.flush()
         return raw
 
-    async def request_magic_link(self, email: str) -> tuple[AffiliateParticipant, str] | None:
+    async def request_magic_link(
+        self, email: str
+    ) -> tuple[AffiliateParticipant, str] | None:
         participant = (
             await self.db.execute(
                 select(AffiliateParticipant).where(
@@ -77,7 +84,9 @@ class AffiliatePortalService:
     async def exchange_magic_link(self, raw_token: str) -> AffiliateParticipant:
         row = (
             await self.db.execute(
-                select(AffiliateMagicLink).where(AffiliateMagicLink.token_hash == _hash(raw_token))
+                select(AffiliateMagicLink).where(
+                    AffiliateMagicLink.token_hash == _hash(raw_token)
+                )
             )
         ).scalar_one_or_none()
         if row is None:
@@ -86,10 +95,24 @@ class AffiliatePortalService:
             raise AffiliatePortalForbiddenError("Este link já foi usado")
         if _as_utc(row.expires_at) <= datetime.now(UTC):
             raise AffiliatePortalForbiddenError("Link inválido ou expirado")
+        consumed = await self.db.execute(
+            update(AffiliateMagicLink)
+            .where(
+                AffiliateMagicLink.id == row.id,
+                AffiliateMagicLink.used_at.is_(None),
+                AffiliateMagicLink.expires_at > datetime.now(UTC),
+            )
+            .values(used_at=datetime.now(UTC))
+            .execution_options(synchronize_session=False)
+        )
+        if consumed.rowcount != 1:
+            raise AffiliatePortalForbiddenError("Este link já foi usado")
+        await self.db.refresh(row)
         participant = await self.db.get(AffiliateParticipant, row.participant_id)
         if participant is None or participant.status not in {"invited", "active"}:
-            raise AffiliatePortalForbiddenError("Participante não pode acessar o portal")
-        row.used_at = datetime.now(UTC)
+            raise AffiliatePortalForbiddenError(
+                "Participante não pode acessar o portal"
+            )
         await self.db.flush()
         return participant
 
@@ -112,7 +135,9 @@ class AffiliatePortalService:
     def decode_session_token(token: str) -> UUID:
         settings = get_settings()
         try:
-            payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+            payload = jwt.decode(
+                token, settings.jwt_secret, algorithms=[settings.jwt_algorithm]
+            )
             if payload.get("type") != "affiliate_portal":
                 raise ValueError("scope")
             return UUID(str(payload["sub"]))
@@ -120,11 +145,15 @@ class AffiliatePortalService:
             raise AffiliatePortalForbiddenError("Sessão do portal inválida") from exc
 
 
-def send_affiliate_magic_link_email(to_email: str, public_name: str | None, raw_token: str) -> None:
+def send_affiliate_magic_link_email(
+    to_email: str, public_name: str | None, raw_token: str
+) -> None:
     settings = get_settings()
     url = f"{settings.frontend_url.rstrip('/')}/afiliados?token={quote_plus(raw_token)}"
     if not settings.email_sending_enabled:
-        logger.info("Email sending disabled; affiliate portal token created (recipient omitted)")
+        logger.info(
+            "Email sending disabled; affiliate portal token created (recipient omitted)"
+        )
         return
     name = public_name or "parceiro"
     html_name = escape(name)

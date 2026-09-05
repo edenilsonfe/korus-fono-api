@@ -23,6 +23,224 @@ from app.services.affiliate_payout_service import (
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.fixture
+async def funded_partner(db_session, monkeypatch):
+    key = Fernet.generate_key().decode()
+    monkeypatch.setattr(
+        "app.services.affiliate_payout_service.get_affiliate_fernet_key", lambda: key
+    )
+    participant = AffiliateParticipant(
+        email="funded@example.com", status="active", partner_enabled=True
+    )
+    db_session.add(participant)
+    await db_session.flush()
+    service = AffiliatePayoutService(db_session)
+    profile = await service.submit_fiscal_profile(
+        participant=participant,
+        person_type="pf",
+        legal_name="Pessoa Teste",
+        document="52998224725",
+        pix_key_type="cpf",
+        pix_key="52998224725",
+    )
+    profile.status = "approved"
+    profile.pix_validated_at = datetime.now(UTC)
+    profile.withdrawal_locked_until = datetime.now(UTC) - timedelta(days=1)
+    db_session.add(
+        AffiliateLedgerEntry(
+            participant_id=participant.id,
+            entry_type="test",
+            account="available",
+            amount_cents=30000,
+            idempotency_key="funded-test",
+        )
+    )
+    await db_session.commit()
+    return participant, profile, service
+
+
+async def test_payout_idempotency_and_changed_amount(db_session, funded_partner):
+    participant, _, service = funded_partner
+    first = await service.request_cash_payout(
+        participant=participant,
+        amount_cents=10000,
+        cash_enabled=True,
+        request_id="unique-request",
+    )
+    same = await service.request_cash_payout(
+        participant=participant,
+        amount_cents=10000,
+        cash_enabled=True,
+        request_id="unique-request",
+    )
+    assert same.id == first.id
+    assert await service._available(participant.id) == 20000
+    with pytest.raises(AffiliatePayoutConflictError, match="outro valor"):
+        await service.request_cash_payout(
+            participant=participant,
+            amount_cents=15000,
+            cash_enabled=True,
+            request_id="unique-request",
+        )
+
+
+async def test_transfer_done_before_link_is_verified_and_settled_once(
+    db_session, funded_partner, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    from app.core.config import get_settings
+    from app.services.affiliate_service import AffiliateService
+
+    monkeypatch.setattr(get_settings(), "asaas_api_key", "test-key-no-network")
+    participant, _, service = funded_partner
+    payout = await service.request_cash_payout(
+        participant=participant, amount_cents=10000, cash_enabled=True
+    )
+    payout.status = "approved"
+    await db_session.commit()
+    assert (
+        await service.complete_transfer(
+            provider_transfer_id="transfer-early", succeeded=True
+        )
+        is None
+    )
+    transfer = {
+        "id": "transfer-early",
+        "value": 100,
+        "bankAccount": {"pixAddressKey": "52998224725"},
+        "externalReference": str(payout.id),
+        "status": "DONE",
+    }
+    monkeypatch.setattr(
+        "app.billing.asaas_gateway.AsaasPaymentGateway.get_transfer",
+        AsyncMock(return_value=transfer),
+    )
+    participant.status = (
+        "suspended"  # Provider fact must still be accounted after a later hold.
+    )
+    await db_session.flush()
+    for _ in range(2):
+        result = await service.reconcile_transfer(
+            payout_id=payout.id, provider_transfer_id="transfer-early"
+        )
+        assert result.status == "paid"
+    assert (await AffiliateService(db_session).balances(participant.id))[
+        "reserved"
+    ] == 0
+    for field, value in [
+        ("value", 99),
+        ("bankAccount", {"pixAddressKey": "11144477735"}),
+        ("externalReference", "other"),
+    ]:
+        with pytest.raises(AffiliatePayoutConflictError):
+            await service.verify_transfer(
+                payout_id=payout.id, transfer={**transfer, field: value}
+            )
+
+
+async def test_obsolete_fiscal_profile_cannot_be_reapproved_or_paid(
+    db_session, funded_partner
+):
+    participant, old, service = funded_partner
+    payout = await service.request_cash_payout(
+        participant=participant, amount_cents=10000, cash_enabled=True
+    )
+    payout.status = "approved"
+    await service.submit_fiscal_profile(
+        participant=participant,
+        person_type="pf",
+        legal_name="New profile",
+        document="52998224725",
+        pix_key_type="cpf",
+        pix_key="52998224725",
+    )
+    actor = await _admin(db_session, "obsolete-approver@example.com")
+    with pytest.raises(AffiliatePayoutConflictError, match="vigente"):
+        await service.approve_fiscal_profile(
+            profile_id=old.id, actor=actor, pix_validated=True
+        )
+    with pytest.raises(AffiliatePayoutConflictError):
+        await service.mark_transfer_processing(
+            payout_id=payout.id, provider_transfer_id="blocked-transfer"
+        )
+
+
+async def test_invalid_document_check_digits_are_rejected(db_session, funded_partner):
+    participant, _, service = funded_partner
+    with pytest.raises(AffiliatePayoutConflictError, match="Documento"):
+        await service.submit_fiscal_profile(
+            participant=participant,
+            person_type="pf",
+            legal_name="Test",
+            document="11111111111",
+            pix_key_type="cpf",
+            pix_key="52998224725",
+        )
+
+
+async def test_admin_can_cancel_approved_reserve_but_not_a_sent_transfer(
+    db_session, funded_partner
+):
+    participant, _, service = funded_partner
+    payout = await service.request_cash_payout(
+        participant=participant, amount_cents=10000, cash_enabled=True
+    )
+    payout.status = "approved"
+    await db_session.flush()
+    canceled = await service.cancel_payout(
+        payout_id=payout.id, participant_id=participant.id, admin_override=True
+    )
+    assert canceled.status == "canceled"
+    assert await service._available(participant.id) == 30000
+    sent = await service.request_cash_payout(
+        participant=participant, amount_cents=10000, cash_enabled=True
+    )
+    sent.status = "processing"
+    sent.provider_transfer_id = "transfer-sent"
+    await db_session.flush()
+    with pytest.raises(AffiliatePayoutConflictError):
+        await service.cancel_payout(
+            payout_id=sent.id, participant_id=participant.id, admin_override=True
+        )
+
+
+async def test_failed_transfer_returns_reserve_once_and_worker_reconciles(
+    db_session, funded_partner, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    from app.core.config import get_settings
+    from app.services.billing_event_recovery import reconcile_pending_transfers
+
+    participant, _, service = funded_partner
+    payout = await service.request_cash_payout(
+        participant=participant, amount_cents=10000, cash_enabled=True
+    )
+    payout.status = "approved"
+    await db_session.flush()
+    await service.mark_transfer_processing(
+        payout_id=payout.id, provider_transfer_id="transfer-failed"
+    )
+    await db_session.commit()
+    monkeypatch.setattr(get_settings(), "asaas_api_key", "test-no-network")
+    monkeypatch.setattr(
+        "app.billing.asaas_gateway.AsaasPaymentGateway.get_transfer",
+        AsyncMock(
+            return_value={
+                "id": "transfer-failed",
+                "pixAddressKey": "52998224725",
+                "value": 100,
+                "externalReference": str(payout.id),
+                "status": "FAILED",
+            }
+        ),
+    )
+    assert await reconcile_pending_transfers(db_session) == 1
+    assert await reconcile_pending_transfers(db_session) == 0
+    assert await service._available(participant.id) == 30000
+
+
 async def _admin(db, email: str) -> Professional:
     row = Professional(
         email=email,
@@ -246,7 +464,9 @@ async def test_batch_requires_a_different_approver(db_session, monkeypatch):
     assert payout.batch_id == batch.id
 
     with pytest.raises(AffiliatePayoutConflictError, match="segunda pessoa"):
-        await service.approve_batch(batch_id=batch.id, actor=preparer, allow_single_operator=False)
+        await service.approve_batch(
+            batch_id=batch.id, actor=preparer, allow_single_operator=False
+        )
 
     approved = await service.approve_batch(
         batch_id=batch.id,

@@ -13,7 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.billing import PaymentGatewayConfigError, get_payment_gateway
-from app.billing.checkout_urls import build_checkout_return_urls, build_in_app_payment_url
+from app.billing.checkout_urls import (
+    build_checkout_return_urls,
+    build_in_app_payment_url,
+)
 from app.billing.errors import PaymentGatewayError
 from app.billing.payment_methods import payment_method_from_payload
 from app.billing.types import InternalBillingEventType
@@ -32,27 +35,30 @@ from app.schemas.billing import (
     CreditCardPaymentRequest,
     CreditCardPaymentResponse,
     PaymentSessionResponse,
+    PendingPlanSummary,
     PixCheckoutResponse,
     PlanChangePreviewResponse,
     PlanPublicResponse,
     PlanSummary,
-    PendingPlanSummary,
     ReconcileResponse,
     SubscriptionSummary,
 )
+from app.services.affiliate_credit_service import (
+    AffiliateCreditForbiddenError,
+    AffiliateCreditService,
+)
+from app.services.affiliate_service import AffiliateService
 from app.services.billing_checkout_service import BillingCheckoutService
-from app.services.billing_rate_limit import enforce_card_payment_rate_limit
 from app.services.billing_customer_service import BillingCustomerService
 from app.services.billing_profile_service import asaas_customer_profile
+from app.services.billing_rate_limit import enforce_card_payment_rate_limit
 from app.services.billing_reconciliation_service import BillingReconciliationService
 from app.services.coupon_service import CouponError, CouponService
-from app.services.affiliate_service import AffiliateService
-from app.services.affiliate_credit_service import AffiliateCreditService
 from app.services.entitlement_service import EntitlementService
-from app.services.plan_change_service import PlanChangeService
-from app.services.plan_catalog_seed import CANONICAL_PLAN_SLUGS
-from app.services.saas_billing_service import SaasBillingService
 from app.services.meta_pixel_service import MetaPixelService
+from app.services.plan_catalog_seed import CANONICAL_PLAN_SLUGS
+from app.services.plan_change_service import PlanChangeService
+from app.services.saas_billing_service import SaasBillingService
 
 logger = logging.getLogger(__name__)
 
@@ -577,16 +583,30 @@ async def create_billing_checkout(
     credit_reservation_id = str(
         existing_sub.checkout_session_id if existing_sub else uuid4()
     )
-    credit_reservation = await AffiliateCreditService(db).reserve_for_checkout(
-        professional_id=professional.id,
-        charge_cents=charge_cents,
-        reservation_id=credit_reservation_id,
-    )
+    try:
+        credit_reservation = await AffiliateCreditService(db).reserve_for_checkout(
+            professional_id=professional.id,
+            charge_cents=charge_cents,
+            reservation_id=credit_reservation_id,
+        )
+        if credit_reservation.reused and not credit_reservation.payment_id and credit_reservation.external_charge_cents:
+            raise AffiliateCreditForbiddenError("A cobrança com crédito aguarda conciliação. Verifique o status antes de tentar novamente")
+    except AffiliateCreditForbiddenError as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
     charge_cents = credit_reservation.external_charge_cents
     metadata["charge_cents"] = charge_cents
     if credit_reservation.applied_cents:
         metadata["affiliate_credit_cents"] = credit_reservation.applied_cents
         metadata["affiliate_credit_reservation_id"] = credit_reservation_id
+        # Persist before the provider can create a charge or deliver a webhook.
+        await db.commit()
+
+    if existing_sub and (credit_reservation.applied_cents or (affiliate_discount_bps and charge_cents == affiliate_charge_cents)):
+        # Coupon behavior remains authoritative when the coupon won the price comparison.
+        existing_sub.checkout_recurring_price_cents = (
+            coupon_charge_cents if coupon_code_applied else plan.price_cents
+        )
+        await db.commit()
 
     if charge_cents == 0 and credit_reservation.applied_cents:
         if existing_sub is None:
@@ -598,6 +618,8 @@ async def create_billing_checkout(
                 detail="Não foi possível vincular o crédito à assinatura",
             )
         internal_payment_id = f"credit-{credit_reservation_id}"
+        await AffiliateCreditService(db).bind_payment(reservation_id=credit_reservation_id,
+            payment_id=internal_payment_id)
         existing_sub.provider = "internal_credit"
         existing_sub.external_checkout_id = internal_payment_id
         existing_sub.checkout_charge_cents = 0
@@ -650,9 +672,11 @@ async def create_billing_checkout(
             metadata=metadata,
         )
     except PaymentGatewayError as exc:
-        await AffiliateCreditService(db).release_checkout_reservation(
-            reservation_id=credit_reservation_id
-        )
+        # A timeout/server failure may have created the provider charge. Keep
+        # its credit reserved until reconciliation instead of spending it again.
+        # This gateway operation contains multiple requests: even a 4xx may
+        # occur after creating the charge. Only an explicit reconciliation can
+        # release an unbound reservation; HTTP status alone is insufficient.
         await db.commit()
         logger.warning(
             "Billing checkout gateway failure provider=%s stage=%s professional_id=%s: %s",
@@ -685,12 +709,27 @@ async def create_billing_checkout(
         billing_document=document,
     )
     local_session_id = session.get("session_id") or session.get("external_checkout_id")
+    if credit_reservation.applied_cents:
+        external_payment_id = str(session.get("external_checkout_id") or session.get("session_id") or "")
+        if external_payment_id:
+            await AffiliateCreditService(db).bind_payment(reservation_id=credit_reservation_id,
+                payment_id=external_payment_id)
     if attached_sub:
         if not attached_sub.checkout_session_id:
             attached_sub.checkout_session_id = uuid4()
         attached_sub.checkout_charge_cents = charge_cents
         await db.commit()
         local_session_id = str(attached_sub.checkout_session_id)
+        if attached_sub.external_subscription_id and attached_sub.checkout_recurring_price_cents and provider == "asaas":
+            try:
+                await gateway.set_recurring_price(
+                    external_subscription_id=attached_sub.external_subscription_id,
+                    value_cents=attached_sub.checkout_recurring_price_cents,
+                )
+            except PaymentGatewayError:
+                # The payment and reservation remain durable; the payment handler
+                # retries before marking its receipt processed.
+                logger.exception("Future affiliate price reconciliation pending for subscription %s", attached_sub.id)
 
     if session.get("status") == "completed":
         await BillingReconciliationService(db).reconcile_professional(professional.id)
@@ -869,7 +908,7 @@ async def billing_webhook(
             payload={"event": event_name, "transfer": {"id": transfer_id}},
         )
         if event_name == "TRANSFER_DONE":
-            await AffiliatePayoutService(db).complete_transfer(
+            matched = await AffiliatePayoutService(db).complete_transfer(
                 provider_transfer_id=transfer_id,
                 succeeded=True,
             )
@@ -882,13 +921,15 @@ async def billing_webhook(
                     else "Transferência recusada pelo provedor"
                 )
             )
-            await AffiliatePayoutService(db).complete_transfer(
+            matched = await AffiliatePayoutService(db).complete_transfer(
                 provider_transfer_id=transfer_id,
                 succeeded=False,
                 failure_reason=failure_reason,
             )
+        else:
+            matched = True
         await db.commit()
-        if row:
+        if row and matched:
             await billing.mark_processed(row.id)
         return {"received": True, "events": 1}
 
@@ -907,7 +948,6 @@ async def billing_webhook(
             )
             if row:
                 await billing.apply_normalized_events([ev])
-                await billing.mark_processed(row.id)
     except Exception:
         logger.exception("Webhook processing failed for provider=%s", provider_key)
         await db.rollback()

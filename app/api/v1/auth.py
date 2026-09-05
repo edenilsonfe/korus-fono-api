@@ -1,9 +1,16 @@
 import logging
 from datetime import UTC, datetime, timedelta
-
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,10 +27,9 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.db.session import get_db
 from app.core.specialty_catalog import specialty_label
+from app.db.session import get_db
 from app.models.professional import Professional
-from app.services.temporary_access import signup_payment_blocks_access
 from app.schemas.auth import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
@@ -35,17 +41,31 @@ from app.schemas.auth import (
     TokenResponse,
     VerifyEmailRequest,
 )
+from app.services.affiliate_service import (
+    AffiliateConflictError,
+    AffiliateForbiddenError,
+    AffiliateNotFoundError,
+    AffiliateService,
+)
 from app.services.auth_rate_limit import (
     enforce_forgot_rate_limit,
     enforce_login_rate_limit,
     enforce_register_rate_limit,
     enforce_reset_rate_limit,
 )
+from app.services.demo_patient_service import ensure_demo_patient
 from app.services.email_verification import (
     request_email_verification,
     send_email_verification_email_sync,
     verify_email_with_token,
 )
+from app.services.feature_flag_service import FeatureFlagService
+from app.services.financial_defaults import (
+    add_default_financial_categories,
+    add_default_payment_methods,
+)
+from app.services.meta_pixel_service import MetaPixelService
+from app.services.new_account_notification import send_new_account_notification_sync
 from app.services.password_reset import (
     GENERIC_FORGOT_MESSAGE,
     change_password,
@@ -59,24 +79,11 @@ from app.services.refresh_token_service import (
     revoke_refresh_session,
     rotate_refresh_session,
 )
-from app.services.meta_pixel_service import MetaPixelService
-from app.services.new_account_notification import send_new_account_notification_sync
-from app.services.demo_patient_service import ensure_demo_patient
+from app.services.temporary_access import signup_payment_blocks_access
 from app.services.whatsapp_welcome_service import (
     dispatch_whatsapp_welcome_message,
     queue_whatsapp_welcome_message,
 )
-from app.services.financial_defaults import (
-    add_default_financial_categories,
-    add_default_payment_methods,
-)
-from app.services.affiliate_service import (
-    AffiliateConflictError,
-    AffiliateForbiddenError,
-    AffiliateNotFoundError,
-    AffiliateService,
-)
-from app.services.feature_flag_service import FeatureFlagService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
@@ -229,6 +236,7 @@ async def _register_account(
     await db.flush()
     if body.referral_code:
         try:
+            AffiliateService.validate_attribution_token(body.referral_code, body.referral_token)
             public_referral = await AffiliateService(db).resolve_public_code(body.referral_code)
             flag_key = (
                 "affiliate_customer_program"
@@ -244,7 +252,8 @@ async def _register_account(
                 user_agent=request.headers.get("user-agent", ""),
             )
         except (AffiliateNotFoundError, AffiliateForbiddenError, AffiliateConflictError) as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.detail) from exc
+            # Optional expired invitations must not prevent registration.
+            logger.info("Optional referral not applied: %s", type(exc).__name__)
     add_default_financial_categories(db, professional.id)
     add_default_payment_methods(db, professional.id)
     await ensure_demo_patient(db, professional)

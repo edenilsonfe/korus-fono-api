@@ -3,6 +3,7 @@
 from collections.abc import Callable
 
 from fastapi import HTTPException
+from sqlalchemy import select
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -12,9 +13,10 @@ from app.core.security import decode_token
 from app.db.session import AsyncSessionLocal
 from app.models.professional import Professional
 from app.services.entitlement_service import EntitlementService
-from sqlalchemy import select
 
 EXEMPT_PATH_PREFIXES: tuple[str, ...] = (
+    "/api/v1/affiliate-portal",
+    "/api/v1/affiliates",
     "/api/v1/auth",
     # Public signed attendance response from the 24h WhatsApp reminder.
     "/api/v1/appointment-responses",

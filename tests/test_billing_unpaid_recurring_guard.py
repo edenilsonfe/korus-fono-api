@@ -365,7 +365,7 @@ async def test_confirmed_payment_reactivates_suspended_monthly_subscription(
             create=True,
         ),
         patch(
-            "app.services.saas_billing_service.AffiliateService.record_external_payment",
+            "app.services.affiliate_billing_service.AffiliateService.record_external_payment",
             new=AsyncMock(),
         ),
     ):

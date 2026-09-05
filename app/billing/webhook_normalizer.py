@@ -182,9 +182,20 @@ class AsaasWebhookNormalizer(WebhookNormalizer):
 
         payment_id = payment.get("id") or raw_body.get("id")
         external_event_id = f"asaas-{event_name}-{payment_id or 'unknown'}"
+        if event_name == "PAYMENT_PARTIALLY_REFUNDED":
+            # Refunds can happen repeatedly for one charge. Provider event identity
+            # (or a payload digest on reconciliation) must not discard later totals.
+            import hashlib
+            import json
+            identity = raw_body.get("id") or hashlib.sha256(
+                json.dumps(payment.get("refunds", []), sort_keys=True).encode()
+            ).hexdigest()
+            external_event_id = f"asaas-{event_name}-{payment_id}-{identity}"
 
         if event_name in self._PAYMENT_SUCCESS:
             event_type = InternalBillingEventType.PAYMENT_SUCCEEDED
+        elif event_name == "PAYMENT_PARTIALLY_REFUNDED":
+            event_type = InternalBillingEventType.PAYMENT_PARTIALLY_REFUNDED
         elif event_name == "PAYMENT_DELETED":
             event_type = InternalBillingEventType.PAYMENT_DELETED
         elif event_name in self._PAYMENT_FAILURE:
@@ -205,6 +216,8 @@ class AsaasWebhookNormalizer(WebhookNormalizer):
             "checkout_session_id": checkout_session_id,
             "external_subscription_id": payment.get("subscription"),
             "last_payment_at": payment.get("paymentDate") or payment.get("clientPaymentDate"),
+            "received_at": (payment.get("creditDate") or raw_body.get("dateCreated"))
+            if event_name == "PAYMENT_RECEIVED" else None,
         }
         if event_type == InternalBillingEventType.PAYMENT_SUCCEEDED:
             payload["subscription_status"] = "active"

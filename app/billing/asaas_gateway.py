@@ -286,6 +286,10 @@ class AsaasPaymentGateway:
             "payment": payment,
         }
 
+    async def get_transfer(self, transfer_id: str) -> dict[str, Any]:
+        from urllib.parse import quote
+        return await request_json("GET", f"{self._base_url}/transfers/{quote(transfer_id, safe='')}", headers=self._headers())
+
     async def create_credit_card_payment(
         self,
         *,
@@ -974,6 +978,14 @@ class AsaasPaymentGateway:
             "external_subscription_id": external_subscription_id,
             "next_due_date": next_due_date,
         }
+
+    async def set_recurring_price(self, *, external_subscription_id: str, value_cents: int) -> dict[str, Any]:
+        """Restore future cycles without changing the already issued first charge."""
+        return await request_json(
+            "PUT", f"{self._base_url}/subscriptions/{external_subscription_id}",
+            headers=self._headers(),
+            json_body={"value": round(value_cents / 100, 2), "updatePendingPayments": False},
+        )
 
     async def get_subscription_status(self, *, external_subscription_id: str) -> dict[str, Any]:
         data = await request_json(

@@ -16,12 +16,17 @@ from app.billing.asaas_gateway import AsaasPaymentGateway
 from app.billing.errors import PaymentGatewayConfigError, PaymentGatewayError
 from app.billing.stub_gateway import StubPaymentGateway
 from app.billing.types import InternalBillingEventType
-from app.billing.webhook_normalizer import AsaasWebhookNormalizer, NormalizedBillingEvent
+from app.billing.webhook_normalizer import (
+    AsaasWebhookNormalizer,
+    NormalizedBillingEvent,
+)
 from app.models.billing import Subscription
 from app.models.professional import Professional
 from app.services.plan_change_service import PlanChangeService
 from app.services.saas_billing_service import SaasBillingService
-from app.services.subscription_payment_method_service import recover_subscription_payment_method
+from app.services.subscription_payment_method_service import (
+    recover_subscription_payment_method,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +252,7 @@ class BillingReconciliationService:
                 or f"{sub.professional_id}:{sub.plan.slug}",
             }
             events = normalizer.normalize(
-                {"event": "PAYMENT_RECEIVED", "payment": payment},
+                {"event": "PAYMENT_CONFIRMED" if status == "CONFIRMED" else "PAYMENT_RECEIVED", "payment": payment},
                 {},
             )
             for ev in events:

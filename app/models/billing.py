@@ -2,12 +2,12 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
-    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -68,6 +68,7 @@ class Subscription(Base, TimestampMixin):
         UUID(as_uuid=True), unique=True, nullable=True, index=True
     )
     checkout_charge_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    checkout_recurring_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     external_subscription_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     external_checkout_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     billing_document: Mapped[str] = mapped_column(String(14), default="", nullable=False)
@@ -117,6 +118,7 @@ class BillingEvent(Base):
         UUID(as_uuid=True), ForeignKey("professionals.id", ondelete="SET NULL"), nullable=True
     )
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

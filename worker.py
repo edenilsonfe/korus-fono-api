@@ -1,6 +1,4 @@
-import asyncio
 import json
-from datetime import UTC, datetime
 from uuid import UUID
 
 from arq import cron
@@ -13,11 +11,11 @@ from app.db.session import AsyncSessionLocal
 from app.models.ai import AIJob
 from app.services.ai_service import run_llm
 from app.services.sentry_init import init_sentry
-from app.services.whatsapp_scheduler_service import WhatsAppSchedulerService
 from app.services.trial_email_campaign_service import (
     mark_trial_email_campaign_failed,
     process_trial_email_campaign,
 )
+from app.services.whatsapp_scheduler_service import WhatsAppSchedulerService
 
 # Init before ARQ picks up WorkerSettings (same process as worker entry).
 init_sentry(get_settings())
@@ -85,8 +83,14 @@ async def retry_google_calendar_syncs(ctx) -> None:
 
 async def run_affiliate_maintenance(ctx) -> None:
     from app.services.affiliate_service import AffiliateService
+    from app.services.billing_event_recovery import (
+        reconcile_pending_transfers,
+        recover_billing_events,
+    )
 
     async with AsyncSessionLocal() as session:
+        await recover_billing_events(session)
+        await reconcile_pending_transfers(session)
         await AffiliateService(session).release_due_rewards()
         await session.commit()
 
