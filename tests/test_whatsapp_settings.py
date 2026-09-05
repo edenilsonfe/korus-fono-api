@@ -16,6 +16,24 @@ from app.services.whatsapp_notification_service import WhatsAppNotificationServi
 from app.services.whatsapp_types import WhatsAppSendResult
 
 
+async def test_confirmation_deadline_settings_preserve_clear_and_validate(api_client, auth_headers):
+    url = "/api/v1/whatsapp/settings"
+    initial = await api_client.get(url, headers=auth_headers)
+    assert initial.json()["appointmentConfirmationDeadlineTime"] is None
+    saved = await api_client.put(url, headers=auth_headers, json={"appointmentConfirmationDeadlineTime": "20:00"})
+    assert saved.status_code == 200
+    assert saved.json()["appointmentConfirmationDeadlineTime"] == "20:00"
+    unrelated = await api_client.put(url, headers=auth_headers, json={"whatsappEnabled": False})
+    assert unrelated.json()["appointmentConfirmationDeadlineTime"] == "20:00"
+    reloaded = await api_client.get(url, headers=auth_headers)
+    assert reloaded.json()["appointmentConfirmationDeadlineTime"] == "20:00"
+    for invalid in ["24:00", "20:60", "8:00", "20:00:00", ""]:
+        rejected = await api_client.put(url, headers=auth_headers, json={"appointmentConfirmationDeadlineTime": invalid})
+        assert rejected.status_code == 422
+    cleared = await api_client.put(url, headers=auth_headers, json={"appointmentConfirmationDeadlineTime": None})
+    assert cleared.json()["appointmentConfirmationDeadlineTime"] is None
+
+
 def test_template_variables_support_portuguese_names_and_legacy_aliases():
     context = {
         "patient_name": "João Silva",

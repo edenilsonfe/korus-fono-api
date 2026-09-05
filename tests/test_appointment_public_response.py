@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.core.config import get_settings
 from app.models.appointment import Appointment
 from app.models.notification_message_log import NotificationMessageLog
+from app.models.notification_settings import NotificationSettings
 from app.services.appointment_response_service import (
     APPOINTMENT_RESPONSE_TOKEN_TYPE,
     build_appointment_response_url,
@@ -39,6 +40,46 @@ def _appointment(professional_id, patient_id, *, days_from_today: int = 2) -> Ap
         duration=50,
         status="pendente",
     )
+
+
+@pytest.mark.parametrize("offset,expected", [(-1, 200), (0, 410), (1, 410)])
+@pytest.mark.parametrize("action", ["confirm", "cancel"])
+async def test_previous_day_deadline_enforced_on_preview_and_submit(
+    api_client, db_session, professional, patient, monkeypatch, offset, expected, action
+):
+    appointment = _appointment(professional.id, patient.id)
+    appointment.date = date(2027, 1, 1)
+    db_session.add_all([
+        appointment,
+        NotificationSettings(
+            professional_id=professional.id,
+            appointment_confirmation_deadline_time="20:00",
+        ),
+    ])
+    await db_session.commit()
+    # 20:00 in the clinic is 23:00 UTC, across the year boundary.
+    now = datetime(2026, 12, 31, 23, tzinfo=UTC) + timedelta(seconds=offset)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now.astimezone(tz)
+
+    monkeypatch.setattr("app.services.appointment_response_service.datetime", FrozenDateTime)
+    token = create_appointment_response_token(appointment)
+    preview = await api_client.post("/api/v1/appointment-responses/preview", json={"token": token})
+    response = await api_client.post(
+        "/api/v1/appointment-responses", json={"token": token, "action": action}
+    )
+    assert preview.status_code == expected
+    assert response.status_code == expected
+    await db_session.refresh(appointment)
+    if expected == 410:
+        assert "prazo" in response.json()["detail"]
+        assert appointment.status == "pendente"
+        assert (await db_session.execute(select(NotificationMessageLog))).scalars().all() == []
+    else:
+        assert appointment.status == ("confirmado" if action == "confirm" else "cancelado")
 
 
 @pytest.mark.asyncio
@@ -74,6 +115,42 @@ async def test_public_preview_and_confirm_update_the_appointment_without_auth(
     assert response.json()["status"] == "confirmado"
     await db_session.refresh(appointment)
     assert appointment.status == "confirmado"
+
+
+async def test_current_deadline_applies_to_existing_link_and_can_be_disabled(
+    api_client, db_session, professional, patient, monkeypatch
+):
+    appointment = _appointment(professional.id, patient.id)
+    appointment.date = date(2027, 1, 1)
+    db_session.add(appointment)
+    await db_session.commit()
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 12, 31, 23, 1, tzinfo=UTC).astimezone(tz)
+
+    monkeypatch.setattr("app.services.appointment_response_service.datetime", FrozenDateTime)
+    token = create_appointment_response_token(appointment)
+    preview = await api_client.post("/api/v1/appointment-responses/preview", json={"token": token})
+    assert preview.status_code == 200
+    settings = NotificationSettings(
+        professional_id=professional.id, appointment_confirmation_deadline_time="20:00"
+    )
+    db_session.add(settings)
+    await db_session.commit()
+    denied = await api_client.post(
+        "/api/v1/appointment-responses", json={"token": token, "action": "confirm"}
+    )
+    assert denied.status_code == 410
+    await db_session.refresh(appointment)
+    assert appointment.status == "pendente"
+    settings.appointment_confirmation_deadline_time = None
+    await db_session.commit()
+    accepted = await api_client.post(
+        "/api/v1/appointment-responses", json={"token": token, "action": "confirm"}
+    )
+    assert accepted.status_code == 200
 
 
 @pytest.mark.asyncio

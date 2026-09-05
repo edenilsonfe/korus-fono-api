@@ -70,6 +70,7 @@ class WhatsAppMessageTemplatesUpdate(CamelModel):
 
 
 class WhatsAppSettingsResponse(CamelModel):
+    appointment_confirmation_deadline_time: str | None = None
     whatsapp_enabled: bool
     appointment_confirmation_link_enabled: bool
     whatsapp_events: WhatsAppEventSettings
@@ -78,6 +79,9 @@ class WhatsAppSettingsResponse(CamelModel):
 
 
 class WhatsAppSettingsUpdate(CamelModel):
+    appointment_confirmation_deadline_time: str | None = Field(
+        default=None, pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$"
+    )
     whatsapp_enabled: bool | None = None
     appointment_confirmation_link_enabled: bool | None = None
     whatsapp_events: WhatsAppEventSettingsUpdate | None = None

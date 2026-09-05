@@ -78,10 +78,33 @@ Para o fluxo de recuperação de senha (`/auth/forgot-password` → `/auth/reset
 O cadastro pago usa `POST /api/v1/auth/register-checkout`. Essas contas mantêm
 `signup_payment_required=true`: `/me`, auth e billing continuam acessíveis para recuperação, mas
 dashboard e rotas do produto respondem `403` até um evento `PAYMENT_SUCCEEDED` confirmar a
-cobrança. `SUBSCRIPTION_CREATED` e checkout apenas criado não liberam acesso. A sessão local
+cobrança, salvo uma liberação temporária explícita do administrador. `SUBSCRIPTION_CREATED`
+e checkout apenas criado não liberam acesso. A sessão local
 persistida é devolvida por `GET /api/v1/billing/me` para o frontend retomar o mesmo pagamento.
 Nessa variante, o link de verificação de e-mail só é criado e enviado após o pagamento ser
-confirmado; login e reenvio manual não antecipam essa etapa enquanto a cobrança estiver pendente.
+confirmado, ou pelo login/reenvio durante uma liberação temporária vigente.
+
+### Liberação temporária pelo administrador
+
+Em `/admin/contas/:id`, administradores com `billing:write` podem conceder de 1 a 7 dias
+(padrão: 2 dias de 24 horas) com motivo de 5 a 500 caracteres. A API expõe
+`POST /api/v1/admin/professionals/:id/temporary-access` (`days`, `reason`) e
+`POST .../temporary-access/revoke` (`reason`). Concessão e revogação registram ator, conta,
+motivo e prazo na auditoria. Uma concessão já vigente retorna `409`, sem prorrogar o prazo;
+revogar novamente é inócuo. Contas desativadas, staff ou com acesso regular vigente não recebem
+uma nova concessão.
+
+`Professional.temporary_access_ends_at` é independente do trial e dos registros financeiros.
+A liberação permite superar o bloqueio de acesso por pagamento inicial, mas mantém
+`signup_payment_required=true`, e-mail obrigatório e a cobrança original. `/me` e `/billing/me`
+expõem `temporaryAccessEndsAt`; `signupPaymentRequired` continua sendo a pendência real.
+O cliente liberado entra novamente para solicitar o e-mail de verificação. Cada requisição
+revalida o vencimento, sem cron: ao expirar ou revogar, voltam as condições normais da conta.
+Um `PAYMENT_SUCCEEDED` encerra a exceção e ativa o acesso pago pelo fluxo existente.
+Aplicar a migration `y6z7a8b9c0d1` antes de publicar API e frontend. Nenhuma conta existente
+é convertida automaticamente para uma liberação temporária.
+
+### Pagamento no checkout
 
 O cartão é processado no formulário do KorusFono: o frontend envia PAN/CVV por HTTPS ao endpoint
 autenticado de billing, que os repassa imediatamente ao Asaas sem persistir ou registrar esses
@@ -199,6 +222,9 @@ Transcrição de áudio usa um provedor separado compatível com `/v1/audio/tran
 Sem essa configuração, `GET /api/v1/ai/capabilities` informa que áudio está indisponível e as telas não geram conteúdo simulado.
 
 ## Testes
+
+Importação de exportações clínicas CSV: veja o fluxo de prévia, backup e aplicação
+em [`docs/legacy-csv-import.md`](docs/legacy-csv-import.md).
 
 ```bash
 uv run pytest

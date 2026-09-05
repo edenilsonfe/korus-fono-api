@@ -6,7 +6,7 @@ import base64
 import hashlib
 import hmac
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time, timedelta
 from urllib.parse import quote
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models.appointment import Appointment
+from app.models.notification_settings import NotificationSettings
 from app.models.professional import Professional
 from app.models.patient import Patient
 from app.models.google_calendar import GoogleCalendarSyncRecord
@@ -28,6 +29,10 @@ COMPACT_TOKEN_SIGNATURE_BYTES = 16
 COMPACT_TOKEN_RAW_BYTES = 1 + 16 + COMPACT_TOKEN_SIGNATURE_BYTES
 ACTIVE_RESPONSE_STATUSES = frozenset({"pendente", "confirmado"})
 INVALID_LINK_MESSAGE = "Link inválido ou expirado."
+DEADLINE_EXPIRED_MESSAGE = (
+    "O prazo para confirmar ou cancelar por este link terminou. "
+    "Entre em contato com o profissional."
+)
 UNAVAILABLE_RESPONSE_MESSAGE = (
     "Esta consulta não aceita mais respostas por este link."
 )
@@ -192,6 +197,20 @@ async def _load_appointment(
         or appointment.time.isoformat() != claims.scheduled_time
     ):
         raise InvalidAppointmentResponseToken(INVALID_LINK_MESSAGE)
+    deadline_time = await db.scalar(
+        select(NotificationSettings.appointment_confirmation_deadline_time).where(
+            NotificationSettings.professional_id == appointment.professional_id
+        )
+    )
+    now = datetime.now(ZoneInfo(get_settings().clinic_timezone))
+    if deadline_time is not None:
+        deadline = datetime.combine(
+            appointment.date - timedelta(days=1),
+            time.fromisoformat(deadline_time),
+            tzinfo=ZoneInfo(get_settings().clinic_timezone),
+        )
+        if now >= deadline:
+            raise InvalidAppointmentResponseToken(DEADLINE_EXPIRED_MESSAGE)
     if _appointment_starts_at(appointment) <= datetime.now(
         ZoneInfo(get_settings().clinic_timezone)
     ):

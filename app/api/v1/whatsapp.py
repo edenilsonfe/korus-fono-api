@@ -67,6 +67,7 @@ async def _build_evolution_status(
 def _settings_response(settings) -> WhatsAppSettingsResponse:
     stored_templates = settings.whatsapp_message_templates or {}
     return WhatsAppSettingsResponse(
+        appointment_confirmation_deadline_time=settings.appointment_confirmation_deadline_time,
         whatsapp_enabled=settings.whatsapp_enabled,
         appointment_confirmation_link_enabled=(
             settings.appointment_confirmation_link_enabled
@@ -178,6 +179,8 @@ async def update_whatsapp_settings(
     service = NotificationSettingsService(db)
     settings = await service.update(
         professional.id,
+        appointment_confirmation_deadline_time=body.appointment_confirmation_deadline_time,
+        update_confirmation_deadline="appointment_confirmation_deadline_time" in body.model_fields_set,
         whatsapp_enabled=body.whatsapp_enabled,
         appointment_confirmation_link_enabled=(
             body.appointment_confirmation_link_enabled

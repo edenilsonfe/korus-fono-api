@@ -44,10 +44,15 @@ class NotificationSettingsService:
         whatsapp_enabled: bool | None = None,
         birthday_in_app_enabled: bool | None = None,
         appointment_confirmation_link_enabled: bool | None = None,
+        appointment_confirmation_deadline_time: str | None = None,
+        update_confirmation_deadline: bool = False,
         whatsapp_events: dict[str, bool | None] | None = None,
         whatsapp_message_templates: dict[str, str | None] | None = None,
     ) -> NotificationSettings:
         settings = await self.get_or_create(professional_id)
+
+        if update_confirmation_deadline:
+            settings.appointment_confirmation_deadline_time = appointment_confirmation_deadline_time
 
         if birthday_in_app_enabled is not None:
             settings.birthday_in_app_enabled = birthday_in_app_enabled
