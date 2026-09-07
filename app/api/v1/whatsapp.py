@@ -120,7 +120,7 @@ async def connect_evolution_whatsapp(
     )
 
 
-@router.post("/refresh-connection", response_model=WhatsAppStatusResponse)
+@router.post("/refresh-connection", response_model=WhatsAppConnectResponse)
 async def refresh_evolution_connection(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
@@ -131,8 +131,18 @@ async def refresh_evolution_connection(
             detail="Este endpoint é exclusivo do provider Evolution.",
         )
     service = EvolutionWhatsAppService(db)
-    await service.refresh_connection(professional.id)
-    return await _build_evolution_status(service, professional)
+    result = await service.refresh_connection(professional.id)
+    return WhatsAppConnectResponse(
+        provider="evolution",
+        connection=_connection_schema(
+            result.connection,
+            qrcode_base64=result.qrcode_base64,
+            connection_state=result.connection_state,
+        ),
+        qrcode_base64=result.qrcode_base64,
+        connection_state=result.connection_state,
+        can_send=await service.can_send(professional.id),
+    )
 
 
 @router.post("/disconnect", response_model=WhatsAppStatusResponse)

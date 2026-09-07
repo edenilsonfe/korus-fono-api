@@ -495,7 +495,7 @@ class EvolutionWhatsAppService:
             connection_state=evolution_state,
         )
 
-    async def refresh_connection(self, professional_id: UUID) -> WhatsAppConnection:
+    async def refresh_connection(self, professional_id: UUID) -> EvolutionConnectResult:
         connection = await self.get_active_connection(professional_id)
         if not connection:
             raise HTTPException(
@@ -504,6 +504,7 @@ class EvolutionWhatsAppService:
             )
         api_key = self._instance_api_key(connection)
         instance_name = self._instance_name(connection)
+        qrcode_base64 = None
         try:
             state_payload = await self.client.connection_state(instance_name, api_key=api_key)
             evolution_state = EvolutionApiClient.extract_connection_state(state_payload)
@@ -512,7 +513,7 @@ class EvolutionWhatsAppService:
                 connect_payload = await self.client.connect_instance(
                     instance_name, api_key=api_key
                 )
-                _ = EvolutionApiClient.extract_qrcode_base64(connect_payload)
+                qrcode_base64 = EvolutionApiClient.extract_qrcode_base64(connect_payload)
             await self._ensure_webhook(instance_name, api_key)
             await self._sync_phone_from_instances(connection, api_key)
         except HTTPException:
@@ -525,7 +526,11 @@ class EvolutionWhatsAppService:
             ) from exc
         await self.db.commit()
         await self.db.refresh(connection)
-        return connection
+        return EvolutionConnectResult(
+            connection=connection,
+            qrcode_base64=qrcode_base64,
+            connection_state=evolution_state,
+        )
 
     async def disconnect(self, professional_id: UUID) -> WhatsAppConnection | None:
         connection = await self.get_active_connection(professional_id)
