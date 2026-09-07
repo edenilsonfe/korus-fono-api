@@ -23,7 +23,9 @@ from app.services.plan_proration import (
     calculate_monthly_to_yearly_upgrade,
     is_yearly_interval,
 )
-from app.services.subscription_payment_method_service import recover_subscription_payment_method
+from app.services.subscription_payment_method_service import (
+    recover_subscription_payment_method,
+)
 
 _PAYMENT_SUCCESS = frozenset({"RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"})
 _PAYMENT_PENDING = frozenset({"PENDING", "OVERDUE", "AWAITING_RISK_ANALYSIS"})
@@ -407,6 +409,12 @@ class BillingCheckoutService:
             )
 
         raw_status = str(payment.get("status", "")).upper()
+        if sub.external_subscription_id and sub.checkout_recurring_price_cents:
+            try:
+                await gateway.set_recurring_price(external_subscription_id=sub.external_subscription_id,
+                    value_cents=sub.checkout_recurring_price_cents)
+            except PaymentGatewayError:
+                logger.exception("Future affiliate price reconciliation pending for subscription %s", sub.id)
         payment_status = "paid" if raw_status in _PAYMENT_SUCCESS else "pending"
         if payment_status == "paid":
             from app.services.billing_reconciliation_service import (

@@ -18,6 +18,7 @@ class RegisterRequest(CamelModel):
     phone: str
     cpf: str | None = None
     referral_code: str | None = Field(default=None, max_length=48)
+    referral_token: str | None = Field(default=None, max_length=1024)
 
     @field_validator("referral_code")
     @classmethod

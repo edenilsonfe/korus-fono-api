@@ -8,9 +8,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import case, func, select
+import jwt
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.models.affiliate import (
     AffiliateCode,
     AffiliateLedgerEntry,
@@ -21,6 +23,7 @@ from app.models.affiliate import (
 )
 from app.models.billing import Subscription
 from app.models.professional import Professional
+from app.services.affiliate_accounting import lock_participant
 from app.services.affiliate_notification_service import AffiliateNotificationService
 
 
@@ -68,16 +71,40 @@ class AffiliateService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    @staticmethod
+    def validate_attribution_token(code: str, token: str | None) -> None:
+        settings = get_settings()
+        try:
+            claims = jwt.decode(
+                token or "",
+                settings.jwt_secret,
+                algorithms=[settings.jwt_algorithm],
+                options={"require": ["exp", "iat"]},
+            )
+            if (
+                claims.get("type") != "affiliate_attribution"
+                or claims.get("code") != code.strip().lower()
+            ):
+                raise ValueError("Invalid attribution scope")
+        except (jwt.PyJWTError, ValueError) as exc:
+            raise AffiliateForbiddenError(
+                "Convite expirado; abra novamente o link de indicação"
+            ) from exc
+
     async def _professional_documents(self, professional_id: UUID) -> set[str]:
         professional = await self.db.get(Professional, professional_id)
         subscription_documents = (
-            await self.db.execute(
-                select(Subscription.billing_document).where(
-                    Subscription.professional_id == professional_id,
-                    Subscription.billing_document != "",
+            (
+                await self.db.execute(
+                    select(Subscription.billing_document).where(
+                        Subscription.professional_id == professional_id,
+                        Subscription.billing_document != "",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         values = [
             professional.cpf if professional else "",
             professional.billing_cnpj if professional else "",
@@ -85,43 +112,109 @@ class AffiliateService:
         ]
         return {normalized for value in values if (normalized := _digits(value))}
 
-    async def _reject_document_self_referral(
+    async def _referrer(self, participant: AffiliateParticipant) -> Professional | None:
+        if participant.professional_id:
+            return await self.db.get(Professional, participant.professional_id)
+        # External partners may create their clinical account after accepting terms.
+        return await self.db.scalar(
+            select(Professional)
+            .where(func.lower(Professional.email) == participant.email.strip().lower())
+            .limit(1)
+        )
+
+    async def _is_self_referral(
+        self, participant: AffiliateParticipant, referred: Professional
+    ) -> bool:
+        if participant.email.strip().lower() == referred.email.strip().lower():
+            return True
+        referrer = await self._referrer(participant)
+        if referrer is None:
+            return False
+        if referrer.id == referred.id:
+            return True
+        return bool(
+            (await self._professional_documents(referrer.id)).intersection(
+                await self._professional_documents(referred.id)
+            )
+        )
+
+    async def _reject_self_referral(
         self,
         *,
         referral: AffiliateReferral,
         participant: AffiliateParticipant,
     ) -> bool:
-        if participant.professional_id is None:
-            return False
-        referrer_documents = await self._professional_documents(participant.professional_id)
-        referred_documents = await self._professional_documents(
-            referral.referred_professional_id
-        )
-        if not referrer_documents.intersection(referred_documents):
+        referred = await self.db.get(Professional, referral.referred_professional_id)
+        if referred is None or not await self._is_self_referral(participant, referred):
             return False
         referral.status = "rejected"
         referral.review_state = "rejected"
-        referral.review_reason = "Autoindicação por documento de cobrança"
+        referral.review_reason = "Autoindicação por identidade ou documento de cobrança"
         await self.db.flush()
         return True
 
     async def _active_policy(self, mode: str) -> AffiliatePolicy:
         policy = (
-            await self.db.execute(
-                select(AffiliatePolicy)
-                .where(AffiliatePolicy.mode == mode, AffiliatePolicy.status == "active")
-                .order_by(AffiliatePolicy.version.desc())
+            (
+                await self.db.execute(
+                    select(AffiliatePolicy)
+                    .where(
+                        AffiliatePolicy.mode == mode,
+                        AffiliatePolicy.status == "active",
+                        AffiliatePolicy.effective_at <= _now(),
+                    )
+                    .order_by(AffiliatePolicy.version.desc())
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if policy is None:
             raise AffiliateForbiddenError("Programa de indicação indisponível")
         return policy
 
+    async def customer_eligible(self, professional: Professional) -> bool:
+        if (
+            professional.is_staff
+            or professional.is_disabled
+            or professional.signup_payment_required
+        ):
+            return False
+        if professional.email_verified_at is None:
+            return False
+        if professional.subscription_status == "trialing":
+            end = professional.trial_ends_at
+            return (
+                end is not None
+                and (end.replace(tzinfo=UTC) if end.tzinfo is None else end) > _now()
+            )
+        if professional.subscription_status != "active":
+            return False
+        sub = (
+            await self.db.execute(
+                select(Subscription)
+                .where(Subscription.professional_id == professional.id)
+                .order_by(Subscription.updated_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if sub and sub.current_period_end:
+            end = sub.current_period_end
+            return (
+                sub.status == "active"
+                and (end.replace(tzinfo=UTC) if end.tzinfo is None else end) > _now()
+            )
+        return True
+
     async def _new_code(self) -> str:
         for _ in range(10):
-            code = secrets.token_urlsafe(12).replace("-", "").replace("_", "").lower()[:18]
+            code = (
+                secrets.token_urlsafe(12).replace("-", "").replace("_", "").lower()[:18]
+            )
             exists = await self.db.scalar(
-                select(func.count()).select_from(AffiliateCode).where(AffiliateCode.code == code)
+                select(func.count())
+                .select_from(AffiliateCode)
+                .where(AffiliateCode.code == code)
             )
             if not exists:
                 return code
@@ -131,13 +224,17 @@ class AffiliateService:
         self, professional: Professional
     ) -> AffiliateParticipant | None:
         return (
-            await self.db.execute(
-                select(AffiliateParticipant).where(
-                    (AffiliateParticipant.professional_id == professional.id)
-                    | (AffiliateParticipant.email == professional.email.lower())
+            (
+                await self.db.execute(
+                    select(AffiliateParticipant).where(
+                        (AffiliateParticipant.professional_id == professional.id)
+                        | (AffiliateParticipant.email == professional.email.lower())
+                    )
                 )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
 
     async def opt_in_customer(
         self, *, professional: Professional, terms_version: str
@@ -146,11 +243,13 @@ class AffiliateService:
             raise AffiliateForbiddenError("Contas da equipe não participam do programa")
         if professional.email_verified_at is None:
             raise AffiliateForbiddenError("Confirme seu e-mail antes de participar")
-        if professional.subscription_status not in self.CUSTOMER_ELIGIBLE_STATUSES:
+        if not await self.customer_eligible(professional):
             raise AffiliateForbiddenError("É necessário ter uma assinatura elegível")
         policy = await self._active_policy("customer")
         if terms_version != policy.terms_version:
-            raise AffiliateConflictError("Aceite a versão atual dos termos de indicação")
+            raise AffiliateConflictError(
+                "Aceite a versão atual dos termos de indicação"
+            )
 
         participant = await self._participant_for_professional(professional)
         if participant is None:
@@ -165,19 +264,30 @@ class AffiliateService:
         if participant.status in {"suspended", "deactivated", "closed"}:
             raise AffiliateForbiddenError("Sua participação no programa não está ativa")
 
+        participant = await lock_participant(self.db, participant.id)
+        if participant.status in {"suspended", "deactivated", "closed"}:
+            raise AffiliateForbiddenError("Sua participação no programa não está ativa")
+        if participant.professional_id is None:
+            participant.professional_id = professional.id
+        elif participant.professional_id != professional.id:
+            raise AffiliateConflictError("Participação já vinculada a outra conta")
         participant.status = "active"
         participant.customer_enabled = True
         participant.customer_terms_version = terms_version
         participant.customer_terms_accepted_at = _now()
         code = (
-            await self.db.execute(
-                select(AffiliateCode).where(
-                    AffiliateCode.participant_id == participant.id,
-                    AffiliateCode.mode == "customer",
-                    AffiliateCode.status == "active",
+            (
+                await self.db.execute(
+                    select(AffiliateCode).where(
+                        AffiliateCode.participant_id == participant.id,
+                        AffiliateCode.mode == "customer",
+                        AffiliateCode.status == "active",
+                    )
                 )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if code is None:
             code = AffiliateCode(
                 participant_id=participant.id,
@@ -190,7 +300,9 @@ class AffiliateService:
             await self.db.flush()
         elif code.terms_version != terms_version:
             code.terms_version = terms_version
-        return AffiliateOptInResult(participant=participant, mode="customer", code=code.code)
+        return AffiliateOptInResult(
+            participant=participant, mode="customer", code=code.code
+        )
 
     async def invite_partner(
         self,
@@ -200,11 +312,23 @@ class AffiliateService:
         commission_override_bps: int | None = None,
     ) -> AffiliateParticipant:
         normalized_email = email.strip().lower()
-        if commission_override_bps is not None and not 0 <= commission_override_bps <= 10000:
+        account = await self.db.scalar(
+            select(Professional).where(
+                func.lower(Professional.email) == normalized_email
+            )
+        )
+        if account and account.is_staff:
+            raise AffiliateForbiddenError("Contas da equipe não participam do programa")
+        if (
+            commission_override_bps is not None
+            and not 0 <= commission_override_bps <= 10000
+        ):
             raise AffiliateConflictError("Percentual de comissão inválido")
         participant = (
             await self.db.execute(
-                select(AffiliateParticipant).where(AffiliateParticipant.email == normalized_email)
+                select(AffiliateParticipant).where(
+                    AffiliateParticipant.email == normalized_email
+                )
             )
         ).scalar_one_or_none()
         if participant is None:
@@ -226,6 +350,7 @@ class AffiliateService:
     async def activate_partner(
         self, *, participant: AffiliateParticipant, terms_version: str
     ) -> AffiliateOptInResult:
+        participant = await lock_participant(self.db, participant.id)
         policy = await self._active_policy("partner")
         if terms_version != policy.terms_version:
             raise AffiliateConflictError("Aceite a versão atual dos termos de afiliado")
@@ -236,14 +361,18 @@ class AffiliateService:
         participant.partner_terms_version = terms_version
         participant.partner_terms_accepted_at = _now()
         code = (
-            await self.db.execute(
-                select(AffiliateCode).where(
-                    AffiliateCode.participant_id == participant.id,
-                    AffiliateCode.mode == "partner",
-                    AffiliateCode.status == "active",
+            (
+                await self.db.execute(
+                    select(AffiliateCode).where(
+                        AffiliateCode.participant_id == participant.id,
+                        AffiliateCode.mode == "partner",
+                        AffiliateCode.status == "active",
+                    )
                 )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if code is None:
             code = AffiliateCode(
                 participant_id=participant.id,
@@ -256,7 +385,9 @@ class AffiliateService:
             await self.db.flush()
         elif code.terms_version != terms_version:
             code.terms_version = terms_version
-        return AffiliateOptInResult(participant=participant, mode="partner", code=code.code)
+        return AffiliateOptInResult(
+            participant=participant, mode="partner", code=code.code
+        )
 
     async def resolve_public_code(self, code: str) -> dict:
         code_row = (
@@ -272,6 +403,20 @@ class AffiliateService:
         participant = await self.db.get(AffiliateParticipant, code_row.participant_id)
         if participant is None or participant.status != "active":
             raise AffiliateNotFoundError("Código de indicação indisponível")
+        if code_row.mode == "customer":
+            referrer = (
+                await self.db.get(Professional, participant.professional_id)
+                if participant.professional_id
+                else None
+            )
+            if (
+                not participant.customer_enabled
+                or not referrer
+                or not await self.customer_eligible(referrer)
+            ):
+                raise AffiliateNotFoundError("Código de indicação indisponível")
+        elif not participant.partner_enabled:
+            raise AffiliateNotFoundError("Código de indicação indisponível")
         policy = await self._active_policy(code_row.mode)
         accepted_terms = (
             participant.customer_terms_version
@@ -285,9 +430,21 @@ class AffiliateService:
             raise AffiliateNotFoundError("Código de indicação indisponível")
         return {
             "code": code_row.code,
+            "attributionToken": jwt.encode(
+                {
+                    "type": "affiliate_attribution",
+                    "code": code_row.code,
+                    "iat": _now(),
+                    "exp": _now() + timedelta(days=policy.attribution_window_days),
+                },
+                get_settings().jwt_secret,
+                algorithm=get_settings().jwt_algorithm,
+            ),
             "mode": code_row.mode,
-            "benefitPercent": policy.referral_discount_bps // 100,
-            "publicName": participant.public_name if code_row.mode == "partner" else None,
+            "benefitPercent": policy.referral_discount_bps / 100,
+            "publicName": participant.public_name
+            if code_row.mode == "partner"
+            else None,
             "expiresInDays": policy.attribution_window_days,
         }
 
@@ -302,7 +459,8 @@ class AffiliateService:
         existing = (
             await self.db.execute(
                 select(AffiliateReferral).where(
-                    AffiliateReferral.referred_professional_id == referred_professional.id
+                    AffiliateReferral.referred_professional_id
+                    == referred_professional.id
                 )
             )
         ).scalar_one_or_none()
@@ -312,7 +470,8 @@ class AffiliateService:
         code_row = (
             await self.db.execute(
                 select(AffiliateCode).where(
-                    AffiliateCode.code == code.strip().lower(), AffiliateCode.status == "active"
+                    AffiliateCode.code == code.strip().lower(),
+                    AffiliateCode.status == "active",
                 )
             )
         ).scalar_one_or_none()
@@ -325,20 +484,15 @@ class AffiliateService:
             raise AffiliateForbiddenError("Código de cliente indisponível")
         if code_row.mode == "partner" and not participant.partner_enabled:
             raise AffiliateForbiddenError("Código de parceiro indisponível")
-        if participant.professional_id == referred_professional.id:
+        if await self._is_self_referral(participant, referred_professional):
             raise AffiliateForbiddenError("Autoindicação não é permitida")
-        referrer = (
-            await self.db.get(Professional, participant.professional_id)
-            if participant.professional_id
-            else None
-        )
-        referrer_document = _digits(referrer.cpf or referrer.billing_cnpj) if referrer else ""
-        referred_document = _digits(
-            referred_professional.cpf or referred_professional.billing_cnpj
-        )
-        if referrer_document and referred_document and referrer_document == referred_document:
-            raise AffiliateForbiddenError("Autoindicação não é permitida")
-
+        referrer = await self._referrer(participant)
+        if referred_professional.is_staff or (referrer and referrer.is_staff):
+            raise AffiliateForbiddenError("Contas da equipe não participam do programa")
+        if code_row.mode == "customer" and (
+            not referrer or not await self.customer_eligible(referrer)
+        ):
+            raise AffiliateForbiddenError("Indicador sem assinatura elegível")
         policy = await self._active_policy(code_row.mode)
         accepted_terms = (
             participant.customer_terms_version
@@ -349,10 +503,16 @@ class AffiliateService:
             code_row.terms_version != policy.terms_version
             or accepted_terms != policy.terms_version
         ):
-            raise AffiliateForbiddenError("Aceite a versão atual dos termos do programa")
+            raise AffiliateForbiddenError(
+                "Aceite a versão atual dos termos do programa"
+            )
         effective_commission = participant.commission_override_bps
         snapshot = policy.snapshot(commission_bps=effective_commission)
-        fingerprint = _fingerprint(request_ip, user_agent)
+        fingerprint = (
+            _fingerprint(request_ip, user_agent)
+            if request_ip not in {"", "unknown"} and user_agent
+            else None
+        )
         review_state = "clear"
         review_reason = None
         reused_source = await self.db.scalar(
@@ -360,10 +520,14 @@ class AffiliateService:
             .select_from(AffiliateReferral)
             .where(AffiliateReferral.source_fingerprint == fingerprint)
         )
-        if reused_source:
+        if fingerprint and reused_source:
             review_state = "manual_review"
             review_reason = "Dispositivo ou rede coincidente"
-        elif referrer and referrer.phone and referrer.phone == referred_professional.phone:
+        elif (
+            referrer
+            and referrer.phone
+            and referrer.phone == referred_professional.phone
+        ):
             review_state = "manual_review"
             review_reason = "Telefone coincidente"
         referral = AffiliateReferral(
@@ -389,7 +553,9 @@ class AffiliateService:
         )
         return referral
 
-    async def referral_discount(self, professional_id: UUID) -> tuple[int, AffiliateReferral | None]:
+    async def referral_discount(
+        self, professional_id: UUID
+    ) -> tuple[int, AffiliateReferral | None]:
         referral = (
             await self.db.execute(
                 select(AffiliateReferral).where(
@@ -401,11 +567,16 @@ class AffiliateService:
         if (
             referral is None
             or referral.status != "registered"
-            or referral.benefit_expires_at < _now()
+            or (
+                referral.benefit_expires_at.replace(tzinfo=UTC)
+                if referral.benefit_expires_at.tzinfo is None
+                else referral.benefit_expires_at
+            )
+            < _now()
         ):
             return 0, referral
         participant = await self.db.get(AffiliateParticipant, referral.participant_id)
-        if participant is None or await self._reject_document_self_referral(
+        if participant is None or await self._reject_self_referral(
             referral=referral,
             participant=participant,
         ):
@@ -461,17 +632,21 @@ class AffiliateService:
         referral = (
             await self.db.execute(
                 select(AffiliateReferral).where(
-                    AffiliateReferral.referred_professional_id == referred_professional_id,
+                    AffiliateReferral.referred_professional_id
+                    == referred_professional_id,
                     AffiliateReferral.status != "rejected",
                 )
             )
         ).scalar_one_or_none()
-        if referral is None or referral.review_state in {"manual_review", "rejected"}:
+        if referral is None or referral.review_state == "rejected":
             return None
-        participant = await self.db.get(AffiliateParticipant, referral.participant_id)
-        if participant is None or participant.status != "active":
+        participant = await lock_participant(self.db, referral.participant_id)
+        await self.db.refresh(referral)
+        if referral.status == "rejected" or referral.review_state == "rejected":
             return None
-        if await self._reject_document_self_referral(
+        if participant is None or participant.status not in {"active", "suspended"}:
+            return None
+        if await self._reject_self_referral(
             referral=referral,
             participant=participant,
         ):
@@ -479,13 +654,17 @@ class AffiliateService:
         kind = "partner_recurring" if referral.mode == "partner" else "customer_once"
         if kind == "customer_once":
             prior = (
-                await self.db.execute(
-                    select(AffiliateReward).where(
-                        AffiliateReward.referral_id == referral.id,
-                        AffiliateReward.kind == kind,
+                (
+                    await self.db.execute(
+                        select(AffiliateReward).where(
+                            AffiliateReward.referral_id == referral.id,
+                            AffiliateReward.kind == kind,
+                        )
                     )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             if prior is not None and prior.source_payment_id != external_payment_id:
                 return None
         reward = (
@@ -509,7 +688,9 @@ class AffiliateService:
                     "yearly": "customerRewardYearlyCents",
                     "annual": "customerRewardYearlyCents",
                 }
-                gross_cents = int(referral.policy_snapshot.get(rewards.get(interval_key, ""), 0))
+                gross_cents = int(
+                    referral.policy_snapshot.get(rewards.get(interval_key, ""), 0)
+                )
             if gross_cents <= 0:
                 return None
             reward = AffiliateReward(
@@ -559,19 +740,32 @@ class AffiliateService:
         reversed_revenue_cents: int | None = None,
     ) -> AffiliateReward | None:
         reward = (
-            await self.db.execute(
-                select(AffiliateReward).where(
-                    AffiliateReward.source_payment_id == external_payment_id
+            (
+                await self.db.execute(
+                    select(AffiliateReward).where(
+                        AffiliateReward.source_payment_id == external_payment_id
+                    )
                 )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if reward is None or reward.state in {"reversed", "voided"}:
             return reward
-        if reversed_revenue_cents is None or reversed_revenue_cents >= reward.external_revenue_cents:
+        await lock_participant(self.db, reward.participant_id)
+        await self.db.refresh(reward)
+        if reward.state in {"reversed", "voided"}:
+            return reward
+        if (
+            reversed_revenue_cents is None
+            or reversed_revenue_cents >= reward.external_revenue_cents
+        ):
             reverse_cents = reward.gross_cents - reward.reversed_cents
         else:
             proportional_total = (
-                reward.gross_cents * max(0, reversed_revenue_cents) // reward.external_revenue_cents
+                reward.gross_cents
+                * max(0, reversed_revenue_cents)
+                // reward.external_revenue_cents
             )
             reverse_cents = max(0, proportional_total - reward.reversed_cents)
         if reverse_cents <= 0:
@@ -608,16 +802,29 @@ class AffiliateService:
     async def release_due_rewards(self, *, now: datetime | None = None) -> int:
         cutoff = now or _now()
         rewards = (
-            await self.db.execute(
-                select(AffiliateReward).where(
-                    AffiliateReward.state == "coolingOff",
-                    AffiliateReward.available_at <= cutoff,
+            (
+                await self.db.execute(
+                    select(AffiliateReward).where(
+                        AffiliateReward.state == "coolingOff",
+                        AffiliateReward.available_at <= cutoff,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         released = 0
         for reward in rewards:
-            participant = await self.db.get(AffiliateParticipant, reward.participant_id)
+            participant = await lock_participant(self.db, reward.participant_id)
+            await self.db.refresh(reward)
+            referral = await self.db.get(AffiliateReferral, reward.referral_id)
+            if (
+                reward.state != "coolingOff"
+                or not referral
+                or referral.review_state not in {"clear", "approved"}
+                or referral.status == "rejected"
+            ):
+                continue
             if participant is None or participant.status != "active":
                 continue
             net_cents = max(0, reward.gross_cents - reward.reversed_cents)
@@ -669,46 +876,76 @@ class AffiliateService:
     async def customer_dashboard(self, professional: Professional) -> dict:
         participant = await self._participant_for_professional(professional)
         active_policy = await self._active_policy("customer")
+        policy_fields = {
+            "referralDiscountBps": active_policy.referral_discount_bps,
+            "customerRewardMonthlyCents": active_policy.customer_reward_monthly_cents,
+            "customerRewardQuarterlyCents": active_policy.customer_reward_quarterly_cents,
+            "customerRewardYearlyCents": active_policy.customer_reward_yearly_cents,
+            "coolingOffDays": active_policy.cooling_off_days,
+            "termsAcceptanceRequired": not participant
+            or not participant.customer_enabled
+            or participant.customer_terms_version != active_policy.terms_version,
+        }
         if participant is None:
             return {
-                "eligible": professional.subscription_status in self.CUSTOMER_ELIGIBLE_STATUSES
-                and professional.email_verified_at is not None
-                and not professional.is_staff,
+                **policy_fields,
+                "eligible": await self.customer_eligible(professional),
                 "termsVersion": active_policy.terms_version,
                 "participant": None,
                 "code": None,
-                "balances": {"pending": 0, "available": 0, "reserved": 0, "credit": 0, "cash": 0},
+                "balances": {
+                    "pending": 0,
+                    "available": 0,
+                    "reserved": 0,
+                    "credit": 0,
+                    "cash": 0,
+                },
                 "referrals": [],
                 "rewards": [],
             }
         code = (
-            await self.db.execute(
-                select(AffiliateCode).where(
-                    AffiliateCode.participant_id == participant.id,
-                    AffiliateCode.mode == "customer",
-                    AffiliateCode.status == "active",
+            (
+                await self.db.execute(
+                    select(AffiliateCode).where(
+                        AffiliateCode.participant_id == participant.id,
+                        AffiliateCode.mode == "customer",
+                        AffiliateCode.status == "active",
+                    )
                 )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         referrals = (
-            await self.db.execute(
-                select(AffiliateReferral)
-                .where(AffiliateReferral.participant_id == participant.id)
-                .order_by(AffiliateReferral.created_at.desc())
+            (
+                await self.db.execute(
+                    select(AffiliateReferral)
+                    .where(AffiliateReferral.participant_id == participant.id)
+                    .order_by(AffiliateReferral.created_at.desc())
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         rewards = (
-            await self.db.execute(
-                select(AffiliateReward)
-                .where(AffiliateReward.participant_id == participant.id)
-                .order_by(AffiliateReward.created_at.desc())
+            (
+                await self.db.execute(
+                    select(AffiliateReward)
+                    .where(AffiliateReward.participant_id == participant.id)
+                    .order_by(AffiliateReward.created_at.desc())
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return {
-            "eligible": professional.subscription_status in self.CUSTOMER_ELIGIBLE_STATUSES,
+            **policy_fields,
+            "eligible": await self.customer_eligible(professional),
             "termsVersion": active_policy.terms_version,
             "participant": participant,
-            "code": code.code if code else None,
+            "code": code.code
+            if code and not policy_fields["termsAcceptanceRequired"]
+            else None,
             "balances": await self.balances(participant.id),
             "referrals": referrals,
             "rewards": rewards,
@@ -727,7 +964,9 @@ class AffiliateService:
             )
         )
         return {
-            "activePolicies": await count(AffiliatePolicy, AffiliatePolicy.status == "active"),
+            "activePolicies": await count(
+                AffiliatePolicy, AffiliatePolicy.status == "active"
+            ),
             "participants": await count(AffiliateParticipant),
             "activeParticipants": await count(
                 AffiliateParticipant, AffiliateParticipant.status == "active"
@@ -741,12 +980,16 @@ class AffiliateService:
         }
 
     async def list_participants(self, *, query: str | None = None) -> list[dict]:
-        stmt = select(AffiliateParticipant).order_by(AffiliateParticipant.created_at.desc())
+        stmt = select(AffiliateParticipant).order_by(
+            AffiliateParticipant.created_at.desc()
+        )
         if query:
             pattern = f"%{query.strip().lower()}%"
             stmt = stmt.where(
                 func.lower(AffiliateParticipant.email).like(pattern)
-                | func.lower(func.coalesce(AffiliateParticipant.public_name, "")).like(pattern)
+                | func.lower(func.coalesce(AffiliateParticipant.public_name, "")).like(
+                    pattern
+                )
             )
         rows = (await self.db.execute(stmt)).scalars().all()
         result = []
@@ -766,8 +1009,18 @@ class AffiliateService:
             )
         return result
 
-    async def create_policy(self, *, actor: Professional, values: dict, activate: bool) -> AffiliatePolicy:
+    async def create_policy(
+        self, *, actor: Professional, values: dict, activate: bool
+    ) -> AffiliatePolicy:
         mode = values["mode"]
+        effective = values["effective_at"]
+        effective = (
+            effective.replace(tzinfo=UTC) if effective.tzinfo is None else effective
+        )
+        if activate and effective > _now():
+            raise AffiliateConflictError(
+                "Ativação futura não é permitida; salve como rascunho"
+            )
         latest = await self.db.scalar(
             select(func.coalesce(func.max(AffiliatePolicy.version), 0)).where(
                 AffiliatePolicy.mode == mode
@@ -775,14 +1028,20 @@ class AffiliateService:
         )
         if activate:
             current = (
-                await self.db.execute(
-                    select(AffiliatePolicy).where(
-                        AffiliatePolicy.mode == mode, AffiliatePolicy.status == "active"
+                (
+                    await self.db.execute(
+                        select(AffiliatePolicy).where(
+                            AffiliatePolicy.mode == mode,
+                            AffiliatePolicy.status == "active",
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             for policy in current:
                 policy.status = "retired"
+            await self.db.flush()
         policy = AffiliatePolicy(
             mode=mode,
             version=int(latest or 0) + 1,
@@ -813,23 +1072,52 @@ class AffiliateService:
         referral = await self.db.get(AffiliateReferral, referral_id)
         if referral is None:
             raise AffiliateNotFoundError("Indicação não encontrada")
+        await lock_participant(self.db, referral.participant_id)
+        await self.db.refresh(referral)
+        if referral.status == "rejected" and decision != "rejected":
+            raise AffiliateConflictError("Indicação rejeitada não pode ser reativada")
         referral.review_state = decision
         referral.review_reason = reason.strip()
         if decision == "rejected":
             referral.status = "rejected"
-            rewards = (
-                await self.db.execute(
-                    select(AffiliateReward).where(
-                        AffiliateReward.referral_id == referral.id,
-                        AffiliateReward.state.in_(["pending", "coolingOff"]),
+            released_rewards = (
+                (
+                    await self.db.execute(
+                        select(AffiliateReward).where(
+                            AffiliateReward.referral_id == referral.id,
+                            AffiliateReward.state.in_(
+                                ["available", "reserved", "credited", "paid"]
+                            ),
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
+            for reward in released_rewards:
+                await self.reverse_external_payment(
+                    external_payment_id=reward.source_payment_id,
+                    external_event_id=f"risk-rejected:{referral.id}:{reward.id}",
+                )
+            rewards = (
+                (
+                    await self.db.execute(
+                        select(AffiliateReward).where(
+                            AffiliateReward.referral_id == referral.id,
+                            AffiliateReward.state.in_(["pending", "coolingOff"]),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
             for reward in rewards:
                 pending_cents = int(
                     await self.db.scalar(
                         select(
-                            func.coalesce(func.sum(AffiliateLedgerEntry.amount_cents), 0)
+                            func.coalesce(
+                                func.sum(AffiliateLedgerEntry.amount_cents), 0
+                            )
                         ).where(
                             AffiliateLedgerEntry.reward_id == reward.id,
                             AffiliateLedgerEntry.account == "pending",
@@ -857,7 +1145,7 @@ class AffiliateService:
     ) -> AffiliateParticipant:
         if status not in {"active", "suspended", "deactivated", "closed"}:
             raise AffiliateConflictError("Estado de participante inválido")
-        participant = await self.db.get(AffiliateParticipant, participant_id)
+        participant = await lock_participant(self.db, participant_id)
         if participant is None:
             raise AffiliateNotFoundError("Participante não encontrado")
         participant.status = status
@@ -865,13 +1153,17 @@ class AffiliateService:
         if status in {"deactivated", "closed"}:
             participant.deactivated_at = _now()
             pending = (
-                await self.db.execute(
-                    select(AffiliateReward).where(
-                        AffiliateReward.participant_id == participant.id,
-                        AffiliateReward.state.in_(["pending", "coolingOff"]),
+                (
+                    await self.db.execute(
+                        select(AffiliateReward).where(
+                            AffiliateReward.participant_id == participant.id,
+                            AffiliateReward.state.in_(["pending", "coolingOff"]),
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             for reward in pending:
                 net_cents = max(0, reward.gross_cents - reward.reversed_cents)
                 reward.state = "voided"

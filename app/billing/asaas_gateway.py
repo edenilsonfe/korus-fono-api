@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import urlencode
 
@@ -104,7 +105,8 @@ class AsaasPaymentGateway:
     def _matches_external_reference(
         payment: dict[str, Any], *, account_id: str, plan_slug: str
     ) -> bool:
-        return payment.get("externalReference") == f"{account_id}:{plan_slug}"
+        reference = str(payment.get("externalReference") or "").split(":")
+        return len(reference) in {2, 3} and reference[:2] == [account_id, plan_slug]
 
     async def create_customer(
         self, *, account_id: str, email: str, name: str, metadata: dict[str, Any] | None = None
@@ -285,6 +287,10 @@ class AsaasPaymentGateway:
             "external_subscription_id": str(subscription_id),
             "payment": payment,
         }
+
+    async def get_transfer(self, transfer_id: str) -> dict[str, Any]:
+        from urllib.parse import quote
+        return await request_json("GET", f"{self._base_url}/transfers/{quote(transfer_id, safe='')}", headers=self._headers())
 
     async def create_credit_card_payment(
         self,
@@ -556,17 +562,32 @@ class AsaasPaymentGateway:
                 raw_status = str(existing_checkout.get("status", "")).upper()
                 from app.billing.checkout_urls import build_in_app_payment_url
 
-                if meta.get("replace_existing_checkout"):
-                    if raw_status == "PAID":
-                        return {
-                            "external_subscription_id": None,
-                            "external_checkout_id": checkout_id,
-                            "session_id": checkout_id,
-                            "checkout_url": build_in_app_payment_url(checkout_id),
-                            "status": "completed",
-                            "invoice_url": self._hosted_checkout_url(existing_checkout),
-                            "preserve_existing_plan": True,
-                        }
+                try:
+                    items = existing_checkout.get("items")
+                    amount = (
+                        sum(Decimal(str(item["value"])) * Decimal(str(item["quantity"])) for item in items)
+                        if items
+                        else Decimal(str(existing_checkout["value"]))
+                    )
+                    existing_cents = int((amount * 100).quantize(Decimal("1")))
+                except (KeyError, TypeError, ValueError, InvalidOperation, OverflowError):
+                    existing_cents = None
+                if raw_status == "PAID":
+                    return {
+                        "external_subscription_id": None,
+                        "external_checkout_id": checkout_id,
+                        "session_id": checkout_id,
+                        "checkout_url": build_in_app_payment_url(checkout_id),
+                        "status": "completed",
+                        "invoice_url": self._hosted_checkout_url(existing_checkout),
+                        "preserve_existing_plan": bool(meta.get("replace_existing_checkout")),
+                        "affiliate_credit_not_applied": not meta.get("affiliate_credit_reused", False),
+                    }
+                if meta.get("affiliate_credit_cents") and existing_cents is None:
+                    raise PaymentGatewayError("Não foi possível conferir o valor do checkout com crédito")
+                if meta.get("replace_existing_checkout") or (
+                    existing_cents is not None and existing_cents != price_cents
+                ):
                     await self.cancel_checkout(checkout_id)
                     existing_checkout = None
 
@@ -601,6 +622,7 @@ class AsaasPaymentGateway:
                         "checkout_url": success_url,
                         "status": "completed",
                         "payment_method": payment_method_from_payload(existing_payment),
+                        "affiliate_credit_not_applied": not meta.get("affiliate_credit_reused", False),
                         "preserve_existing_plan": bool(
                             meta.get("replace_existing_checkout")
                         ),
@@ -666,6 +688,7 @@ class AsaasPaymentGateway:
                         "status": "completed",
                         "invoice_url": self._hosted_checkout_url(existing_checkout),
                         "preserve_existing_plan": True,
+                        "affiliate_credit_not_applied": not meta.get("affiliate_credit_reused", False),
                     }
                 await self.cancel_checkout(checkout_id)
 
@@ -702,6 +725,7 @@ class AsaasPaymentGateway:
                     "status": "completed",
                     "external_customer_id": str(customer_id),
                     "payment_method": payment_method_from_payload(existing_payment),
+                    "affiliate_credit_not_applied": not meta.get("affiliate_credit_reused", False),
                     "preserve_existing_plan": True,
                 }
             try:
@@ -748,6 +772,7 @@ class AsaasPaymentGateway:
                     "status": "completed",
                     "external_customer_id": str(customer_id),
                     "payment_method": payment_method_from_payload(payment),
+                    "affiliate_credit_not_applied": not meta.get("affiliate_credit_reused", False),
                 }
             payments = await self.list_subscription_payments(subscription_id)
             payment = payment or self._pick_payment(payments)
@@ -974,6 +999,14 @@ class AsaasPaymentGateway:
             "external_subscription_id": external_subscription_id,
             "next_due_date": next_due_date,
         }
+
+    async def set_recurring_price(self, *, external_subscription_id: str, value_cents: int) -> dict[str, Any]:
+        """Restore future cycles without changing the already issued first charge."""
+        return await request_json(
+            "PUT", f"{self._base_url}/subscriptions/{external_subscription_id}",
+            headers=self._headers(),
+            json_body={"value": round(value_cents / 100, 2), "updatePendingPayments": False},
+        )
 
     async def get_subscription_status(self, *, external_subscription_id: str) -> dict[str, Any]:
         data = await request_json(

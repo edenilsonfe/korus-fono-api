@@ -101,6 +101,7 @@ async def _make_professional(db, *, email, is_staff=False, specialty_key="fono")
         council="CRFa",
         phone="11999990000",
         is_staff=is_staff,
+        email_verified_at=datetime.now(timezone.utc),
         subscription_status="active",
         trial_ends_at=datetime.now(timezone.utc) + timedelta(days=30),
     )
@@ -166,6 +167,45 @@ async def test_unknown_flag_fail_closed(db):
     assert await service.is_enabled(pro, "does_not_exist") is False
     assert await service.is_enabled(pro, "ai_assistant") is True
     assert await service.is_enabled(pro, "demo_protocol") is False
+
+
+async def test_admin_can_toggle_affiliate_rollout_flags(db):
+    staff = await _make_professional(db, email="affiliate-admin@x.com", is_staff=True)
+    customer = await _make_professional(db, email="affiliate-customer@x.com")
+    keys = (
+        "affiliate_customer_program",
+        "affiliate_partner_program",
+        "affiliate_cash_payouts",
+    )
+    for key in keys:
+        db.add(FeatureFlag(key=key, description=key, enabled_global=False))
+    await db.commit()
+    service = FeatureFlagService(db)
+    client = await _client(db)
+    try:
+        async with client:
+            response = await client.get("/api/v1/admin/feature-flags", headers=_auth(staff))
+            assert response.status_code == 200
+            listed = {flag["key"]: flag for flag in response.json()}
+            for key in keys:
+                assert listed[key]["enabledGlobal"] is False
+                for enabled in (True, False):
+                    response = await client.patch(
+                        f"/api/v1/admin/feature-flags/{key}",
+                        headers=_auth(staff),
+                        json={"enabledGlobal": enabled},
+                    )
+                    assert response.status_code == 200, response.text
+                    assert await service.is_enabled(customer, key) is enabled
+                    assert await service.is_globally_enabled(key) is enabled
+            response = await client.patch(
+                f"/api/v1/admin/feature-flags/{keys[0]}",
+                headers=_auth(customer),
+                json={"enabledGlobal": True},
+            )
+            assert response.status_code == 403
+    finally:
+        _clear()
 
 
 async def test_override_forces_flag(db):

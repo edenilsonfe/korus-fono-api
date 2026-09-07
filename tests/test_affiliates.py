@@ -55,6 +55,7 @@ async def _professional(db, *, email: str, **values) -> Professional:
         cpf=values.get("cpf", ""),
         email_verified_at=values.get("email_verified_at", datetime.now(UTC)),
         subscription_status=values.get("subscription_status", "trialing"),
+        trial_ends_at=datetime.now(UTC) + timedelta(days=7),
         is_staff=values.get("is_staff", False),
         admin_role=values.get("admin_role"),
     )
@@ -92,6 +93,153 @@ async def test_permissions_are_limited_to_billing_and_superadmin():
     assert PERMISSION_AFFILIATES_WRITE not in permissions_for_role("product")
 
 
+async def test_signed_attribution_expiry_scope_and_expired_customer(db_session):
+    import jwt
+
+    from app.core.config import get_settings
+
+    policy = await _active_policy(db_session, mode="customer")
+    customer = await _professional(db_session, email="signed@example.com")
+    service = AffiliateService(db_session)
+    result = await service.opt_in_customer(
+        professional=customer, terms_version=policy.terms_version
+    )
+    public = await service.resolve_public_code(result.code)
+    service.validate_attribution_token(result.code, public["attributionToken"])
+    settings = get_settings()
+    for code, token in [
+        ("othercode", public["attributionToken"]),
+        (result.code, None),
+        (
+            result.code,
+            jwt.encode(
+                {
+                    "type": "affiliate_attribution",
+                    "code": result.code,
+                    "iat": datetime.now(UTC) - timedelta(days=40),
+                    "exp": datetime.now(UTC) - timedelta(days=1),
+                },
+                settings.jwt_secret,
+                algorithm=settings.jwt_algorithm,
+            ),
+        ),
+    ]:
+        with pytest.raises(AffiliateForbiddenError):
+            service.validate_attribution_token(code, token)
+    customer.trial_ends_at = datetime.now(UTC) - timedelta(seconds=1)
+    await db_session.flush()
+    with pytest.raises(AffiliateNotFoundError):
+        await service.resolve_public_code(result.code)
+
+
+async def test_customer_dashboard_status_and_invitation_lifecycle(db_session):
+    customer_policy = await _active_policy(db_session, mode="customer")
+    partner_policy = await _active_policy(db_session, mode="partner")
+    professional = await _professional(db_session, email="lifecycle@example.com")
+    service = AffiliateService(db_session)
+    assert (await service.customer_dashboard(professional))["participant"] is None
+    invited = await service.invite_partner(
+        email=professional.email.upper(),
+        public_name="Partner",
+        commission_override_bps=2500,
+    )
+    same = await service.invite_partner(
+        email=professional.email,
+        public_name="Partner updated",
+        commission_override_bps=2200,
+    )
+    assert invited.id == same.id
+    await service.activate_partner(
+        participant=invited, terms_version=partner_policy.terms_version
+    )
+    await service.opt_in_customer(
+        professional=professional, terms_version=customer_policy.terms_version
+    )
+    assert (await service.customer_dashboard(professional))[
+        "participant"
+    ].id == invited.id
+    assert len(await service.list_participants(query="lifecycle")) == 1
+    await service.set_participant_status(
+        participant_id=invited.id, status="suspended", reason="review"
+    )
+    with pytest.raises(AffiliateForbiddenError):
+        await service.opt_in_customer(
+            professional=professional, terms_version=customer_policy.terms_version
+        )
+    await service.set_participant_status(
+        participant_id=invited.id, status="deactivated", reason="closed program"
+    )
+    with pytest.raises(AffiliateForbiddenError):
+        await service.activate_partner(
+            participant=invited, terms_version=partner_policy.terms_version
+        )
+
+
+async def test_invalid_optional_referral_does_not_block_new_account(
+    api_client, db_session
+):
+    response = await api_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "expired-cookie-signup@example.com",
+            "password": "testpass123",
+            "name": "Cadastro",
+            "specialtyKey": "fono",
+            "phone": "11999999999",
+            "referralCode": "expiredcookie123",
+            "referralToken": "invalid-proof",
+        },
+    )
+    assert response.status_code == 201, response.text
+    professional = await db_session.scalar(
+        select(Professional).where(
+            Professional.email == "expired-cookie-signup@example.com"
+        )
+    )
+    assert professional is not None
+    assert (
+        await db_session.scalar(
+            select(AffiliateReferral).where(
+                AffiliateReferral.referred_professional_id == professional.id
+            )
+        )
+        is None
+    )
+
+
+async def test_admin_correction_retry_is_idempotent_and_conflicts_are_explicit(
+    api_client, db_session
+):
+    admin = await _professional(
+        db_session, email="correction@example.com", is_staff=True, admin_role="billing"
+    )
+    participant = AffiliateParticipant(
+        email="corrected@example.com", status="active", partner_enabled=True
+    )
+    db_session.add(participant)
+    await db_session.commit()
+    body = {
+        "participantId": str(participant.id),
+        "account": "available",
+        "amountCents": 100,
+        "reason": "Confirmed evidence",
+        "evidenceReference": "evidence-" + "x" * 240,
+    }
+    url = "/api/v1/admin/affiliates/ledger/corrections"
+    first = await api_client.post(url, headers=_auth(admin), json=body)
+    assert first.status_code == 201
+    repeated = await api_client.post(url, headers=_auth(admin), json=body)
+    assert repeated.status_code == 201 and repeated.json()["id"] == first.json()["id"]
+    assert (
+        await api_client.post(
+            url, headers=_auth(admin), json={**body, "amountCents": 200}
+        )
+    ).status_code == 409
+    assert (await AffiliateService(db_session).balances(participant.id))[
+        "available"
+    ] == 100
+
+
 async def test_customer_opt_in_requires_verified_eligible_account(db_session):
     policy = await _active_policy(db_session, mode="customer")
     eligible = await _professional(db_session, email="eligible-affiliate@example.com")
@@ -119,9 +267,9 @@ async def test_customer_opt_in_requires_verified_eligible_account(db_session):
         terms_version=next_policy.terms_version,
     )
     assert renewed.code == result.code
-    assert (
-        await AffiliateService(db_session).resolve_public_code(renewed.code)
-    )["code"] == renewed.code
+    assert (await AffiliateService(db_session).resolve_public_code(renewed.code))[
+        "code"
+    ] == renewed.code
 
     expired = await _professional(
         db_session,
@@ -136,7 +284,9 @@ async def test_customer_opt_in_requires_verified_eligible_account(db_session):
         )
 
 
-async def test_attribution_is_first_valid_immutable_and_blocks_self_referral(db_session):
+async def test_attribution_is_first_valid_immutable_and_blocks_self_referral(
+    db_session,
+):
     policy = await _active_policy(db_session, mode="customer")
     referrer = await _professional(
         db_session,
@@ -213,7 +363,9 @@ async def test_attribution_is_first_valid_immutable_and_blocks_self_referral(db_
         )
 
 
-async def test_payment_received_moves_reward_after_cooling_off_and_is_idempotent(db_session):
+async def test_payment_received_moves_reward_after_cooling_off_and_is_idempotent(
+    db_session,
+):
     policy = await _active_policy(db_session, mode="partner")
     participant = AffiliateParticipant(
         email="partner@example.com",
@@ -288,17 +440,20 @@ async def test_payment_received_moves_reward_after_cooling_off_and_is_idempotent
     assert same_reward.id == reward.id
     assert same_reward.state == "coolingOff"
     assert same_reward.available_at is not None
-    rewards = (
-        await db_session.execute(select(AffiliateReward))
-    ).scalars().all()
+    rewards = (await db_session.execute(select(AffiliateReward))).scalars().all()
     assert len(rewards) == 1
     pending_entries = (
-        await db_session.execute(
-            select(AffiliateLedgerEntry).where(
-                AffiliateLedgerEntry.idempotency_key == "reward:pay_affiliate_1:pending"
+        (
+            await db_session.execute(
+                select(AffiliateLedgerEntry).where(
+                    AffiliateLedgerEntry.idempotency_key
+                    == "reward:pay_affiliate_1:pending"
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(pending_entries) == 1
 
     reversed_reward = await service.reverse_external_payment(
@@ -438,15 +593,20 @@ async def test_rejecting_risk_review_voids_unreleased_reward_without_mutating_hi
     assert reviewed.review_state == "rejected"
     assert reward.state == "voided"
     assert balances["pending"] == 0
-    assert len(
-        (
-            await db_session.execute(
-                select(AffiliateLedgerEntry).where(
-                    AffiliateLedgerEntry.reward_id == reward.id
+    assert (
+        len(
+            (
+                await db_session.execute(
+                    select(AffiliateLedgerEntry).where(
+                        AffiliateLedgerEntry.reward_id == reward.id
+                    )
                 )
             )
-        ).scalars().all()
-    ) == 2
+            .scalars()
+            .all()
+        )
+        == 2
+    )
 
 
 async def test_admin_list_never_exposes_fiscal_secrets(api_client, db_session):

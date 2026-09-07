@@ -5,11 +5,12 @@ import logging
 import uuid
 from calendar import monthrange
 from datetime import UTC, date, datetime
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.billing.asaas_gateway import AsaasPaymentGateway
@@ -24,7 +25,6 @@ from app.services.email_verification import (
 )
 from app.services.meta_pixel_service import MetaPixelService
 from app.services.posthog_analytics_service import PostHogAnalyticsService
-from app.services.affiliate_service import AffiliateService
 
 logger = logging.getLogger(__name__)
 
@@ -127,13 +127,14 @@ class SaasBillingService:
         status: str = "received",
     ) -> BillingEvent | None:
         existing = await self.db.execute(
-            select(BillingEvent.id).where(
+            select(BillingEvent).where(
                 BillingEvent.provider == provider,
                 BillingEvent.external_event_id == external_event_id,
-            )
+            ).with_for_update().execution_options(populate_existing=True)
         )
-        if existing.scalar_one_or_none():
-            return None
+        prior = existing.scalar_one_or_none()
+        if prior:
+            return None if prior.status == "processed" else prior
         row = BillingEvent(
             id=uuid.uuid4(),
             provider=provider,
@@ -144,10 +145,17 @@ class SaasBillingService:
             professional_id=UUID(professional_id) if professional_id else None,
             created_at=datetime.now(UTC),
         )
-        self.db.add(row)
+        try:
+            async with self.db.begin_nested():
+                self.db.add(row)
+                await self.db.flush()
+        except IntegrityError:
+            pass
         await self.db.commit()
-        await self.db.refresh(row)
-        return row
+        row = (await self.db.execute(select(BillingEvent).where(
+            BillingEvent.provider == provider, BillingEvent.external_event_id == external_event_id
+        ).with_for_update().execution_options(populate_existing=True))).scalar_one()
+        return None if row.status == "processed" else row
 
     async def mark_processed(self, event_id: uuid.UUID) -> None:
         row = (
@@ -298,6 +306,12 @@ class SaasBillingService:
         track_purchase: bool = True,
     ) -> None:
         for ev in events:
+            stored_event = (await self.db.execute(select(BillingEvent).where(
+                BillingEvent.external_event_id == ev.external_event_id,
+                BillingEvent.provider == str((ev.payload or {}).get("provider") or "stub"),
+            ).with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
+            if stored_event and stored_event.status == "processed" and track_purchase:
+                continue
             professional_id = await self._resolve_professional_id(ev)
             if not professional_id:
                 logger.info("Skipping billing event %s: no professional_id", ev.external_event_id)
@@ -310,6 +324,8 @@ class SaasBillingService:
                 select(Subscription)
                 .where(Subscription.professional_id == professional_uuid)
                 .order_by(Subscription.updated_at.desc())
+                .with_for_update(of=Subscription)
+                .execution_options(populate_existing=True)
             )
             subscriptions = list(sub_result.scalars().unique().all())
             if not subscriptions:
@@ -336,7 +352,34 @@ class SaasBillingService:
                     ),
                     None,
                 )
+            from app.services.affiliate_billing_service import AffiliateBillingService
+            payment_plan = await self.db.scalar(select(Plan).where(Plan.slug == str(payload.get("plan_slug") or "")))
+            if payment_plan is None:
+                payment_plan = await self.db.get(Plan, subscriptions[0].plan_id)
+            await AffiliateBillingService(self.db).apply(
+                payload=payload, event_id=ev.external_event_id,
+                professional_id=professional_uuid,
+                plan_interval=payment_plan.billing_interval if payment_plan else "",
+                reservation_id=str(target.checkout_session_id) if target and target.checkout_session_id else "",
+            )
+            if payload.get("provider") == "asaas" and ev.event_type == InternalBillingEventType.PAYMENT_SUCCEEDED:
+                terminal = await self.db.scalar(select(BillingEvent.id).where(
+                    BillingEvent.provider == "asaas",
+                    BillingEvent.payload["id"].as_string() == str(payload.get("id") or ""),
+                    BillingEvent.payload["provider_event"].as_string().in_(
+                        ["PAYMENT_REFUNDED", "PAYMENT_CHARGEBACK_REQUESTED"]),
+                ).limit(1))
+                if terminal:
+                    if stored_event:
+                        stored_event.status = "processed"
+                        stored_event.processed_at = datetime.now(UTC)
+                    await self.db.commit()
+                    continue
             if target is None and (external_subscription_id or external_checkout_id):
+                if stored_event:
+                    stored_event.status = "processed"
+                    stored_event.processed_at = datetime.now(UTC)
+                await self.db.commit()
                 logger.info(
                     "Skipping stale billing event %s: provider resource is no longer current",
                     ev.external_event_id,
@@ -349,11 +392,29 @@ class SaasBillingService:
                         target = sub
                         break
 
+            if (ev.event_type == InternalBillingEventType.PAYMENT_SUCCEEDED
+                    and payload.get("provider") == "asaas" and target.external_subscription_id
+                    and target.checkout_recurring_price_cents):
+                await AsaasPaymentGateway().set_recurring_price(
+                    external_subscription_id=target.external_subscription_id,
+                    value_cents=target.checkout_recurring_price_cents)
+                target.checkout_recurring_price_cents = None
+
+            if ev.event_type == InternalBillingEventType.PAYMENT_PARTIALLY_REFUNDED:
+                if stored_event:
+                    stored_event.status = "processed"
+                    stored_event.processed_at = datetime.now(UTC)
+                await self.db.commit()
+                continue
             if ev.event_type == InternalBillingEventType.PAYMENT_DELETED:
                 await self._cancel_never_paid_asaas_subscription(
                     target=target,
                     payload=payload,
                 )
+                if stored_event:
+                    stored_event.status = "processed"
+                    stored_event.processed_at = datetime.now(UTC)
+                await self.db.commit()
                 continue
 
             sub_status = self._target_subscription_status(ev)
@@ -441,64 +502,9 @@ class SaasBillingService:
                         sub_status, professional.subscription_status
                     )
 
-            provider_event = str(payload.get("provider_event") or "")
-            source_payment_id = str(
-                payload.get("id")
-                or payload.get("payment_id")
-                or purchase_deduplication_id(ev)
-            )
-            if ev.event_type == InternalBillingEventType.PAYMENT_SUCCEEDED and plan_row:
-                fallback_revenue_cents = (
-                    target.checkout_charge_cents
-                    if target.checkout_charge_cents is not None
-                    else plan_row.price_cents
-                )
-                external_revenue_cents = _payment_value_cents(
-                    payload,
-                    fallback_cents=fallback_revenue_cents,
-                )
-                await AffiliateService(self.db).record_external_payment(
-                    referred_professional_id=professional_uuid,
-                    external_payment_id=source_payment_id,
-                    external_event_id=ev.external_event_id,
-                    provider_event=provider_event or "PAYMENT_CONFIRMED",
-                    received_revenue_cents=external_revenue_cents,
-                    plan_interval=plan_row.billing_interval,
-                    occurred_at=payment_at or datetime.now(UTC),
-                )
-            elif ev.event_type in {
-                InternalBillingEventType.PAYMENT_FAILED,
-                InternalBillingEventType.PAYMENT_DELETED,
-            }:
-                raw_reversal = payload.get("value") or payload.get("refundedValue")
-                reversed_cents = None
-                if raw_reversal is not None:
-                    try:
-                        reversed_cents = int(round(float(raw_reversal) * 100))
-                    except (TypeError, ValueError):
-                        reversed_cents = None
-                await AffiliateService(self.db).reverse_external_payment(
-                    external_payment_id=source_payment_id,
-                    external_event_id=ev.external_event_id,
-                    reversed_revenue_cents=reversed_cents,
-                )
-                if target.checkout_session_id is not None:
-                    from app.services.affiliate_credit_service import AffiliateCreditService
-
-                    await AffiliateCreditService(self.db).release_checkout_reservation(
-                        reservation_id=str(target.checkout_session_id)
-                    )
-
-            if (
-                provider_event == "PAYMENT_RECEIVED"
-                and target.checkout_session_id is not None
-            ):
-                from app.services.affiliate_credit_service import AffiliateCreditService
-
-                await AffiliateCreditService(self.db).settle_checkout_reservation(
-                    reservation_id=str(target.checkout_session_id)
-                )
-
+            if stored_event:
+                stored_event.status = "processed"
+                stored_event.processed_at = datetime.now(UTC)
             await self.db.commit()
             logger.info(
                 "Applied billing event %s -> professional=%s subscription=%s",

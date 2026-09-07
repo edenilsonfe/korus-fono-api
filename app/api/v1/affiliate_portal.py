@@ -1,9 +1,19 @@
-from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Request, Response
+from uuid import UUID
+
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Cookie,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.core.client_ip import get_client_ip
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.affiliate import (
     AffiliateCode,
@@ -17,19 +27,20 @@ from app.models.affiliate import (
 from app.schemas.affiliate import (
     AffiliateFiscalProfileBody,
     AffiliateFiscalProfileItem,
+    AffiliateOptInBody,
+    AffiliateOptInResponse,
     AffiliatePayoutItem,
     AffiliatePayoutRequestBody,
     AffiliatePortalDashboard,
     AffiliatePortalExchangeBody,
     AffiliatePortalLinkRequest,
     AffiliatePortalSession,
-    AffiliateOptInBody,
-    AffiliateOptInResponse,
 )
 from app.schemas.common import MessageResponse
 from app.services.affiliate_payout_service import (
     AffiliatePayoutConflictError,
     AffiliatePayoutForbiddenError,
+    AffiliatePayoutNotFoundError,
     AffiliatePayoutService,
 )
 from app.services.affiliate_portal_service import (
@@ -79,15 +90,21 @@ async def _require_current_partner_terms(
     db: AsyncSession,
 ) -> AffiliatePolicy:
     policy = (
-        await db.execute(
-            select(AffiliatePolicy).where(
-                AffiliatePolicy.mode == "partner",
-                AffiliatePolicy.status == "active",
+        (
+            await db.execute(
+                select(AffiliatePolicy).where(
+                    AffiliatePolicy.mode == "partner",
+                    AffiliatePolicy.status == "active",
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if policy is None:
-        raise HTTPException(status_code=503, detail="Programa de parceiros indisponível")
+        raise HTTPException(
+            status_code=503, detail="Programa de parceiros indisponível"
+        )
     if participant.partner_terms_version != policy.terms_version:
         raise HTTPException(status_code=409, detail="Aceite a versão atual dos termos")
     return policy
@@ -112,7 +129,9 @@ async def request_portal_link(
                 participant.public_name,
                 raw_token,
             )
-    return MessageResponse(message="Se o cadastro estiver habilitado, enviaremos o link de acesso.")
+    return MessageResponse(
+        message="Se o cadastro estiver habilitado, enviaremos o link de acesso."
+    )
 
 
 @router.post("/exchange", response_model=AffiliatePortalSession)
@@ -127,14 +146,21 @@ async def exchange_portal_link(
         raise HTTPException(status_code=400, detail=exc.detail) from exc
     token = AffiliatePortalService.create_session_token(participant)
     policy = (
-        await db.execute(
-            select(AffiliatePolicy).where(
-                AffiliatePolicy.mode == "partner", AffiliatePolicy.status == "active"
+        (
+            await db.execute(
+                select(AffiliatePolicy).where(
+                    AffiliatePolicy.mode == "partner",
+                    AffiliatePolicy.status == "active",
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if policy is None:
-        raise HTTPException(status_code=503, detail="Programa de parceiros indisponível")
+        raise HTTPException(
+            status_code=503, detail="Programa de parceiros indisponível"
+        )
     response.set_cookie(
         PORTAL_COOKIE,
         token,
@@ -173,14 +199,21 @@ async def portal_me(
     db: AsyncSession = Depends(get_db),
 ):
     policy = (
-        await db.execute(
-            select(AffiliatePolicy).where(
-                AffiliatePolicy.mode == "partner", AffiliatePolicy.status == "active"
+        (
+            await db.execute(
+                select(AffiliatePolicy).where(
+                    AffiliatePolicy.mode == "partner",
+                    AffiliatePolicy.status == "active",
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if policy is None:
-        raise HTTPException(status_code=503, detail="Programa de parceiros indisponível")
+        raise HTTPException(
+            status_code=503, detail="Programa de parceiros indisponível"
+        )
     return {
         "participantId": participant.id,
         "publicName": participant.public_name,
@@ -197,31 +230,52 @@ async def portal_dashboard(
 ):
     policy = await _require_current_partner_terms(participant, db)
     code = (
-        await db.execute(
-            select(AffiliateCode).where(
-                AffiliateCode.participant_id == participant.id,
-                AffiliateCode.mode == "partner",
-                AffiliateCode.status == "active",
-                AffiliateCode.terms_version == policy.terms_version,
+        (
+            await db.execute(
+                select(AffiliateCode).where(
+                    AffiliateCode.participant_id == participant.id,
+                    AffiliateCode.mode == "partner",
+                    AffiliateCode.status == "active",
+                    AffiliateCode.terms_version == policy.terms_version,
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     referrals = (
-        await db.execute(
-            select(AffiliateReferral)
-            .where(AffiliateReferral.participant_id == participant.id)
-            .order_by(AffiliateReferral.created_at.desc())
+        (
+            await db.execute(
+                select(AffiliateReferral)
+                .where(AffiliateReferral.participant_id == participant.id)
+                .order_by(AffiliateReferral.created_at.desc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     rewards = (
-        await db.execute(
-            select(AffiliateReward)
-            .where(AffiliateReward.participant_id == participant.id)
-            .order_by(AffiliateReward.created_at.desc())
+        (
+            await db.execute(
+                select(AffiliateReward)
+                .where(AffiliateReward.participant_id == participant.id)
+                .order_by(AffiliateReward.created_at.desc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return {
         "participant": participant,
+        "commissionBps": participant.commission_override_bps
+        if participant.commission_override_bps is not None
+        else policy.commission_bps,
+        "referralDiscountBps": policy.referral_discount_bps,
+        "payoutMinimumCents": await AffiliatePayoutService(db).minimum_payout(
+            participant
+        ),
+        "cashEnabled": get_settings().affiliate_cash_payouts_enabled
+        and await FeatureFlagService(db).is_globally_enabled("affiliate_cash_payouts"),
         "code": code.code if code else None,
         "balances": await AffiliateService(db).balances(participant.id),
         "referrals": referrals,
@@ -285,12 +339,16 @@ async def portal_list_fiscal_profiles(
     db: AsyncSession = Depends(get_db),
 ):
     return (
-        await db.execute(
-            select(AffiliateFiscalProfile)
-            .where(AffiliateFiscalProfile.participant_id == participant.id)
-            .order_by(AffiliateFiscalProfile.version.desc())
+        (
+            await db.execute(
+                select(AffiliateFiscalProfile)
+                .where(AffiliateFiscalProfile.participant_id == participant.id)
+                .order_by(AffiliateFiscalProfile.version.desc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
 
 @router.post("/payouts", response_model=AffiliatePayoutItem)
@@ -302,14 +360,16 @@ async def portal_request_payout(
 ):
     _require_portal_mutation_header(request)
     await _require_current_partner_terms(participant, db)
-    enabled = get_settings().affiliate_cash_payouts_enabled and await FeatureFlagService(
-        db
-    ).is_globally_enabled("affiliate_cash_payouts")
+    enabled = (
+        get_settings().affiliate_cash_payouts_enabled
+        and await FeatureFlagService(db).is_globally_enabled("affiliate_cash_payouts")
+    )
     try:
         payout = await AffiliatePayoutService(db).request_cash_payout(
             participant=participant,
             amount_cents=body.amount_cents,
             cash_enabled=enabled,
+            request_id=body.request_id,
         )
         await db.commit()
         await db.refresh(payout)
@@ -324,9 +384,33 @@ async def portal_list_payouts(
     db: AsyncSession = Depends(get_db),
 ):
     return (
-        await db.execute(
-            select(AffiliatePayoutRequest)
-            .where(AffiliatePayoutRequest.participant_id == participant.id)
-            .order_by(AffiliatePayoutRequest.requested_at.desc())
+        (
+            await db.execute(
+                select(AffiliatePayoutRequest)
+                .where(AffiliatePayoutRequest.participant_id == participant.id)
+                .order_by(AffiliatePayoutRequest.requested_at.desc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
+
+
+@router.delete("/payouts/{payout_id}", response_model=AffiliatePayoutItem)
+async def portal_cancel_payout(
+    payout_id: UUID,
+    request: Request,
+    participant: AffiliateParticipant = Depends(get_portal_participant),
+    db: AsyncSession = Depends(get_db),
+):
+    _require_portal_mutation_header(request)
+    try:
+        payout = await AffiliatePayoutService(db).cancel_payout(
+            payout_id=payout_id, participant_id=participant.id
+        )
+        await db.commit()
+        return payout
+    except AffiliatePayoutNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.detail) from exc
+    except AffiliatePayoutConflictError as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc

@@ -9,6 +9,7 @@ class InternalBillingEventType(str, Enum):
     SUBSCRIPTION_CANCELED = "subscription.canceled"
     PAYMENT_SUCCEEDED = "payment.succeeded"
     PAYMENT_FAILED = "payment.failed"
+    PAYMENT_PARTIALLY_REFUNDED = "payment.partially_refunded"
     PAYMENT_DELETED = "payment.deleted"
     CHECKOUT_COMPLETED = "checkout.completed"
     UNKNOWN = "unknown"

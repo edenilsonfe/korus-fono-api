@@ -4,8 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.deps import require_verified_professional
 from app.db.session import get_db
+from app.models.affiliate import (
+    AffiliateFiscalProfile,
+    AffiliateParticipant,
+    AffiliatePayoutRequest,
+)
 from app.models.professional import Professional
 from app.schemas.affiliate import (
     AffiliateCreditRedemptionBody,
@@ -15,17 +21,10 @@ from app.schemas.affiliate import (
     AffiliateFiscalProfileItem,
     AffiliateOptInBody,
     AffiliateOptInResponse,
-    PublicAffiliateCodeResponse,
     AffiliatePayoutItem,
     AffiliatePayoutRequestBody,
+    PublicAffiliateCodeResponse,
 )
-from app.models.affiliate import (
-    AffiliateFiscalProfile,
-    AffiliateParticipant,
-    AffiliatePayoutRequest,
-)
-from app.core.config import get_settings
-from app.services.feature_flag_service import FeatureFlagService
 from app.services.affiliate_credit_service import (
     AffiliateCreditForbiddenError,
     AffiliateCreditService,
@@ -42,6 +41,7 @@ from app.services.affiliate_service import (
     AffiliateNotFoundError,
     AffiliateService,
 )
+from app.services.feature_flag_service import FeatureFlagService
 
 router = APIRouter(prefix="/affiliates", tags=["affiliates"])
 
@@ -57,7 +57,9 @@ async def _customer_participant(
         )
     ).scalar_one_or_none()
     if participant is None or not participant.customer_enabled:
-        raise HTTPException(status_code=403, detail="Ative o programa de indicação primeiro")
+        raise HTTPException(
+            status_code=403, detail="Ative o programa de indicação primeiro"
+        )
     return participant
 
 
@@ -83,6 +85,15 @@ async def affiliate_dashboard(
     db: AsyncSession = Depends(get_db),
 ):
     result = await AffiliateService(db).customer_dashboard(professional)
+    result["payoutMinimumCents"] = await AffiliatePayoutService(db).minimum_payout(
+        result["participant"]
+    )
+    result["cashEnabled"] = (
+        get_settings().affiliate_cash_payouts_enabled
+        and await FeatureFlagService(db).is_enabled(
+            professional, "affiliate_cash_payouts"
+        )
+    )
     if not await FeatureFlagService(db).is_enabled(
         professional, "affiliate_customer_program"
     ):
@@ -104,7 +115,9 @@ async def affiliate_customer_opt_in(
         if not await FeatureFlagService(db).is_enabled(
             professional, "affiliate_customer_program"
         ):
-            raise AffiliateForbiddenError("Programa de indicação ainda não está disponível")
+            raise AffiliateForbiddenError(
+                "Programa de indicação ainda não está disponível"
+            )
         result = await AffiliateService(db).opt_in_customer(
             professional=professional,
             terms_version=body.terms_version,
@@ -150,12 +163,16 @@ async def list_my_affiliate_fiscal_profiles(
 ):
     participant = await _customer_participant(professional, db)
     return (
-        await db.execute(
-            select(AffiliateFiscalProfile)
-            .where(AffiliateFiscalProfile.participant_id == participant.id)
-            .order_by(AffiliateFiscalProfile.version.desc())
+        (
+            await db.execute(
+                select(AffiliateFiscalProfile)
+                .where(AffiliateFiscalProfile.participant_id == participant.id)
+                .order_by(AffiliateFiscalProfile.version.desc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
 
 @router.post(
@@ -192,12 +209,16 @@ async def list_my_affiliate_payouts(
 ):
     participant = await _customer_participant(professional, db)
     return (
-        await db.execute(
-            select(AffiliatePayoutRequest)
-            .where(AffiliatePayoutRequest.participant_id == participant.id)
-            .order_by(AffiliatePayoutRequest.requested_at.desc())
+        (
+            await db.execute(
+                select(AffiliatePayoutRequest)
+                .where(AffiliatePayoutRequest.participant_id == participant.id)
+                .order_by(AffiliatePayoutRequest.requested_at.desc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
 
 @router.post(
@@ -211,14 +232,18 @@ async def request_my_affiliate_payout(
     db: AsyncSession = Depends(get_db),
 ):
     participant = await _customer_participant(professional, db)
-    enabled = get_settings().affiliate_cash_payouts_enabled and await FeatureFlagService(
-        db
-    ).is_enabled(professional, "affiliate_cash_payouts")
+    enabled = (
+        get_settings().affiliate_cash_payouts_enabled
+        and await FeatureFlagService(db).is_enabled(
+            professional, "affiliate_cash_payouts"
+        )
+    )
     try:
         payout = await AffiliatePayoutService(db).request_cash_payout(
             participant=participant,
             amount_cents=body.amount_cents,
             cash_enabled=enabled,
+            request_id=body.request_id,
         )
         await db.commit()
         await db.refresh(payout)
