@@ -386,6 +386,13 @@ async def create_billing_checkout(
         )
 
     existing_sub = await _latest_subscription(db, professional.id)
+    if existing_sub:
+        try:
+            await AffiliateCreditService(db).advance_overdue_checkout(existing_sub, gateway)
+        except AffiliateCreditForbiddenError as exc:
+            raise HTTPException(status_code=409, detail=exc.detail) from exc
+        except PaymentGatewayError as exc:
+            raise _checkout_gateway_error() from exc
     reusable_sub = (
         existing_sub
         if existing_sub and existing_sub.status in ("incomplete", "trialing", "past_due")
@@ -588,6 +595,9 @@ async def create_billing_checkout(
             professional_id=professional.id,
             charge_cents=charge_cents,
             reservation_id=credit_reservation_id,
+            existing_external_charge=bool(
+                existing_sub and (existing_sub.external_checkout_id or existing_sub.external_subscription_id)
+            ),
         )
         if credit_reservation.reused and not credit_reservation.payment_id and credit_reservation.external_charge_cents:
             raise AffiliateCreditForbiddenError("A cobrança com crédito aguarda conciliação. Verifique o status antes de tentar novamente")
@@ -598,6 +608,7 @@ async def create_billing_checkout(
     if credit_reservation.applied_cents:
         metadata["affiliate_credit_cents"] = credit_reservation.applied_cents
         metadata["affiliate_credit_reservation_id"] = credit_reservation_id
+        metadata["affiliate_credit_reused"] = credit_reservation.reused
         # Persist before the provider can create a charge or deliver a webhook.
         await db.commit()
 
@@ -687,6 +698,17 @@ async def create_billing_checkout(
             exc_info=True,
         )
         raise _checkout_gateway_error() from exc
+
+    if credit_reservation.applied_cents and session.get("affiliate_credit_not_applied"):
+        await AffiliateCreditService(db).release_checkout_reservation(
+            reservation_id=credit_reservation_id
+        )
+        credit_reservation.applied_cents = 0
+        metadata.pop("affiliate_credit_cents", None)
+        metadata.pop("affiliate_credit_reservation_id", None)
+        charge_cents = existing_sub.checkout_charge_cents or plan.price_cents
+        metadata["charge_cents"] = charge_cents
+        await db.commit()
 
     preserve_existing_plan = bool(session.get("preserve_existing_plan"))
     if preserve_existing_plan and existing_sub:

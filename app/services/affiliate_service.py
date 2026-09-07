@@ -112,25 +112,44 @@ class AffiliateService:
         ]
         return {normalized for value in values if (normalized := _digits(value))}
 
-    async def _reject_document_self_referral(
+    async def _referrer(self, participant: AffiliateParticipant) -> Professional | None:
+        if participant.professional_id:
+            return await self.db.get(Professional, participant.professional_id)
+        # External partners may create their clinical account after accepting terms.
+        return await self.db.scalar(
+            select(Professional)
+            .where(func.lower(Professional.email) == participant.email.strip().lower())
+            .limit(1)
+        )
+
+    async def _is_self_referral(
+        self, participant: AffiliateParticipant, referred: Professional
+    ) -> bool:
+        if participant.email.strip().lower() == referred.email.strip().lower():
+            return True
+        referrer = await self._referrer(participant)
+        if referrer is None:
+            return False
+        if referrer.id == referred.id:
+            return True
+        return bool(
+            (await self._professional_documents(referrer.id)).intersection(
+                await self._professional_documents(referred.id)
+            )
+        )
+
+    async def _reject_self_referral(
         self,
         *,
         referral: AffiliateReferral,
         participant: AffiliateParticipant,
     ) -> bool:
-        if participant.professional_id is None:
-            return False
-        referrer_documents = await self._professional_documents(
-            participant.professional_id
-        )
-        referred_documents = await self._professional_documents(
-            referral.referred_professional_id
-        )
-        if not referrer_documents.intersection(referred_documents):
+        referred = await self.db.get(Professional, referral.referred_professional_id)
+        if referred is None or not await self._is_self_referral(participant, referred):
             return False
         referral.status = "rejected"
         referral.review_state = "rejected"
-        referral.review_reason = "Autoindicação por documento de cobrança"
+        referral.review_reason = "Autoindicação por identidade ou documento de cobrança"
         await self.db.flush()
         return True
 
@@ -465,32 +484,15 @@ class AffiliateService:
             raise AffiliateForbiddenError("Código de cliente indisponível")
         if code_row.mode == "partner" and not participant.partner_enabled:
             raise AffiliateForbiddenError("Código de parceiro indisponível")
-        if participant.professional_id == referred_professional.id:
+        if await self._is_self_referral(participant, referred_professional):
             raise AffiliateForbiddenError("Autoindicação não é permitida")
-        referrer = (
-            await self.db.get(Professional, participant.professional_id)
-            if participant.professional_id
-            else None
-        )
-        referrer_document = (
-            _digits(referrer.cpf or referrer.billing_cnpj) if referrer else ""
-        )
+        referrer = await self._referrer(participant)
         if referred_professional.is_staff or (referrer and referrer.is_staff):
             raise AffiliateForbiddenError("Contas da equipe não participam do programa")
         if code_row.mode == "customer" and (
             not referrer or not await self.customer_eligible(referrer)
         ):
             raise AffiliateForbiddenError("Indicador sem assinatura elegível")
-        referred_document = _digits(
-            referred_professional.cpf or referred_professional.billing_cnpj
-        )
-        if (
-            referrer_document
-            and referred_document
-            and referrer_document == referred_document
-        ):
-            raise AffiliateForbiddenError("Autoindicação não é permitida")
-
         policy = await self._active_policy(code_row.mode)
         accepted_terms = (
             participant.customer_terms_version
@@ -574,7 +576,7 @@ class AffiliateService:
         ):
             return 0, referral
         participant = await self.db.get(AffiliateParticipant, referral.participant_id)
-        if participant is None or await self._reject_document_self_referral(
+        if participant is None or await self._reject_self_referral(
             referral=referral,
             participant=participant,
         ):
@@ -644,7 +646,7 @@ class AffiliateService:
             return None
         if participant is None or participant.status not in {"active", "suspended"}:
             return None
-        if await self._reject_document_self_referral(
+        if await self._reject_self_referral(
             referral=referral,
             participant=participant,
         ):

@@ -249,3 +249,61 @@ async def test_magic_link_consumed_once_with_two_transactions(pg_factory):
     assert sorted(
         await asyncio.wait_for(asyncio.gather(exchange(), exchange()), 10)
     ) == ["blocked", "exchanged"]
+
+
+async def test_two_checkouts_advance_overdue_credit_cycle_once(pg_factory):
+    from unittest.mock import AsyncMock
+
+    from app.models.billing import Plan, Subscription
+
+    professional_id, _participant_id = await seed(pg_factory)
+    old_session_id = uuid4()
+    async with pg_factory() as db:
+        professional = await db.get(Professional, professional_id)
+        credit = AffiliateCreditService(db)
+        await credit.convert_available_to_credit(
+            professional=professional, amount_cents=5000, idempotency_key="cycle-seed"
+        )
+        await credit.reserve_for_checkout(
+            professional_id=professional_id,
+            charge_cents=10000,
+            reservation_id=str(old_session_id),
+        )
+        await credit.bind_payment(
+            reservation_id=str(old_session_id), payment_id="pay-old"
+        )
+        await credit.settle_checkout_reservation(reservation_id=str(old_session_id))
+        plan = Plan(slug="cycle-plan", name="Cycle", price_cents=10000)
+        db.add(plan)
+        await db.flush()
+        sub = Subscription(
+            professional_id=professional_id,
+            plan_id=plan.id,
+            provider="asaas",
+            status="past_due",
+            checkout_session_id=old_session_id,
+            external_subscription_id="sub-cycle",
+            external_checkout_id="pay-next",
+        )
+        db.add(sub)
+        await db.commit()
+        sub_id = sub.id
+    gateway = AsyncMock()
+    gateway.list_subscription_payments.return_value = [
+        {"id": "pay-next", "subscription": "sub-cycle", "status": "OVERDUE"}
+    ]
+    barrier = asyncio.Barrier(2)
+
+    async def advance():
+        async with pg_factory() as db:
+            subscription = await db.get(Subscription, sub_id)
+            await barrier.wait()
+            await AffiliateCreditService(db).advance_overdue_checkout(
+                subscription, gateway
+            )
+            await db.commit()
+            return subscription.checkout_session_id
+
+    first, second = await asyncio.wait_for(asyncio.gather(advance(), advance()), 10)
+    assert first == second and first != old_session_id
+    gateway.list_subscription_payments.assert_awaited_once()

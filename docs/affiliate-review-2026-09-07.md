@@ -1,5 +1,17 @@
 # Revisão de afiliados — 07/09/2026
 
+## Atualização após correções locais
+
+Os três defeitos reproduzidos foram corrigidos. As reproduções foram promovidas a `tests/test_affiliate_checkout_regressions.py`, coletado automaticamente, com cenários adicionais de repetição, conta divergente, checkout já pago e preservação de saldo. O quarto ponto foi resolvido explicitando na interface e no contrato que o crédito é aplicado no checkout manual, sem abatimento automático em renovações.
+
+O avanço de ciclo consulta cobranças do Asaas e exige ID distinto, mesma assinatura e estado pendente/vencido; o lock da assinatura garante uma única nova sessão entre solicitações concorrentes. Checkout anual compara o total dos itens/valor antes de reutilizar. Autoindicação consulta a identidade comercial mesmo sem vínculo explícito com a conta clínica. Crédito integral fica bloqueado quando já existe cobrança externa, sem debitar saldo, até conciliação dessa cobrança.
+
+Os detalhes abaixo registram a auditoria anterior às correções. Não houve commit, deploy ou alteração de dados de produção nesta etapa.
+
+Validação final das correções: **128 testes backend passaram**, incluindo cinco casos com PostgreSQL 18 descartável em `127.0.0.1:55439` (migração de reservas legadas, concorrência de resgates, magic link e avanço único de ciclo). Typecheck e ESLint da tela alterada passaram no web; Ruff dos arquivos alterados e `git diff --check` passaram. Não foram executados build, Playwright, migration no ambiente da aplicação ou transações reais do Asaas nesta etapa.
+
+Referências do provedor conferidas para a correção: [estrutura e valores dos itens do checkout](https://docs.asaas.com/docs/introduction-1) e [cancelamento do checkout](https://docs.asaas.com/reference/cancelar-um-checkout). As chamadas externas foram simuladas nos testes; isso não comprova a configuração da conta Asaas em produção.
+
 ## Parecer
 
 Não recomendo liberar o fluxo completo antes de corrigir os três defeitos reproduzidos abaixo e alinhar a aplicação de crédito às renovações. Esta é uma revisão local: não houve alteração de regras de negócio, saldo, flags, segredos, commit ou deploy.
@@ -55,10 +67,10 @@ Constatação por rastreamento de todos os chamadores e do worker, não por obse
 - Não executei build, Playwright, migrations nem homologação externa nesta rodada. Resultados registrados nas auditorias anteriores não foram tratados como execuções atuais.
 
 ```powershell
-.\.venv-pytest\Scripts\python.exe -m pytest tests/review_affiliates_2026_09_07.py -q
+.\.venv-pytest\Scripts\python.exe -m pytest tests/test_affiliate_checkout_regressions.py -q
 ```
 
-O comando acima deve falhar nos três cenários enquanto os defeitos persistirem. A suíte existente permanece passando; esses cenários não estavam cobertos por ela.
+Na revisão inicial, os três cenários falhavam. Após as correções, o comando acima executa as regressões promovidas à suíte e deve passar.
 
 ## Estruturas verificadas e limites operacionais
 

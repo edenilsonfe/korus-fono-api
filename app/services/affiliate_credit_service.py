@@ -1,7 +1,7 @@
 """Conversion and checkout reservation of internal KorusFono credit."""
 
 from dataclasses import dataclass
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,7 @@ from app.models.affiliate import (
     AffiliateLedgerEntry,
     AffiliateParticipant,
 )
+from app.models.billing import Subscription
 from app.models.professional import Professional
 from app.services.affiliate_accounting import lock_participant
 
@@ -135,6 +136,50 @@ class AffiliateCreditService:
             )
         ).scalar_one_or_none()
 
+    async def advance_overdue_checkout(
+        self, subscription: Subscription, gateway
+    ) -> None:
+        """Give a new provider charge its own reservation; never reopen a paid one."""
+        if subscription.provider != "asaas" or subscription.status != "past_due":
+            return
+        subscription = await self.db.scalar(
+            select(Subscription)
+            .where(Subscription.id == subscription.id)
+            .with_for_update(of=Subscription)
+            .execution_options(populate_existing=True)
+        )
+        previous = await self._latest(str(subscription.checkout_session_id))
+        if (
+            subscription.status != "past_due"
+            or not subscription.external_subscription_id
+            or previous is None
+            or previous.state not in {"settled", "refunded"}
+        ):
+            return
+        payments = await gateway.list_subscription_payments(
+            subscription.external_subscription_id
+        )
+        pending = [
+            payment
+            for payment in payments
+            if payment.get("id")
+            and payment["id"] != previous.source_payment_id
+            and payment.get("subscription") == subscription.external_subscription_id
+            and payment.get("status") in {"PENDING", "OVERDUE"}
+            and not payment.get("deleted")
+        ]
+        if not pending:
+            raise AffiliateCreditForbiddenError(
+                "Nenhuma nova cobrança pendente foi confirmada. Concilie a assinatura antes de tentar novamente"
+            )
+        payment = min(
+            pending, key=lambda item: (str(item.get("dueDate") or ""), item["id"])
+        )
+        subscription.checkout_session_id = uuid4()
+        subscription.external_checkout_id = payment["id"]
+        # Commit the new identity before any provider mutation; retries reuse it.
+        await self.db.commit()
+
     async def _entry(self, row, suffix: str, account: str, amount: int):
         self.db.add(
             AffiliateLedgerEntry(
@@ -151,7 +196,12 @@ class AffiliateCreditService:
         )
 
     async def reserve_for_checkout(
-        self, *, professional_id: UUID, charge_cents: int, reservation_id: str
+        self,
+        *,
+        professional_id: UUID,
+        charge_cents: int,
+        reservation_id: str,
+        existing_external_charge: bool = False,
     ) -> AffiliateCreditReservation:
         participant = await self._participant(professional_id, lock=True)
         applied = 0
@@ -188,6 +238,12 @@ class AffiliateCreditService:
                 available = await self._account_balance(participant.id, "available")
                 credit = max(0, await self._account_balance(participant.id, "credit"))
                 applied = min(max(charge_cents, 0), credit) if available >= 0 else 0
+                if applied and applied == charge_cents and existing_external_charge:
+                    # ponytail: full credit requires an unissued charge; replacing one
+                    # needs durable provider cancellation before granting internal access.
+                    raise AffiliateCreditForbiddenError(
+                        "Já existe uma cobrança externa. Concilie essa cobrança antes de usar crédito integral"
+                    )
                 if applied:
                     row = AffiliateCreditCheckout(
                         participant_id=participant.id,
