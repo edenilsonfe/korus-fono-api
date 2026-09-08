@@ -232,16 +232,25 @@ class EvolutionWhatsAppService:
         except HTTPException:
             api_key = get_settings().evolution_global_api_key
             if not api_key:
-                return
+                raise
         name = connection.evolution_instance_name
         try:
             await self.client.logout_instance(name, api_key=api_key)
         except EvolutionApiError as exc:
-            logger.info("Evolution logout failed for %s: %s", name, exc.message)
+            logger.warning("Evolution logout failed for %s (HTTP %s)", name, exc.status_code)
         try:
             await self.client.delete_instance(name, api_key=api_key)
         except EvolutionApiError as exc:
-            logger.info("Evolution delete failed for %s: %s", name, exc.message)
+            if exc.status_code == 404:
+                return  # Already absent: cleanup is idempotent.
+            logger.warning("Evolution delete failed for %s (HTTP %s)", name, exc.status_code)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=(
+                    "Não foi possível remover a sessão WhatsApp no provedor. "
+                    "A desconexão não foi concluída. Tente novamente ou contate o suporte."
+                ),
+            ) from exc
 
     async def _soft_disconnect_existing(self, professional_id: UUID) -> None:
         result = await self.db.execute(

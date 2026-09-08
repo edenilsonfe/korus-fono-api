@@ -69,6 +69,13 @@ Para o fluxo de recuperação de senha (`/auth/forgot-password` → `/auth/reset
 
 ## Endpoints
 
+WhatsApp Evolution: `POST /api/v1/whatsapp/disconnect` só confirma a desconexão
+local após a exclusão remota (ou HTTP 404, instância já ausente). Se a exclusão
+falhar, retorna HTTP 502 com `detail` em português e preserva o vínculo local;
+falha de credencial sem alternativa administrativa também impede a limpeza.
+O mesmo bloqueio vale para a limpeza anterior à criação de outra conexão.
+O frontend já exibe `detail` e só limpa o QR/confirma sucesso após a resposta.
+
 - Health: `GET /health`
 - API: `GET /api/v1/...`
 - Docs: `GET /docs` (Swagger — debug local; contrato = `app/schemas/` + `app/api/v1/`)
