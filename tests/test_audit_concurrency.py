@@ -13,7 +13,7 @@ from app.models.professional import Professional
 from app.models.refresh_session import RefreshSession
 from app.schemas.ai import AIReportUpdate
 from app.schemas.schedule_block import ScheduleBlockCreate
-from app.services.refresh_token_service import create_refresh_session, rotate_refresh_session, RefreshSessionInvalidated
+from app.services.refresh_token_service import create_refresh_session, revoke_refresh_session, rotate_refresh_session, RefreshSessionInvalidated
 from app.services.report_service import revise_report
 from app.services.schedule_block_service import ensure_appointment_slot_available, create_schedule_block
 
@@ -59,7 +59,7 @@ async def test_empty_slot_has_only_one_winner(audit_pg_factory, second_is_block)
     await asyncio.wait_for(asyncio.gather(reserve(), competing()), timeout=5)
 
 
-async def test_refresh_race_revokes_the_rotated_token(audit_pg_factory):
+async def test_refresh_race_returns_the_same_rotated_token(audit_pg_factory):
     factory = audit_pg_factory
     owner, _ = await seed(factory)
     async with factory() as db:
@@ -69,16 +69,45 @@ async def test_refresh_race_revokes_the_rotated_token(audit_pg_factory):
     async def rotate():
         async with factory() as db:
             try:
-                await rotate_refresh_session(db, raw)
-                outcome = "rotated"
+                _, outcome = await rotate_refresh_session(db, raw)
             except RefreshSessionInvalidated:
                 outcome = "revoked"
             await db.commit()
             return outcome
 
-    assert sorted(await asyncio.wait_for(asyncio.gather(rotate(), rotate()), timeout=5)) == ["revoked", "rotated"]
+    outcomes = await asyncio.wait_for(asyncio.gather(rotate(), rotate()), timeout=5)
+    assert outcomes[0] == outcomes[1] and outcomes[0] != "revoked"
     async with factory() as reader:
-        assert (await reader.get(Professional, owner)).token_version == 1
+        assert (await reader.get(Professional, owner)).token_version == 0
+        sessions = (await reader.scalars(select(RefreshSession))).all()
+        assert len(sessions) == 2 and sum(session.revoked_at is None for session in sessions) == 1
+
+
+async def test_logout_closes_an_overlapping_refresh(audit_pg_factory):
+    factory = audit_pg_factory
+    owner, _ = await seed(factory)
+    async with factory() as db:
+        raw = await create_refresh_session(db, await db.get(Professional, owner))
+        await db.commit()
+    rotated, logging_out = asyncio.Event(), asyncio.Event()
+
+    async def refresh():
+        async with factory() as db:
+            await rotate_refresh_session(db, raw)
+            rotated.set()
+            await logging_out.wait()
+            await asyncio.sleep(0.05)
+            await db.commit()
+
+    async def logout():
+        await rotated.wait()
+        async with factory() as db:
+            logging_out.set()
+            await revoke_refresh_session(db, raw)
+            await db.commit()
+
+    await asyncio.wait_for(asyncio.gather(refresh(), logout()), timeout=5)
+    async with factory() as reader:
         sessions = (await reader.scalars(select(RefreshSession))).all()
         assert len(sessions) == 2 and all(session.revoked_at for session in sessions)
 

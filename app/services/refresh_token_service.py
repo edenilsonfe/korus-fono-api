@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -12,6 +13,22 @@ from app.core.config import get_settings
 from app.models.professional import Professional
 from app.models.refresh_session import RefreshSession
 from app.utils.token_hash import hash_token
+
+REFRESH_OVERLAP = timedelta(seconds=15)
+
+
+def _successor_token(raw_token: str) -> str:
+    # Reproduce only this token's successor across API processes; the database
+    # still stores hashes only. Knowing a DB hash cannot derive a usable token.
+    return hmac.new(
+        get_settings().jwt_secret.encode(),
+        b"korus-refresh-successor-v1:" + raw_token.encode(),
+        "sha256",
+    ).hexdigest()
+
+
+def _utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
 class RefreshSessionInvalidated(HTTPException):
@@ -71,7 +88,6 @@ async def rotate_refresh_session(
     db: AsyncSession,
     raw_token: str,
 ) -> tuple[Professional, str]:
-    now = datetime.now(UTC)
     token_hash = hash_token(raw_token)
     professional_id = await db.scalar(
         select(RefreshSession.professional_id).where(RefreshSession.token_hash == token_hash)
@@ -87,14 +103,34 @@ async def rotate_refresh_session(
         .with_for_update().execution_options(populate_existing=True)
     )
     session = result.scalar_one_or_none()
+    # Measure the overlap after waiting for the owner lock.
+    now = datetime.now(UTC)
 
     if session is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
 
+    if professional is None or professional.is_disabled:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Conta desativada")
+
+    # A previously invalidated token must not invalidate later, fresh logins.
+    if session.token_version != professional.token_version:
+        raise RefreshSessionInvalidated()
+
     if session.revoked_at is not None:
-        if professional is not None:
-            await _invalidate_professional_sessions(db, professional)
-            await db.flush()
+        if now - _utc(session.revoked_at) <= REFRESH_OVERLAP and _utc(session.expires_at) > now:
+            successor = _successor_token(raw_token)
+            active = await db.scalar(select(RefreshSession).where(
+                RefreshSession.token_hash == hash_token(successor),
+                RefreshSession.professional_id == professional.id,
+                RefreshSession.family_id == session.family_id,
+                RefreshSession.token_version == professional.token_version,
+                RefreshSession.revoked_at.is_(None),
+                RefreshSession.expires_at > now,
+            ))
+            if active is not None:
+                return professional, successor
+        await _invalidate_professional_sessions(db, professional)
+        await db.flush()
         raise RefreshSessionInvalidated()
 
     expires_at = session.expires_at
@@ -105,16 +141,8 @@ async def rotate_refresh_session(
         await db.flush()
         raise RefreshSessionInvalidated("Token inválido")
 
-    if professional is None or professional.is_disabled:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Conta desativada")
-
-    if session.token_version != professional.token_version:
-        await _invalidate_professional_sessions(db, professional)
-        await db.flush()
-        raise RefreshSessionInvalidated()
-
     session.revoked_at = now
-    new_raw = _new_raw_token()
+    new_raw = _successor_token(raw_token)
     db.add(
         RefreshSession(
             professional_id=professional.id,
@@ -129,12 +157,16 @@ async def rotate_refresh_session(
 
 
 async def revoke_refresh_session(db: AsyncSession, raw_token: str) -> None:
-    now = datetime.now(UTC)
     token_hash = hash_token(raw_token)
     result = await db.execute(select(RefreshSession).where(RefreshSession.token_hash == token_hash))
     session = result.scalar_one_or_none()
-    if session is not None and session.revoked_at is None:
-        session.revoked_at = now
+    if session is not None:
+        # Same lock order as refresh. Logout also closes a successor created by
+        # an overlapping refresh, even when the browser sent the previous cookie.
+        await db.scalar(select(Professional).where(
+            Professional.id == session.professional_id
+        ).with_for_update())
+        await _revoke_family(db, session.family_id, now=datetime.now(UTC))
         await db.flush()
 
 

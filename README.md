@@ -69,6 +69,14 @@ Para o fluxo de recuperação de senha (`/auth/forgot-password` → `/auth/reset
 
 ## Endpoints
 
+Autenticação: `POST /api/v1/auth/refresh` tolera a repetição do token
+imediatamente anterior por 15 segundos e devolve o mesmo sucessor ativo.
+O banco continua armazenando apenas hashes; a tolerância exige conta habilitada,
+versão vigente e tokens não expirados. Fora dessa janela, reutilização invalida
+a versão atual uma única vez: tentativas antigas não derrubam logins posteriores.
+Logout revoga a família do token, incluindo eventual renovação concorrente.
+O contrato JSON/cookies permanece igual; não há migration nem variável nova.
+
 WhatsApp Evolution: `POST /api/v1/whatsapp/disconnect` só confirma a desconexão
 local após a exclusão remota (ou HTTP 404, instância já ausente). Se a exclusão
 falhar, retorna HTTP 502 com `detail` em português e preserva o vínculo local;

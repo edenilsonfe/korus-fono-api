@@ -59,7 +59,8 @@ async def test_refresh_rotates_opaque_token(api_client, professional):
         "/api/v1/auth/refresh",
         json={"refreshToken": old_refresh},
     )
-    assert reuse.status_code == 401
+    assert reuse.status_code == 200
+    assert reuse.cookies["korus_refresh"] == new_refresh
 
 
 @pytest.mark.asyncio

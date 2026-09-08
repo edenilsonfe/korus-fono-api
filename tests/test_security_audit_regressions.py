@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -13,11 +13,17 @@ from app.models.refresh_session import RefreshSession
 from app.models.session import Session
 
 
-async def test_refresh_replay_commits_revocation(api_client, professional, db_engine):
+async def test_refresh_replay_commits_revocation(api_client, professional, db_engine, db_session):
     login = await api_client.post("/api/v1/auth/login", json={"email": professional.email, "password": "testpass123"})
     old = login.cookies["korus_refresh"]
     rotated = await api_client.post("/api/v1/auth/refresh", json={"refreshToken": old})
     assert rotated.status_code == 200
+    previous = (await db_session.scalars(select(RefreshSession).where(
+        RefreshSession.professional_id == professional.id,
+        RefreshSession.revoked_at.is_not(None),
+    ))).one()
+    previous.revoked_at = datetime.now(UTC) - timedelta(minutes=1)
+    await db_session.commit()
     api_client.cookies.clear()
     reused = await api_client.post("/api/v1/auth/refresh", json={"refreshToken": old})
     assert reused.status_code == 401
