@@ -140,7 +140,12 @@ async def api_client(db_session: AsyncSession, monkeypatch):
             # Test code retains fixture objects across rejected requests. Reload
             # them explicitly instead of leaving async lazy loads on attributes.
             for instance in list(db_session.identity_map.values()):
-                await db_session.refresh(instance)
+                from sqlalchemy.exc import InvalidRequestError
+                try:
+                    await db_session.refresh(instance)
+                except InvalidRequestError:
+                    # A row inserted during the rejected request was rolled back.
+                    db_session.expunge(instance)
             raise
 
     app.dependency_overrides[get_db] = override_get_db

@@ -129,13 +129,19 @@ async def test_annual_checkout_does_not_create_incomplete_asaas_customer(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("consent", [False, True])
 async def test_annual_checkout_prefills_complete_asaas_customer(
     db_session,
     professional,
     auth_headers,
     api_client,
     monkeypatch,
+    consent,
 ):
+    from app.services.analytics_consent import set_analytics_consent
+    set_analytics_consent(professional, consent)
+    tracking = AsyncMock()
+    monkeypatch.setattr("app.api.v1.billing.track_checkout_started_task", tracking)
     professional.cpf = "24971563792"
     professional.billing_address = "Rua das Flores"
     professional.billing_address_number = "123"
@@ -178,6 +184,7 @@ async def test_annual_checkout_prefills_complete_asaas_customer(
     checkout_metadata = gateway.create_checkout_session.await_args.kwargs["metadata"]
     assert checkout_metadata["customer_external_id"] == "cus_complete"
     assert checkout_metadata["customer_profile_synced"] is True
+    assert tracking.await_count == int(consent)
 
 
 @pytest.mark.asyncio

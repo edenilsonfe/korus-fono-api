@@ -10,6 +10,7 @@ from app.models.professional import Professional
 from app.schemas.common import MessageResponse
 from app.schemas.marketing import PixelConfigResponse, TrackEventRequest
 from app.services.meta_pixel_service import MetaPixelService
+from app.services.analytics_consent import has_analytics_consent
 
 router = APIRouter(prefix="/tracking", tags=["tracking"])
 
@@ -33,6 +34,10 @@ async def forward_tracking_event(
     Útil para eventos que o snippet dispara client-side (ex.: ViewContent,
     PageView) e que devem chegar também via CAPI sem expor o access token.
     """
+    if not has_analytics_consent(professional) or body.event_name not in {
+        "PageView", "ViewContent", "Lead", "InitiateCheckout", "CompleteRegistration", "StartTrial",
+    }:
+        return MessageResponse(message="Evento ignorado")
     service = MetaPixelService()
     user_data = service.build_user_data(
         email=professional.email,
@@ -45,8 +50,10 @@ async def forward_tracking_event(
     await service.send_event(
         event_name=body.event_name,
         event_id=body.event_id,
-        event_source_url=body.event_source_url,
-        custom_data=body.custom_data,
+        # Browser payloads must not forward clinical URLs or arbitrary content.
+        # Authoritative commercial values are emitted by billing itself.
+        event_source_url=None,
+        custom_data=None,
         user_data=user_data,
     )
     return MessageResponse(message="Evento rastreado")

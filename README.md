@@ -204,6 +204,14 @@ ao consultar a caixa de notificações e não exige o worker.
 
 ## Worker IA (opcional)
 
+As ferramentas HTTP de IA e a geração de relatórios aguardam o resultado na própria
+requisição. Ferramentas retornam **200** com `status: completed`; criação de
+relatório retorna **201**. O job registra a execução, sem enqueue/polling neste
+fluxo. A chamada ao LLM não faz retry automático e tem orçamento de até 90 segundos;
+indisponibilidade/timeout retorna 503 com `Retry-After`. O web reserva 120 segundos.
+Áudio utiliza seu próprio timeout de transcrição. O worker continua responsável
+pelos fluxos que efetivamente usam ARQ.
+
 ```bash
 uv run arq worker.WorkerSettings
 ```
@@ -230,7 +238,23 @@ em [`docs/legacy-csv-import.md`](docs/legacy-csv-import.md).
 uv run pytest
 ```
 
+Os testes comuns usam SQLite em memória, sem ler `.env`. Para executar também os
+testes de concorrência, defina `TEST_AUDIT_PG_URL` para um PostgreSQL descartável
+em `127.0.0.1`, banco `korus_audit`. Cada teste cria e remove somente seu schema
+aleatório. A CI da API fornece esse banco e executa a suíte completa.
+
+Correções da auditoria de 07/09: [estado e validação](docs/audits/2026-09-07/FIXES.md).
+
 ## Deploy Railway
+
+Antes de aplicar as correções de segurança, execute a migration `3f782f034deb`.
+Ela adiciona consentimento opcional (padrão `false`) e histórico de revisões, sem
+alterar conteúdo clínico ou registros financeiros existentes.
+
+Configure **o mesmo `KORUS_PROXY_SECRET` de 32+ caracteres** na API e como secret
+do Cloudflare Worker. A borda assina IP e horário; a API verifica assinatura e
+validade de 60 segundos. Sem a chave, continua a política anterior de proxy.
+Nunca exponha a chave em variável `VITE_` ou arquivo versionado.
 
 Spec: `docs/superpowers/specs/2026-07-15-railway-deploy-design.md`.
 

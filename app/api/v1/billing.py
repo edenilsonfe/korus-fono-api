@@ -57,6 +57,7 @@ from app.services.billing_reconciliation_service import BillingReconciliationSer
 from app.services.coupon_service import CouponError, CouponService
 from app.services.entitlement_service import EntitlementService
 from app.services.meta_pixel_service import MetaPixelService
+from app.services.analytics_consent import has_analytics_consent
 from app.services.plan_catalog_seed import CANONICAL_PLAN_SLUGS
 from app.services.plan_change_service import PlanChangeService
 from app.services.saas_billing_service import SaasBillingService
@@ -769,19 +770,20 @@ async def create_billing_checkout(
         else plan
     )
 
-    background_tasks.add_task(
-        track_checkout_started_task,
-        professional_id,
-        professional.email,
-        professional.name,
-        charge_cents,
-        effective_plan.currency,
-        effective_plan.slug,
-        get_client_ip(request),
-        request.headers.get("user-agent"),
-        request.cookies.get("_fbp"),
-        request.cookies.get("_fbc"),
-    )
+    if has_analytics_consent(professional):
+        background_tasks.add_task(
+            track_checkout_started_task,
+            professional_id,
+            professional.email,
+            professional.name,
+            charge_cents,
+            effective_plan.currency,
+            effective_plan.slug,
+            get_client_ip(request),
+            request.headers.get("user-agent"),
+            request.cookies.get("_fbp"),
+            request.cookies.get("_fbc"),
+        )
 
     return CheckoutResponse(
         checkout_url=build_in_app_payment_url(str(local_session_id)),

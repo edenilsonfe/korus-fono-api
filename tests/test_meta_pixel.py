@@ -171,21 +171,32 @@ async def test_forward_event_requires_auth(api_client):
     assert response.status_code == 401
 
 
-async def test_forward_event_ok_when_disabled(api_client, auth_headers):
+@pytest.mark.parametrize("consent", [False, True])
+async def test_forward_event_respects_consent_and_removes_sensitive_payload(api_client, auth_headers, professional, db_session, monkeypatch, consent):
+    from unittest.mock import AsyncMock
+    from app.services.analytics_consent import set_analytics_consent
+    set_analytics_consent(professional, consent)
+    await db_session.commit()
+    send = AsyncMock(return_value=True)
+    monkeypatch.setattr(MetaPixelService, "send_event", send)
     response = await api_client.post(
         "/api/v1/tracking/events",
         headers=auth_headers,
         json={
             "eventName": "ViewContent",
             "eventId": "web-1",
-            "eventSourceUrl": "https://app.korusfono.com.br/pacientes",
-            "customData": {"page": "patients"},
+            "eventSourceUrl": "https://app.korusfono.com.br/reset-password?token=secret",
+            "customData": {"patient_name": "Synthetic private name"},
             "fbp": "fb.1.1.1",
             "fbc": "fb.1.1.2",
         },
     )
     assert response.status_code == 200
-    assert response.json()["message"] == "Evento rastreado"
+    assert response.json()["message"] == ("Evento rastreado" if consent else "Evento ignorado")
+    assert send.await_count == int(consent)
+    if consent:
+        assert send.await_args.kwargs["event_source_url"] is None
+        assert send.await_args.kwargs["custom_data"] is None
 
 
 @pytest.mark.parametrize("consent", [False, True])
