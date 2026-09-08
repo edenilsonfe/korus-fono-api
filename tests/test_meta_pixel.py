@@ -188,8 +188,9 @@ async def test_forward_event_ok_when_disabled(api_client, auth_headers):
     assert response.json()["message"] == "Evento rastreado"
 
 
-async def test_register_schedules_tracking_tasks(api_client, monkeypatch):
-    """Register must enqueue CompleteRegistration/StartTrial as background tasks."""
+@pytest.mark.parametrize("consent", [False, True])
+async def test_register_schedules_tracking_tasks(api_client, monkeypatch, consent):
+    """Optional conversion tracking requires explicit consent."""
     scheduled: list[tuple[str, dict]] = []
 
     async def fake_track_registration(self, **kwargs):
@@ -207,6 +208,7 @@ async def test_register_schedules_tracking_tasks(api_client, monkeypatch):
         "/api/v1/auth/register",
         json={
             "email": "novo-profissional@example.com",
+            "analyticsConsent": consent,
             "password": "senha-forte-123",
             "name": "Nova Profissional",
             "specialtyKey": "fono",
@@ -215,5 +217,6 @@ async def test_register_schedules_tracking_tasks(api_client, monkeypatch):
         },
     )
     assert response.status_code == 201
-    assert {name for name, _ in scheduled} == {"CompleteRegistration", "StartTrial"}
-    assert scheduled[0][1]["email"] == "novo-profissional@example.com"
+    assert {name for name, _ in scheduled} == ({"CompleteRegistration", "StartTrial"} if consent else set())
+    if consent:
+        assert scheduled[0][1]["email"] == "novo-profissional@example.com"

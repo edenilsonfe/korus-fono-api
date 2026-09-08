@@ -1,3 +1,4 @@
+from starlette.concurrency import run_in_threadpool
 """Billing plan catalog, checkout and webhooks."""
 
 import hmac
@@ -846,7 +847,7 @@ async def pay_checkout_with_credit_card(
         )
 
     client_ip = get_client_ip(request)
-    enforce_card_payment_rate_limit(
+    await run_in_threadpool(enforce_card_payment_rate_limit, 
         professional_id=str(professional.id),
         session_id=session_id,
     )

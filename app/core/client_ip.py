@@ -18,6 +18,9 @@ Invalid hop literals fall back to the TCP peer.
 from __future__ import annotations
 
 import ipaddress
+import hashlib
+import hmac
+import time
 
 from starlette.requests import Request
 
@@ -53,6 +56,18 @@ def get_client_ip(
         default: Value when there is no peer and no usable XFF hop.
     """
     peer = _peer_host(request, default)
+    secret = get_settings().korus_proxy_secret
+    signed_ip = request.headers.get("x-korus-client-ip", "")
+    timestamp = request.headers.get("x-korus-client-time", "")
+    signature = request.headers.get("x-korus-client-signature", "")
+    if len(secret) >= 32 and _is_valid_ip(signed_ip):
+        try:
+            fresh = abs(time.time() - int(timestamp)) <= 60
+        except ValueError:
+            fresh = False
+        expected = hmac.new(secret.encode(), f"{timestamp}\n{signed_ip}".encode(), hashlib.sha256).hexdigest()
+        if fresh and len(signature) == 64 and signature.isascii() and hmac.compare_digest(signature, expected):
+            return signed_ip
     n = (
         get_settings().trusted_proxy_count
         if trusted_proxy_count is None

@@ -110,34 +110,12 @@ async def test_legacy_credit_migration_preserves_ledger_and_rejects_ambiguous_hi
 
 
 @pytest.fixture
-async def pg_factory(monkeypatch):
-    url = os.getenv("TEST_AFFILIATE_PG_URL")
-    if not url:
-        pytest.skip("Set TEST_AFFILIATE_PG_URL to a disposable local PostgreSQL")
-    parsed = make_url(url)
-    assert parsed.host == "127.0.0.1" and parsed.port == 55439, (
-        "Only disposable audit cluster is allowed"
-    )
-    schema = "affiliate_test_" + uuid4().hex
-    admin = create_async_engine(url)
-    async with admin.begin() as conn:
-        await conn.execute(text(f'CREATE SCHEMA "{schema}"'))
-    engine = create_async_engine(
-        url, connect_args={"server_settings": {"search_path": schema}}
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+async def pg_factory(monkeypatch, audit_pg_factory):
     key = Fernet.generate_key().decode()
     monkeypatch.setattr(
         "app.services.affiliate_payout_service.get_affiliate_fernet_key", lambda: key
     )
-    try:
-        yield async_sessionmaker(engine, expire_on_commit=False)
-    finally:
-        await engine.dispose()
-        async with admin.begin() as conn:
-            await conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
-        await admin.dispose()
+    yield audit_pg_factory
 
 
 async def seed(factory):

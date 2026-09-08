@@ -24,11 +24,15 @@ def test_fois_scaled_sum():
     assert "FOIS" in scores["summary"]
 
 
-def test_pard_risk_cutoff():
+def test_pard_uses_observational_battery():
+    from app.services.battery_scoring_service import score_observational_module, synthesize_battery_scores
     package = get_instrument_content_package("pard")
-    answers = {f"pard_{i:02d}": 1 for i in range(1, 4)}
-    scores = InstrumentScoringService.score(package, answers)
-    assert scores["total"] == 3
+    items = package.get_module_items("liquido-fino")
+    answers = {item["id"]: {"value": 1} for item in items}
+    result = score_observational_module(package, "liquido-fino", answers)
+    assert len(result["attention_items"]) == len(items)
+    scores = synthesize_battery_scores(package, [result])
+    assert scores["engine"] == "observational_domains"
     assert scores["interpretation"] is not None
 
 

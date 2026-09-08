@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import defaultdict
+from threading import Lock
 from typing import DefaultDict
 
 from fastapi import HTTPException, status
@@ -14,17 +15,19 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 
 _in_memory_buckets: DefaultDict[str, list[float]] = defaultdict(list)
+_memory_lock = Lock()
 
 
 def _check_memory(key: str, max_requests: int, window_seconds: int) -> bool:
     now = time.time()
     window_start = now - window_seconds
-    bucket = [ts for ts in _in_memory_buckets[key] if ts > window_start]
-    if len(bucket) >= max_requests:
+    with _memory_lock:
+        bucket = [ts for ts in _in_memory_buckets[key] if ts > window_start]
+        if len(bucket) >= max_requests:
+            _in_memory_buckets[key] = bucket
+            return False
+        bucket.append(now)
         _in_memory_buckets[key] = bucket
-        return False
-    bucket.append(now)
-    _in_memory_buckets[key] = bucket
     return True
 
 
@@ -32,7 +35,7 @@ def _redis_check(key: str, max_requests: int, window_seconds: int) -> bool:
     import redis
 
     settings = get_settings()
-    client = redis.from_url(settings.redis_url, decode_responses=True)
+    client = redis.from_url(settings.redis_url, decode_responses=True, socket_connect_timeout=1, socket_timeout=1)
     try:
         pipe = client.pipeline()
         pipe.incr(key)

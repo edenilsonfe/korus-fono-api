@@ -27,6 +27,16 @@ class AIReport(Base, TimestampMixin):
     patient: Mapped["Patient"] = relationship(back_populates="ai_reports")  # noqa: F821
 
 
+class AIReportRevision(Base, TimestampMixin):
+    __tablename__ = "ai_report_revisions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
+    report_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("ai_reports.id", ondelete="CASCADE"), nullable=False, index=True)
+    professional_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("professionals.id"), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+
+
 class Conversation(Base, TimestampMixin):
     __tablename__ = "conversations"
 

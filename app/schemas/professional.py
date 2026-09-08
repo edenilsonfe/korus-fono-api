@@ -8,6 +8,7 @@ from app.schemas.common import CamelModel
 
 
 class ProfessionalResponse(CamelModel):
+    analytics_consent: bool = False
     id: str
     name: str
     specialty: str
@@ -29,6 +30,10 @@ class ProfessionalResponse(CamelModel):
     email_verified: bool = False
     signup_payment_required: bool = False
     temporary_access_ends_at: datetime | None = None
+
+
+class AnalyticsConsentUpdate(CamelModel):
+    analytics_consent: bool
 
 
 class ProfessionalUpdate(CamelModel):

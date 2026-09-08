@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.mappers import format_size_bytes
 from app.core.config import get_settings
-from app.core.deps import get_patient_for_professional, require_verified_professional
+from app.core.deps import get_patient_for_professional, get_session_for_patient, require_verified_professional
 from app.core.utils import utcnow
 from app.db.session import get_db
 from app.models.attachment import Attachment
@@ -66,9 +66,11 @@ async def create_evolution(
     db: AsyncSession = Depends(get_db),
 ):
     await get_patient_for_professional(patient_id, professional, db)
+    if body.session_id is not None:
+        await get_session_for_patient(body.session_id, patient_id, professional, db)
     evolution = Evolution(
         patient_id=patient_id,
-        session_id=UUID(body.session_id) if body.session_id else None,
+        session_id=body.session_id,
         professional_id=professional.id,
         date=utcnow(),
         title=(body.title.strip() or None) if body.title else None,
@@ -80,7 +82,7 @@ async def create_evolution(
     return EvolutionResponse(
         id=str(evolution.id),
         patient_id=str(patient_id),
-        session_id=body.session_id,
+        session_id=str(body.session_id) if body.session_id else None,
         date=evolution.date.isoformat(),
         title=evolution.title,
         content=evolution.content,

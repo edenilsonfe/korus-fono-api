@@ -45,6 +45,14 @@ def create_app() -> FastAPI:
         docs_kwargs = {}
     app = FastAPI(title=settings.app_name, lifespan=lifespan, **docs_kwargs)
 
+    async def protect_sensitive_responses(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith(settings.api_v1_prefix):
+            response.headers["Cache-Control"] = "private, no-store"
+            response.headers["Referrer-Policy"] = "no-referrer"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
     @app.exception_handler(ValidationError)
     async def handle_validation_error(
         request: Request, exc: ValidationError
@@ -69,6 +77,7 @@ def create_app() -> FastAPI:
 
     app.add_middleware(CORSMiddleware, **cors_kwargs)
     app.add_middleware(EntitlementMiddleware)
+    app.middleware("http")(protect_sensitive_responses)
     app.include_router(api_router, prefix=settings.api_v1_prefix)
 
     @app.get("/health")

@@ -20,7 +20,7 @@ async def test_instrument_manifest_and_score(api_client: AsyncClient, auth_heade
     manifest_resp = await api_client.get("/api/v1/instruments/fois/manifest", headers=auth_headers)
     assert manifest_resp.status_code == 200
     manifest = manifest_resp.json()
-    assert manifest["slug"] == "fois"
+    assert manifest["instrumentSlug"] == "fois"
 
     score_resp = await api_client.post(
         "/api/v1/instruments/fois/score",

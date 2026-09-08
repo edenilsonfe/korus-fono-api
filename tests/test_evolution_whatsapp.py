@@ -518,6 +518,7 @@ async def test_dispatch_uses_claim_before_send(
         "whatsapp_enabled": True,
         "appointment_confirmation_link_enabled": False,
         "whatsapp_events": {
+            "patient_birthday": False,
             "appointment_reminder_24h": False,
             "appointment_confirmation": True,
             "appointment_cancelled": False,

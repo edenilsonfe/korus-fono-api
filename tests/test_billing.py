@@ -884,6 +884,9 @@ async def test_stub_webhook_activates_subscription(db_session, monkeypatch):
     plan = Plan(**COMMERCIAL_PLAN_SEEDS[0])
     professional = Professional(
         email="billing@test.com",
+        analytics_consent=True,
+        analytics_consent_at=datetime.now(UTC),
+        analytics_consent_version="2026-09-07",
         password_hash="hash",
         name="Billing User",
         subscription_status="trialing",

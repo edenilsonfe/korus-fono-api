@@ -6,7 +6,8 @@ from app.core.deps import admin_permissions_for, get_current_professional, requi
 from app.core.specialty_catalog import specialty_label
 from app.db.session import get_db
 from app.models.professional import Professional
-from app.schemas.professional import ProfessionalResponse, ProfessionalUpdate
+from app.schemas.professional import AnalyticsConsentUpdate, ProfessionalResponse, ProfessionalUpdate
+from app.services.analytics_consent import has_analytics_consent, set_analytics_consent
 from app.schemas.onboarding import OnboardingResponse, OnboardingUpdate
 from app.services.onboarding_service import build_onboarding_response, update_onboarding
 from app.services.billing_profile_service import billing_profile_is_complete
@@ -16,6 +17,7 @@ router = APIRouter(prefix="/me", tags=["me"])
 
 def _to_response(p: Professional) -> ProfessionalResponse:
     return ProfessionalResponse(
+        analytics_consent=has_analytics_consent(p),
         id=str(p.id),
         name=p.name,
         specialty=p.specialty or specialty_label(p.specialty_key),
@@ -59,6 +61,17 @@ async def update_me(
         setattr(professional, field, value)
     await db.flush()
     return _to_response(professional)
+
+
+@router.patch("/analytics-consent", response_model=AnalyticsConsentUpdate)
+async def update_analytics_consent(
+    body: AnalyticsConsentUpdate,
+    professional: Professional = Depends(get_current_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    set_analytics_consent(professional, body.analytics_consent)
+    await db.commit()
+    return body
 
 
 @router.get("/activation", response_model=OnboardingResponse)

@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -102,7 +102,7 @@ async def build_onboarding_response(
     )
     is_complete = steps.configured_service and steps.created_real_patient
     completion_moments = [
-        moment
+        moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment
         for moment in (
             professional.onboarding_completed_at,
             configured_service.created_at if configured_service is not None else None,

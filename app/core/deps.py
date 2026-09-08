@@ -176,3 +176,18 @@ async def get_patient_for_professional(
     if patient is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paciente não encontrado")
     return patient
+
+
+async def get_session_for_patient(
+    session_id: UUID, patient_id: UUID, professional: Professional, db: AsyncSession,
+):
+    from app.models.session import Session
+
+    session = await db.scalar(select(Session).where(
+        Session.id == session_id,
+        Session.patient_id == patient_id,
+        Session.professional_id == professional.id,
+    ))
+    if session is None:
+        raise HTTPException(status_code=404, detail="Sessão não encontrada")
+    return session

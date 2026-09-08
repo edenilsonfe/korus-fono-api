@@ -17,7 +17,7 @@ def _redis_allow(key: str, max_requests: int, window_seconds: int) -> bool:
     import redis
 
     settings = get_settings()
-    client = redis.from_url(settings.redis_url, decode_responses=True)
+    client = redis.from_url(settings.redis_url, decode_responses=True, socket_connect_timeout=1, socket_timeout=1)
     try:
         pipe = client.pipeline()
         pipe.incr(key)

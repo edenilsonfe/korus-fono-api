@@ -1,3 +1,4 @@
+from starlette.concurrency import run_in_threadpool
 import json
 from datetime import date
 from uuid import UUID
@@ -6,14 +7,14 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import defer, selectinload
 from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.deps import get_patient_for_professional, require_verified_professional
 from app.core.config import get_settings
 from app.core.utils import utcnow
 from app.db.session import get_db
-from app.models.ai import AIJob, AIReport, ChatMessage, Conversation
+from app.models.ai import AIJob, AIReport, AIReportRevision, ChatMessage, Conversation
 from app.models.professional import Professional
 from app.schemas.ai import (
     AIJobResponse,
@@ -21,6 +22,7 @@ from app.schemas.ai import (
     AIReportCreate,
     AIReportResponse,
     AIReportUpdate,
+    AIReportRevisionResponse,
     AIToolRequest,
     ConversationCreate,
     ConversationResponse,
@@ -37,6 +39,7 @@ from app.services.audio_transcription_service import transcribe_audio
 from app.services.report_export import export_report
 from app.services.timeline import create_timeline_event
 from app.schemas.assistant import ChatResponse
+from app.services.report_service import revise_report
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -114,6 +117,9 @@ async def poll_job(
 async def list_reports(
     patient_id: UUID | None = Query(None, alias="patientId"),
     report_type: str | None = Query(None, alias="type"),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200),
+    include_content: bool = Query(False, alias="includeContent"),
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
@@ -128,7 +134,9 @@ async def list_reports(
         query = query.where(AIReport.patient_id == patient_id)
     if report_type:
         query = query.where(AIReport.type == report_type)
-    query = query.order_by(AIReport.date.desc())
+    query = query.order_by(AIReport.date.desc(), AIReport.id.desc()).offset(offset).limit(limit)
+    if not include_content:
+        query = query.options(defer(AIReport.content))
     result = await db.execute(query)
     return [
         AIReportResponse(
@@ -138,7 +146,7 @@ async def list_reports(
             patient=name,
             date=r.date.isoformat(),
             preview=r.preview,
-            content=r.content,
+            content=r.content if include_content else "",
             status=r.status,
         )
         for r, name in result.all()
@@ -154,6 +162,8 @@ async def update_report(
 ):
     from app.models.patient import Patient
 
+    await revise_report(db, report_id, professional.id, body)
+
     result = await db.execute(
         select(AIReport, Patient.name)
         .join(Patient, AIReport.patient_id == Patient.id)
@@ -163,12 +173,6 @@ async def update_report(
     if not row:
         raise HTTPException(status_code=404, detail="Relatório não encontrado")
     report, patient_name = row
-    report.content = body.content
-    report.preview = body.content[:200] + "..." if len(body.content) > 200 else body.content
-    if body.status:
-        report.status = body.status
-    elif report.status == "draft":
-        report.status = "finalized"
     await db.flush()
     return AIReportResponse(
         id=str(report.id),
@@ -180,6 +184,38 @@ async def update_report(
         content=report.content,
         status=report.status,
     )
+
+
+@router.get("/reports/{report_id}", response_model=AIReportResponse)
+async def get_report(
+    report_id: UUID,
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.patient import Patient
+    row = (await db.execute(select(AIReport, Patient.name).join(Patient, AIReport.patient_id == Patient.id)
+        .where(AIReport.id == report_id, AIReport.professional_id == professional.id))).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Relatório não encontrado")
+    report, patient_name = row
+    return AIReportResponse(id=str(report.id), type=report.type, patient_id=str(report.patient_id),
+        patient=patient_name, date=report.date.isoformat(), preview=report.preview,
+        content=report.content, status=report.status)
+
+
+@router.get("/reports/{report_id}/revisions", response_model=list[AIReportRevisionResponse])
+async def get_report_revisions(
+    report_id: UUID,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    await get_report(report_id, professional, db)
+    rows = (await db.scalars(select(AIReportRevision).where(AIReportRevision.report_id == report_id)
+        .order_by(AIReportRevision.created_at.desc(), AIReportRevision.id.desc()).offset(offset).limit(limit))).all()
+    return [AIReportRevisionResponse(id=str(row.id), content=row.content, status=row.status,
+        professional_id=str(row.professional_id), created_at=row.created_at) for row in rows]
 
 
 @router.get("/reports/{report_id}/export")
@@ -220,7 +256,7 @@ async def create_report(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    enforce_assistant_rate_limit(str(professional.id))
+    await run_in_threadpool(enforce_assistant_rate_limit, str(professional.id))
     patient = await get_patient_for_professional(UUID(body.patient_id), professional, db)
     spec_key = f"report:{body.type}"
     if spec_key not in AI_TOOL_SPECS:
@@ -247,6 +283,7 @@ async def create_report(
         status="draft",
     )
     db.add(report)
+    await db.flush()
     job.status = "completed"
     job.result = json.dumps({"reportId": str(report.id)})
     job.completed_at = utcnow()
@@ -363,7 +400,7 @@ async def send_message(
 
     await bind_conversation_patient(db, professional, conv, body.patient_id)
 
-    enforce_assistant_rate_limit(str(professional.id))
+    await run_in_threadpool(enforce_assistant_rate_limit, str(professional.id))
 
     user_msg = ChatMessage(conversation_id=conv.id, role="user", content=body.content)
     db.add(user_msg)
@@ -392,7 +429,7 @@ async def _run_tool_job(
     spec_key: str | None = None,
     prompt_builder=None,
 ) -> dict:
-    enforce_assistant_rate_limit(str(professional.id))
+    await run_in_threadpool(enforce_assistant_rate_limit, str(professional.id))
     patient_id = UUID(body.patient_id) if body.patient_id else None
     if patient_id:
         await get_patient_for_professional(patient_id, professional, db)
@@ -423,14 +460,14 @@ async def _run_tool_job(
     return {"jobId": str(job.id), "status": "completed", "result": result}
 
 
-@router.post("/transcribe", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/transcribe", status_code=status.HTTP_200_OK)
 async def transcribe(
     patient_id: str = Form(alias="patientId"),
     file: UploadFile = File(...),
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    enforce_assistant_rate_limit(str(professional.id))
+    await run_in_threadpool(enforce_assistant_rate_limit, str(professional.id))
     parsed_patient_id = UUID(patient_id)
     await get_patient_for_professional(parsed_patient_id, professional, db)
     transcription = await transcribe_audio(file)
@@ -452,7 +489,7 @@ async def transcribe(
     await db.flush()
     return {"jobId": str(job.id), "status": "completed", "result": transcription.text}
 
-@router.post("/speech-analysis", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/speech-analysis", status_code=status.HTTP_200_OK)
 async def speech_analysis(body: AIToolRequest, professional: Professional = Depends(require_verified_professional), db: AsyncSession = Depends(get_db)):
     return await _run_tool_job(
         db,
@@ -467,14 +504,14 @@ async def speech_analysis(body: AIToolRequest, professional: Professional = Depe
     )
 
 
-@router.post("/speech-analysis/audio", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/speech-analysis/audio", status_code=status.HTTP_200_OK)
 async def speech_analysis_audio(
     patient_id: str = Form(alias="patientId"),
     file: UploadFile = File(...),
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    enforce_assistant_rate_limit(str(professional.id))
+    await run_in_threadpool(enforce_assistant_rate_limit, str(professional.id))
     if not get_settings().opencode_api_key.strip():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -508,22 +545,22 @@ async def speech_analysis_audio(
     await db.flush()
     return {"jobId": str(job.id), "status": "completed", "result": result}
 
-@router.post("/clinical-trends", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/clinical-trends", status_code=status.HTTP_200_OK)
 async def clinical_trends(body: AIToolRequest, professional: Professional = Depends(require_verified_professional), db: AsyncSession = Depends(get_db)):
     return await _run_tool_job(db, professional, "clinical-trends", body, spec_key="clinical-trends")
 
-@router.post("/suggest-goals", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/suggest-goals", status_code=status.HTTP_200_OK)
 async def suggest_goals(body: AIToolRequest, professional: Professional = Depends(require_verified_professional), db: AsyncSession = Depends(get_db)):
     return await _run_tool_job(db, professional, "suggest-goals", body, spec_key="suggest-goals")
 
-@router.post("/therapy-plan", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/therapy-plan", status_code=status.HTTP_200_OK)
 async def therapy_plan(body: AIToolRequest, professional: Professional = Depends(require_verified_professional), db: AsyncSession = Depends(get_db)):
     return await _run_tool_job(db, professional, "therapy-plan", body, spec_key="therapy-plan")
 
-@router.post("/session-summary", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/session-summary", status_code=status.HTTP_200_OK)
 async def session_summary(body: AIToolRequest, professional: Professional = Depends(require_verified_professional), db: AsyncSession = Depends(get_db)):
     return await _run_tool_job(db, professional, "session-summary", body, spec_key="session-summary")
 
-@router.post("/proofread", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/proofread", status_code=status.HTTP_200_OK)
 async def proofread(body: AIToolRequest, professional: Professional = Depends(require_verified_professional), db: AsyncSession = Depends(get_db)):
     return await _run_tool_job(db, professional, "proofread", body, spec_key="proofread")

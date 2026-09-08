@@ -16,14 +16,15 @@ def _package():
 
 def test_phonology_scoring_counts_processes():
     package = _package()
-    answers = {
+    answers = {item["id"]: {"classification": "correct", "processes": []} for item in package.get_module_items("fonologia-imitacao")}
+    answers.update({
         "fon_im_01": {"response": "pato", "classification": "correct", "processes": []},
         "fon_im_02": {"response": "papo", "classification": "substitution", "processes": ["fronting"]},
-    }
+    })
     result = score_phonology_module(
         package, "fonologia-imitacao", answers, patient_age_months=72
     )
-    assert result["correct"] == 1
+    assert result["correct"] == len(answers) - 1
     assert result["altered"] == 1
     assert any(p["id"] == "fronting" for p in result["processes"])
 
@@ -42,8 +43,10 @@ def test_vocabulary_scoring_dvu_percentages():
         package, "vocabulario", answers, patient_age_months=48
     )
     assert result["dvu"] == 3
-    assert result["total_items"] == 5
-    assert result["percentage"] == 60.0
+    # The denominator is the complete manifest, including unanswered items.
+    total = len(package.get_module_items("vocabulario"))
+    assert result["total_items"] == total
+    assert result["percentage"] == round(3 / total * 100, 1)
 
 
 def test_fluency_scoring_calculates_rates():

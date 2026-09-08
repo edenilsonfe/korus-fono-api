@@ -46,7 +46,7 @@ async def _engine():
         await conn.run_sync(
             lambda sync_conn: Base.metadata.create_all(
                 bind=sync_conn,
-                tables=[Professional.__table__, Resource.__table__],
+                tables=[Professional.__table__, Resource.__table__, Base.metadata.tables["admin_audit_logs"]],
             )
         )
     return eng
@@ -391,7 +391,7 @@ async def test_admin_create_global_resource(resources_env):
     data = {
         "title": "Novo global",
         "description": "Staff",
-        "categories": '["TEA"]',
+        "categories": '["Linguagem"]',
         "featured": "true",
     }
     res = await client.post(

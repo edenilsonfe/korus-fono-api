@@ -17,18 +17,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.core.config import get_settings
 from app.db.base import Base
-from app.models.ai import ChatMessage, Conversation
+from app.models.ai import AIReport, ChatMessage, Conversation
 from app.models.appointment import Appointment
+from app.models.assessment import Assessment, ProtocolCatalog
 from app.models.evolution import Evolution
 from app.models.goal import Goal, ClinicalDomainSnapshot
 from app.models.patient import Patient
 from app.models.professional import Professional
 from app.models.session import Session
-# NOTE: Assessment/ProtocolCatalog use JSONB columns that SQLite can't render
-# in CREATE TABLE on newer SQLAlchemy versions. The production tests run on
-# PostgreSQL via the project conftest; here we exclude those tables and test
-# get_patient_context only for the ownership-guard path (which short-circuits
-# before any Assessment query).
+# conftest supplies SQLite adapters for the PostgreSQL JSON/ARRAY columns.
 from app.schemas.assistant import ChatResponse
 from app.services.assistant.assistant_service import AssistantService
 from app.services.assistant import rate_limit as rate_limit_module
@@ -49,6 +46,9 @@ async def engine():
                 bind=sync_conn,
                 tables=[
                     Professional.__table__,
+                    AIReport.__table__,
+                    Assessment.__table__,
+                    ProtocolCatalog.__table__,
                     Patient.__table__,
                     Appointment.__table__,
                     Session.__table__,
@@ -116,9 +116,7 @@ async def _make_conversation(db, professional, patient=None):
     )
     db.add(conv)
     await db.commit()
-    await db.refresh(conv)
-    # eager-load messages attribute as an empty list for the service
-    conv.messages = []
+    await db.refresh(conv, attribute_names=["messages"])
     return conv
 
 

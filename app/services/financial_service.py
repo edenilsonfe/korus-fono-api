@@ -665,14 +665,13 @@ async def _payable_paid(db: AsyncSession, payable_id: UUID) -> int:
     return int(result.scalar_one())
 
 
-async def serialize_payable(db: AsyncSession, entity: Payable) -> PayableResponse:
-    paid = await _payable_paid(db, entity.id)
+async def serialize_payable(db: AsyncSession, entity: Payable, settlements: list[PayableSettlement] | None = None) -> PayableResponse:
+    if settlements is None:
+        settlements = list((await db.scalars(select(PayableSettlement)
+            .where(PayableSettlement.payable_id == entity.id)
+            .order_by(PayableSettlement.payment_date.desc(), PayableSettlement.created_at.desc()))).all())
+    paid = sum(item.amount_cents for item in settlements if item.status == "confirmed")
     balance = max(entity.total_cents - paid, 0)
-    settlement_result = await db.execute(
-        select(PayableSettlement)
-        .where(PayableSettlement.payable_id == entity.id)
-        .order_by(PayableSettlement.payment_date.desc(), PayableSettlement.created_at.desc())
-    )
     return PayableResponse(
         id=entity.id,
         description=entity.description,
@@ -690,7 +689,7 @@ async def serialize_payable(db: AsyncSession, entity: Payable) -> PayableRespons
         notes=entity.notes,
         settlements=[
             SettlementResponse.model_validate(settlement)
-            for settlement in settlement_result.scalars().all()
+            for settlement in settlements
         ],
     )
 
@@ -718,7 +717,15 @@ async def list_payables(
         pattern = f"%{q.strip()}%"
         query = query.where(or_(Payable.description.ilike(pattern), Payable.supplier_name.ilike(pattern)))
     result = await db.execute(query.order_by(Payable.due_date.desc(), Payable.created_at.desc()))
-    return [await serialize_payable(db, item) for item in result.scalars().all()]
+    payables = result.scalars().all()
+    by_payable = {item.id: [] for item in payables}
+    if payables:
+        settlements = await db.scalars(select(PayableSettlement)
+            .where(PayableSettlement.payable_id.in_(by_payable))
+            .order_by(PayableSettlement.payment_date.desc(), PayableSettlement.created_at.desc()))
+        for settlement in settlements:
+            by_payable[settlement.payable_id].append(settlement)
+    return [await serialize_payable(db, item, by_payable[item.id]) for item in payables]
 
 
 async def settle_payable(

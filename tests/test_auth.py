@@ -21,10 +21,8 @@ _JWT_RE = re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
 
 
 @pytest.fixture
-async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+async def client(api_client):
+    yield api_client
 
 
 def _assert_auth_json_has_no_usable_jwt(data: dict) -> None:

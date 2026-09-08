@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.appointment import Appointment
 from app.models.schedule_block import ScheduleBlock
+from app.models.professional import Professional
 from app.schemas.schedule_block import ScheduleBlockCreate, ScheduleBlockResponse
 
 
@@ -43,6 +44,8 @@ async def ensure_appointment_slot_available(
     duration: int,
     exclude_appointment_id: UUID | None = None,
 ) -> None:
+    # Serialize all agenda writers, including two reservations of an empty slot.
+    await db.execute(select(Professional.id).where(Professional.id == professional_id).with_for_update())
     appointment_start = _time_to_minutes(appointment_time)
     appointment_end = appointment_start + duration
 
@@ -110,6 +113,7 @@ async def create_schedule_block(
     professional_id: UUID,
     body: ScheduleBlockCreate,
 ) -> ScheduleBlockResponse:
+    await db.execute(select(Professional.id).where(Professional.id == professional_id).with_for_update())
     appointments_result = await db.execute(
         select(Appointment).where(
             Appointment.professional_id == professional_id,

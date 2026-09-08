@@ -10,10 +10,8 @@ from app.services.auth_rate_limit import normalize_auth_email
 
 
 @pytest.fixture
-async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+async def client(api_client):
+    yield api_client
 
 
 def test_normalize_auth_email():
@@ -56,10 +54,10 @@ async def test_refresh_rotates_opaque_token(api_client, professional):
     assert new_refresh != old_refresh
 
     # Avoid jar cookie (rotated) shadowing the revoked raw token in the body.
+    api_client.cookies.clear()
     reuse = await api_client.post(
         "/api/v1/auth/refresh",
         json={"refreshToken": old_refresh},
-        cookies={},
     )
     assert reuse.status_code == 401
 
@@ -81,7 +79,6 @@ async def test_logout_revokes_refresh(api_client, professional):
     refresh = await api_client.post(
         "/api/v1/auth/refresh",
         json={"refreshToken": refresh_token},
-        cookies={},
     )
     assert refresh.status_code == 401
 
@@ -118,7 +115,7 @@ async def test_login_rate_limit_returns_429(api_client, professional, monkeypatc
             detail="Muitas tentativas de login. Tente novamente mais tarde.",
         )
 
-    monkeypatch.setattr(auth_rate_limit, "enforce_login_rate_limit", _deny)
+    monkeypatch.setattr("app.api.v1.auth.enforce_login_rate_limit", _deny)
 
     response = await api_client.post(
         "/api/v1/auth/login",

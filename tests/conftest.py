@@ -1,22 +1,31 @@
 import os
 import uuid
 from datetime import UTC, date, datetime, timedelta
+from contextlib import asynccontextmanager
 
 os.environ.setdefault("JWT_SECRET", "test-secret-for-pytest-only-not-for-prod")
-os.environ.setdefault("AUTH_RATE_LIMIT_FAIL_CLOSED", "false")
+os.environ["AUTH_RATE_LIMIT_FAIL_CLOSED"] = "false"
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 # Worktree/CI sem .env: app sobe em modo debug (exige ALLOW_DEBUG).
 os.environ.setdefault("DEBUG", "true")
 os.environ.setdefault("ALLOW_DEBUG", "true")
 
 import pytest
+from app.core.config import Settings
+Settings.model_config["env_file"] = None
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
+from sqlalchemy import JSON
 
 from app.core.security import create_access_token, hash_password
 from app.db.base import Base
 import app.models  # noqa: F401
+for table in Base.metadata.tables.values():
+    for column in table.columns:
+        if isinstance(column.type, ARRAY):
+            column.type = column.type.with_variant(JSON(), "sqlite")
 from app.db.session import get_db
 from app.main import app
 from app.models.assessment import ProtocolCatalog
@@ -119,9 +128,20 @@ def auth_headers(professional: Professional):
 
 
 @pytest.fixture
-async def api_client(db_session: AsyncSession):
+async def api_client(db_session: AsyncSession, monkeypatch):
+    monkeypatch.setattr("app.middleware.entitlement.AsyncSessionLocal",
+        async_sessionmaker(db_session.bind, class_=AsyncSession, expire_on_commit=False))
     async def override_get_db():
-        yield db_session
+        try:
+            yield db_session
+            await db_session.commit()
+        except Exception:
+            await db_session.rollback()
+            # Test code retains fixture objects across rejected requests. Reload
+            # them explicitly instead of leaving async lazy loads on attributes.
+            for instance in list(db_session.identity_map.values()):
+                await db_session.refresh(instance)
+            raise
 
     app.dependency_overrides[get_db] = override_get_db
     transport = ASGITransport(app=app)
@@ -137,3 +157,57 @@ def clear_instrument_cache():
     clear_instrument_content_package_cache()
     yield
     clear_instrument_content_package_cache()
+
+
+@pytest.fixture(autouse=True)
+def isolate_entitlement_database(monkeypatch):
+    from app.middleware import entitlement
+    original = entitlement.AsyncSessionLocal
+
+    @asynccontextmanager
+    async def test_session():
+        override = app.dependency_overrides.get(get_db)
+        if override is None:
+            async with original() as session:
+                yield session
+        else:
+            generator = override()
+            try:
+                yield await anext(generator)
+            finally:
+                await generator.aclose()
+
+    monkeypatch.setattr(entitlement, "AsyncSessionLocal", test_session)
+
+
+@pytest.fixture(autouse=True)
+def isolate_auth_rate_limit(monkeypatch):
+    # Endpoint limit tests replace this with their deterministic allow/deny case.
+    # Ordinary domain tests must not depend on a shared local Redis instance.
+    monkeypatch.setattr("app.services.auth_rate_limit._redis_allow", lambda **_: True)
+
+
+@pytest.fixture
+async def audit_pg_factory():
+    from sqlalchemy import text
+    from sqlalchemy.engine import make_url
+
+    url = os.getenv("TEST_AUDIT_PG_URL") or os.getenv("TEST_AFFILIATE_PG_URL")
+    if not url:
+        pytest.skip("Set TEST_AUDIT_PG_URL to a disposable local korus_audit database")
+    parsed = make_url(url)
+    assert parsed.host == "127.0.0.1" and parsed.database == "korus_audit", "Only the disposable local audit database is allowed"
+    schema = "audit_test_" + uuid.uuid4().hex
+    admin = create_async_engine(url)
+    async with admin.begin() as conn:
+        await conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+    engine = create_async_engine(url, connect_args={"server_settings": {"search_path": schema, "statement_timeout": "10000"}})
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        yield async_sessionmaker(engine, expire_on_commit=False)
+    finally:
+        await engine.dispose()
+        async with admin.begin() as conn:
+            await conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        await admin.dispose()

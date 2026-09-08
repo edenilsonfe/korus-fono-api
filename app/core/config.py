@@ -120,6 +120,7 @@ class Settings(BaseSettings):
     trial_days: int = 7
 
     # Meta Pixel / Conversions API (server-side tracking). Vazio desliga.
+    korus_proxy_secret: str = ""
     meta_pixel_id: str = ""
     meta_capi_access_token: str = ""
     # Código de evento de teste gerado em Event Manager > Test Events (só dev).

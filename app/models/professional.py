@@ -42,6 +42,9 @@ class Professional(Base, TimestampMixin):
     admin_role: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     is_disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    analytics_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    analytics_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    analytics_consent_version: Mapped[str | None] = mapped_column(String(16), nullable=True)
     subscription_status: Mapped[str] = mapped_column(String(32), nullable=False, default="trialing")
     signup_payment_required: Mapped[bool] = mapped_column(
         Boolean,

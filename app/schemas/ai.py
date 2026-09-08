@@ -1,3 +1,6 @@
+from typing import Literal
+from datetime import datetime
+
 from pydantic import Field
 
 from app.schemas.common import CamelModel
@@ -22,7 +25,15 @@ class AIReportResponse(CamelModel):
 
 class AIReportUpdate(CamelModel):
     content: str
-    status: str | None = None
+    status: Literal["draft", "finalized"] | None = None
+
+
+class AIReportRevisionResponse(CamelModel):
+    id: str
+    content: str
+    status: str
+    professional_id: str
+    created_at: datetime
 
 
 class AIJobResponse(CamelModel):

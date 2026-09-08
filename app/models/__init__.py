@@ -11,7 +11,7 @@ from app.models.affiliate import (
     AffiliateReferral,
     AffiliateReward,
 )
-from app.models.ai import AIJob, AIReport, ChatMessage, Conversation
+from app.models.ai import AIJob, AIReport, AIReportRevision, ChatMessage, Conversation
 from app.models.admin_audit_log import AdminAuditLog
 from app.models.app_notification import AppNotification, AppNotificationRead
 from app.models.feature_flag import FeatureFlag, FeatureFlagOverride

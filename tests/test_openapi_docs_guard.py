@@ -10,6 +10,7 @@ TEST_SECRET = "test-secret-for-pytest-only-not-for-prod"
 def _make_settings(*, debug: bool) -> Settings:
     return Settings(
         debug=debug,
+        frontend_url="https://app.example.com",
         jwt_secret=TEST_SECRET,
         whatsapp_provider="meta",
     )

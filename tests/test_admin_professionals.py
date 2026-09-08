@@ -15,6 +15,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
 
+from app.core.utils import utcnow
 from app.core.security import create_access_token, hash_password
 from app.billing.errors import PaymentGatewayError
 from app.db.base import Base
@@ -26,6 +27,7 @@ from app.models.assessment import Assessment, ProtocolCatalog
 from app.models.billing import Plan, Subscription
 from app.models.patient import Patient
 from app.models.professional import Professional
+from app.models.refresh_session import RefreshSession
 from app.models.session import Session
 from app.models.whatsapp_connection import WhatsAppConnection
 from app.services.admin_professional_service import (
@@ -53,6 +55,7 @@ async def engine():
     eng = create_async_engine(TEST_DATABASE_URL, echo=False)
     tables = [
         Professional.__table__,
+        RefreshSession.__table__,
         AdminAuditLog.__table__,
         ProtocolCatalog.__table__,
         Patient.__table__,
@@ -78,6 +81,7 @@ async def db(engine):
 
 async def _make_professional(db, *, email, is_staff=False, password="testpass123", **kwargs):
     pro = Professional(
+        email_verified_at=utcnow(),
         email=email,
         password_hash=hash_password(password),
         name=f"Pro {email}",

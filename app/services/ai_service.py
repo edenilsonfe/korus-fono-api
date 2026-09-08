@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import asyncio
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -103,17 +104,20 @@ async def run_llm(prompt: str, system: str = "", output: str = "plain") -> str:
         api_key=settings.opencode_api_key,
         base_url=settings.opencode_base_url,
         timeout=settings.assistant_llm_timeout_seconds,
+        max_retries=0,
     )
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
     try:
-        response = await client.chat.completions.create(
-            model=settings.opencode_model,
-            messages=messages,
-        )
-    except (APIStatusError, APIConnectionError, APITimeoutError) as exc:
+        # Synchronous HTTP contract: finish before the web's 120-second budget.
+        async with asyncio.timeout(min(settings.assistant_llm_timeout_seconds, 90)):
+            response = await client.chat.completions.create(
+                model=settings.opencode_model,
+                messages=messages,
+            )
+    except (APIStatusError, APIConnectionError, APITimeoutError, TimeoutError) as exc:
         logger.warning(
             "AI provider temporarily unavailable: error=%s status=%s",
             type(exc).__name__,
@@ -127,6 +131,8 @@ async def run_llm(prompt: str, system: str = "", output: str = "plain") -> str:
             ),
             headers={"Retry-After": "60"},
         ) from exc
+    finally:
+        await client.close()
     content = response.choices[0].message.content or ""
     from app.services.assistant.format_reply import sanitize_llm_markdown, sanitize_llm_plain_text
 

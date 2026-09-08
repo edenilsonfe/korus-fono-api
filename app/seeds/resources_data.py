@@ -25,7 +25,7 @@ GLOBAL_RESOURCE_SEED: list[dict] = [
             "Conjunto de pranchas PECS imprimíveis com pictogramas de rotina, alimentação e emoções "
             "para crianças não verbais."
         ),
-        "categories": ["Comunicação Alternativa", "TEA"],
+        "categories": ["Comunicação Alternativa"],
         "format": "PDF",
         "filename": "pranchas-caa.pdf",
         "content_type": "application/pdf",
@@ -68,7 +68,7 @@ GLOBAL_RESOURCE_SEED: list[dict] = [
         "description": (
             "Orientações para famílias sobre atividades de regulação sensorial no ambiente domiciliar."
         ),
-        "categories": ["Orientação aos Pais", "TEA"],
+        "categories": ["Orientação aos Pais"],
         "format": "PDF",
         "filename": "guia-integracao-sensorial.pdf",
         "content_type": "application/pdf",
@@ -130,7 +130,7 @@ GLOBAL_RESOURCE_SEED: list[dict] = [
         "description": (
             "Material informativo para entregar às famílias sobre quando buscar avaliação especializada."
         ),
-        "categories": ["Orientação aos Pais", "TEA", "Guias e Orientações"],
+        "categories": ["Orientação aos Pais", "Guias e Orientações"],
         "format": "PDF",
         "filename": "folheto-sinais-alerta.pdf",
         "content_type": "application/pdf",

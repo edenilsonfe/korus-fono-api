@@ -1,0 +1,36 @@
+name: API checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-local-only
+          POSTGRES_DB: korus_audit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d korus_audit"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_AUDIT_PG_URL: postgresql+asyncpg://postgres:ci-local-only@127.0.0.1:5432/korus_audit
+      TEST_AFFILIATE_PG_URL: postgresql+asyncpg://postgres:ci-local-only@127.0.0.1:5432/korus_audit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv sync --frozen --group dev
+      - run: uv run pytest -q

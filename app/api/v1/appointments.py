@@ -308,6 +308,7 @@ async def update_appointment(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
+    await db.execute(select(Professional.id).where(Professional.id == professional.id).with_for_update())
     result = await db.execute(
         select(Appointment, Patient)
         .join(Patient, Appointment.patient_id == Patient.id)
@@ -340,7 +341,9 @@ async def update_appointment(
     new_date = data.get("date", appt.date)
     new_time = data.get("time", appt.time)
     new_duration = data.get("duration", appt.duration)
-    if any(k in data for k in ("date", "time", "duration")):
+    if data.get("status", appt.status) != "cancelado" and (
+        any(k in data for k in ("date", "time", "duration")) or appt.status == "cancelado"
+    ):
         await ensure_appointment_slot_available(
             db, professional.id, new_date, new_time, new_duration, appt.id
         )

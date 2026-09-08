@@ -1,3 +1,4 @@
+from starlette.concurrency import run_in_threadpool
 from uuid import UUID
 
 from fastapi import (
@@ -117,7 +118,7 @@ async def request_portal_link(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
-    enforce_forgot_rate_limit(get_client_ip(request), str(body.email))
+    await run_in_threadpool(enforce_forgot_rate_limit, get_client_ip(request), str(body.email))
     if await FeatureFlagService(db).is_globally_enabled("affiliate_partner_program"):
         result = await AffiliatePortalService(db).request_magic_link(str(body.email))
         if result:

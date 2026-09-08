@@ -346,7 +346,7 @@ async def _get_inactive_patients(
         .where(
             Patient.professional_id == professional.id,
             Patient.status == "ativo",
-            ~select(func.count())
+            ~select(Session.id)
             .select_from(Session)
             .where(
                 Session.patient_id == Patient.id,

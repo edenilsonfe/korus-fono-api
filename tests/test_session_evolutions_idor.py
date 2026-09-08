@@ -16,6 +16,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
 
+from app.core.utils import utcnow
 from app.core.security import create_access_token
 from app.db.base import Base
 from app.db.session import get_db
@@ -69,6 +70,7 @@ async def db(engine):
 
 async def _make_professional(db, *, email):
     pro = Professional(
+        email_verified_at=utcnow(),
         email=email,
         password_hash="x",
         name="Dra. Teste",

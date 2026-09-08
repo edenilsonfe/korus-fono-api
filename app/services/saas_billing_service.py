@@ -25,6 +25,7 @@ from app.services.email_verification import (
 )
 from app.services.meta_pixel_service import MetaPixelService
 from app.services.posthog_analytics_service import PostHogAnalyticsService
+from app.services.analytics_consent import has_analytics_consent
 
 logger = logging.getLogger(__name__)
 
@@ -559,7 +560,7 @@ class SaasBillingService:
         """Purchase server-side quando um pagamento é confirmado — best-effort."""
         if sub_status != "active" or ev.event_type != InternalBillingEventType.PAYMENT_SUCCEEDED:
             return
-        if not professional or not plan_row:
+        if not professional or not plan_row or not has_analytics_consent(professional):
             return
         value_cents = (
             subscription.checkout_charge_cents

@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from pydantic import Field
 
 from app.schemas.common import CamelModel
@@ -6,7 +8,7 @@ from app.schemas.common import CamelModel
 class EvolutionCreate(CamelModel):
     title: str | None = None
     content: str
-    session_id: str | None = None
+    session_id: UUID | None = None
 
 
 class EvolutionResponse(CamelModel):

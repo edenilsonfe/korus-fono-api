@@ -7,6 +7,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.utils import utcnow
 from app.core.security import hash_password
 from app.models.ai import ChatMessage, Conversation
 from app.models.professional import Professional
@@ -27,6 +28,7 @@ async def conversation(db_session: AsyncSession, professional: Professional):
 @pytest.fixture
 async def other_professional(db_session: AsyncSession):
     pro = Professional(
+        email_verified_at=utcnow(),
         email="outra-profissional@example.com",
         password_hash=hash_password("testpass123"),
         name="Dra. Outra",

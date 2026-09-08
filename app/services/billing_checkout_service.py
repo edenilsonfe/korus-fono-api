@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import httpx
 from typing import Any
 from uuid import UUID
 
@@ -501,6 +502,23 @@ class BillingCheckoutService:
                     )
                     payment = self._pick_pix_attempt(payments)
                     old_checkout_id = sub.external_checkout_id
+                    # A committed charge may not appear in the provider's list yet.
+                    if old_checkout_id and str(old_checkout_id).startswith("pay_"):
+                        previous = next(
+                            (candidate for candidate in payments if str(candidate.get("id")) == str(old_checkout_id)),
+                            None,
+                        )
+                        if previous is None:
+                            previous = await gateway.get_payment(str(old_checkout_id))
+                        if str(previous.get("billingType", "")).upper() == "PIX":
+                            if previous.get("deleted") or str(previous.get("status", "")).upper() not in (
+                                _PAYMENT_SUCCESS | _PAYMENT_PENDING
+                            ):
+                                raise HTTPException(
+                                    status_code=status.HTTP_409_CONFLICT,
+                                    detail="Esta cobrança PIX não está mais disponível. Verifique o pagamento antes de preparar uma nova cobrança.",
+                                )
+                            payment = previous
                     old_checkout_is_payment = any(
                         str(candidate.get("id")) == str(old_checkout_id)
                         for candidate in payments
@@ -539,10 +557,15 @@ class BillingCheckoutService:
                             )
                 else:
                     pix = await gateway.get_pix_qr_code(payment_id)
+            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Não foi possível consultar o PIX agora. Tente consultar novamente; a cobrança será mantida.",
+                ) from exc
             except (PaymentGatewayConfigError, PaymentGatewayError) as exc:
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=str(exc),
+                    detail="Não foi possível consultar o PIX agora. Tente consultar novamente; a cobrança será mantida.",
                 ) from exc
         else:
             gateway = StubPaymentGateway()

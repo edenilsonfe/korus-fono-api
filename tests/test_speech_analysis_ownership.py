@@ -20,6 +20,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
 
+from app.core.config import get_settings
 from app.core.security import create_access_token
 from app.db.base import Base
 from app.db.session import get_db
@@ -108,6 +109,7 @@ def _auth_headers(professional):
 
 
 async def _client(engine, monkeypatch):
+    monkeypatch.setattr("app.api.v1.ai.get_settings", lambda: get_settings().model_copy(update={"opencode_api_key": "fake-for-mocked-llm"}))
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async def _get_db():
@@ -164,7 +166,7 @@ async def test_speech_analysis_own_patient_happy_path(monkeypatch):
                 json={"patientId": str(patient_a.id), "text": "papai mamãe"},
                 headers=_auth_headers(pro_a),
             )
-    assert resp.status_code == 202
+    assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "completed"
     assert body["result"] == "análise simulada"
@@ -199,7 +201,7 @@ async def test_transcription_upload_processes_the_selected_audio_file(monkeypatc
                 headers=_auth_headers(professional),
             )
 
-    assert resp.status_code == 202
+    assert resp.status_code == 200
     assert resp.json()["result"] == "transcrição real da gravação"
     assert transcribe_mock.await_args.args[0].filename == "sessao.mp3"
     _clear_override()
@@ -234,7 +236,7 @@ async def test_speech_analysis_audio_uses_transcription_instead_of_sample_text(m
                 headers=_auth_headers(professional),
             )
 
-    assert resp.status_code == 202
+    assert resp.status_code == 200
     assert resp.json()["result"] == "processo fonológico"
     assert "papato por sapato" in llm.await_args.args[0]
     _clear_override()

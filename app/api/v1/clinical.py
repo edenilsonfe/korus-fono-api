@@ -83,18 +83,16 @@ async def list_protocols(
         .order_by(ProtocolCatalog.sort_order.asc(), ProtocolCatalog.name.asc())
     )
     protocols = result.scalars().all()
+    stats_rows = await db.execute(
+        select(Assessment.protocol_id, func.count(), func.avg(Assessment.percentage), func.max(Assessment.date))
+        .join(Patient, Assessment.patient_id == Patient.id)
+        .where(Patient.professional_id == professional.id, Assessment.status == ASSESSMENT_STATUS_COMPLETED)
+        .group_by(Assessment.protocol_id)
+    )
+    stats_by_protocol = {row[0]: tuple(row[1:]) for row in stats_rows}
     responses = []
     for p in protocols:
-        stats = await db.execute(
-            select(func.count(), func.avg(Assessment.percentage), func.max(Assessment.date))
-            .join(Patient, Assessment.patient_id == Patient.id)
-            .where(
-                Assessment.protocol_id == p.id,
-                Patient.professional_id == professional.id,
-                Assessment.status == ASSESSMENT_STATUS_COMPLETED,
-            )
-        )
-        count, avg_result, last_applied = stats.one()
+        count, avg_result, last_applied = stats_by_protocol.get(p.id, (0, 0, None))
         responses.append(
             ProtocolResponse(
                 id=p.id,

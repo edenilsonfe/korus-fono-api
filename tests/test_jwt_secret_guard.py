@@ -31,6 +31,7 @@ def test_debug_false_with_short_secret_raises():
 def test_debug_false_with_strong_secret_is_allowed():
     settings = Settings(
         debug=False,
+        frontend_url="https://app.example.com",
         jwt_secret=TEST_SECRET,
         whatsapp_provider="meta",
         billing_provider="asaas",

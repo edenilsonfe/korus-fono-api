@@ -1,3 +1,4 @@
+from starlette.concurrency import run_in_threadpool
 import logging
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -74,11 +75,13 @@ from app.services.password_reset import (
     send_password_reset_email_sync,
 )
 from app.services.refresh_token_service import (
+    RefreshSessionInvalidated,
     create_refresh_session,
     revoke_all_refresh_sessions,
     revoke_refresh_session,
     rotate_refresh_session,
 )
+from app.services.analytics_consent import set_analytics_consent
 from app.services.temporary_access import signup_payment_blocks_access
 from app.services.whatsapp_welcome_service import (
     dispatch_whatsapp_welcome_message,
@@ -210,7 +213,7 @@ async def _register_account(
     *,
     signup_payment_required: bool,
 ) -> TokenResponse:
-    enforce_register_rate_limit(_request_ip(request))
+    await run_in_threadpool(enforce_register_rate_limit, _request_ip(request))
     existing = await db.execute(select(Professional).where(Professional.email == body.email))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="E-mail já cadastrado")
@@ -233,6 +236,7 @@ async def _register_account(
         onboarding_started_at=now,
     )
     db.add(professional)
+    set_analytics_consent(professional, body.analytics_consent)
     await db.flush()
     if body.referral_code:
         try:
@@ -282,18 +286,19 @@ async def _register_account(
         send_whatsapp_welcome_task,
         welcome_log.id,
     )
-    background_tasks.add_task(
-        track_registration_events_task,
-        str(professional.id),
-        professional.email,
-        professional.name,
-        professional.phone,
-        _request_ip(request),
-        request.headers.get("user-agent"),
-        request.cookies.get("_fbp"),
-        request.cookies.get("_fbc"),
-        not signup_payment_required,
-    )
+    if body.analytics_consent:
+        background_tasks.add_task(
+            track_registration_events_task,
+            str(professional.id),
+            professional.email,
+            professional.name,
+            professional.phone,
+            _request_ip(request),
+            request.headers.get("user-agent"),
+            request.cookies.get("_fbp"),
+            request.cookies.get("_fbc"),
+            not signup_payment_required,
+        )
     return _apply_auth_cookies(response, access_token, refresh_token)
 
 
@@ -345,7 +350,7 @@ async def login(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
-    enforce_login_rate_limit(_request_ip(request), body.email)
+    await run_in_threadpool(enforce_login_rate_limit, _request_ip(request), body.email)
     result = await db.execute(select(Professional).where(Professional.email == body.email))
     professional = result.scalar_one_or_none()
     if not professional or not verify_password(body.password, professional.password_hash):
@@ -372,7 +377,12 @@ async def refresh(
     db: AsyncSession = Depends(get_db),
 ):
     raw_token = _resolve_refresh_token(request, body)
-    professional, new_refresh = await rotate_refresh_session(db, raw_token)
+    try:
+        professional, new_refresh = await rotate_refresh_session(db, raw_token)
+    except RefreshSessionInvalidated:
+        # Commit only the deliberate security revocation, not arbitrary errors.
+        await db.commit()
+        raise
     access_token = create_access_token(professional.id, professional.token_version)
     await db.commit()
     return _apply_auth_cookies(response, access_token, new_refresh)
@@ -412,7 +422,7 @@ async def forgot_password(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    enforce_forgot_rate_limit(_request_ip(request), body.email)
+    await run_in_threadpool(enforce_forgot_rate_limit, _request_ip(request), body.email)
     result = await request_password_reset(db, body.email)
     if result is not None:
         professional, raw_token = result
@@ -431,7 +441,7 @@ async def reset_password(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    enforce_reset_rate_limit(_request_ip(request))
+    await run_in_threadpool(enforce_reset_rate_limit, _request_ip(request))
     await reset_password_with_token(db=db, raw_token=body.token, new_password=body.new_password)
     return MessageResponse(message="Senha redefinida com sucesso")
 
