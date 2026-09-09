@@ -12,9 +12,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 from uuid import UUID
 
+from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -429,10 +430,25 @@ async def _get_owned_patient(db: AsyncSession, professional: Professional, patie
         pid = UUID(str(patient_id))
     except (ValueError, TypeError):
         return None
-    patient = await db.get(Patient, pid)
-    if patient is None or patient.professional_id != professional.id:
+    from app.services.care_team_service import (
+        record_access_event,
+        require_clinical_access,
+    )
+
+    try:
+        access = await require_clinical_access(db, pid, professional)
+    except HTTPException:
         return None
-    return patient
+    record_access_event(
+        db,
+        patient_id=pid,
+        actor=professional,
+        actor_role=access.role,
+        action="ai_context_used",
+        resource_type="patient",
+        resource_id=pid,
+    )
+    return access.patient
 
 
 @_tool(
@@ -459,10 +475,13 @@ async def _search_patient_by_name(
 ) -> Dict[str, Any]:
     limit = max(1, min(int(limit or 5), 10))
     pattern = f"%{name.strip()}%"
+    from app.services.patient_access import list_accessible_patient_ids
+
+    patient_ids = await list_accessible_patient_ids(db, professional)
     rows = await db.execute(
         select(Patient.id, Patient.name, Patient.status)
         .where(
-            Patient.professional_id == professional.id,
+            Patient.id.in_(patient_ids),
             Patient.name.ilike(pattern),
         )
         .order_by(Patient.name)

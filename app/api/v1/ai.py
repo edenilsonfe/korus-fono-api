@@ -1,47 +1,82 @@
-from starlette.concurrency import run_in_threadpool
 import json
 from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import Response, StreamingResponse
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer, selectinload
 from sqlalchemy.orm.attributes import set_committed_value
+from starlette.concurrency import run_in_threadpool
 
-from app.core.deps import get_patient_for_professional, require_verified_professional
 from app.core.config import get_settings
+from app.core.deps import require_verified_professional
 from app.core.utils import utcnow
 from app.db.session import get_db
-from app.models.ai import AIJob, AIReport, AIReportRevision, ChatMessage, Conversation
+from app.models.ai import AIReport, AIReportRevision, ChatMessage, Conversation
 from app.models.professional import Professional
 from app.schemas.ai import (
-    AIJobResponse,
     AICapabilitiesResponse,
+    AIJobResponse,
     AIReportCreate,
     AIReportResponse,
-    AIReportUpdate,
     AIReportRevisionResponse,
+    AIReportUpdate,
     AIToolRequest,
     ConversationCreate,
     ConversationResponse,
     ConversationUpdate,
     MessageCreate,
 )
-from app.services.ai_service import build_patient_context, create_ai_job, get_job, run_llm
+from app.schemas.assistant import ChatResponse
 from app.services.ai_context import build_context
-from app.services.ai_prompts import AI_TOOL_SPECS, build_request_prompt, build_tool_prompt
+from app.services.ai_prompts import (
+    AI_TOOL_SPECS,
+    build_request_prompt,
+    build_tool_prompt,
+)
+from app.services.ai_service import (
+    build_patient_context,
+    create_ai_job,
+    get_job,
+    run_llm,
+)
 from app.services.assistant.assistant_service import AssistantService
 from app.services.assistant.conversation_patient import bind_conversation_patient
 from app.services.assistant.rate_limit import enforce_assistant_rate_limit
 from app.services.audio_transcription_service import transcribe_audio
+from app.services.care_team_service import record_access_event, require_clinical_access
 from app.services.report_export import export_report
-from app.services.timeline import create_timeline_event
-from app.schemas.assistant import ChatResponse
 from app.services.report_service import revise_report
+from app.services.timeline import create_timeline_event
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+
+
+async def _get_ai_patient(
+    db: AsyncSession, patient_id: UUID, professional: Professional
+):
+    access = await require_clinical_access(db, patient_id, professional)
+    record_access_event(
+        db,
+        patient_id=patient_id,
+        actor=professional,
+        actor_role=access.role,
+        action="ai_context_used",
+        resource_type="patient",
+        resource_id=patient_id,
+    )
+    return access.patient
 
 
 @router.get("/capabilities", response_model=AICapabilitiesResponse)
@@ -257,7 +292,7 @@ async def create_report(
     db: AsyncSession = Depends(get_db),
 ):
     await run_in_threadpool(enforce_assistant_rate_limit, str(professional.id))
-    patient = await get_patient_for_professional(UUID(body.patient_id), professional, db)
+    patient = await _get_ai_patient(db, UUID(body.patient_id), professional)
     spec_key = f"report:{body.type}"
     if spec_key not in AI_TOOL_SPECS:
         raise HTTPException(status_code=400, detail="Tipo de relatório inválido")
@@ -343,7 +378,7 @@ async def create_conversation(
 ):
     patient_id = UUID(body.patient_id) if body.patient_id else None
     if patient_id:
-        await get_patient_for_professional(patient_id, professional, db)
+        await _get_ai_patient(db, patient_id, professional)
     conv = Conversation(
         professional_id=professional.id,
         patient_id=patient_id,
@@ -432,7 +467,7 @@ async def _run_tool_job(
     await run_in_threadpool(enforce_assistant_rate_limit, str(professional.id))
     patient_id = UUID(body.patient_id) if body.patient_id else None
     if patient_id:
-        await get_patient_for_professional(patient_id, professional, db)
+        await _get_ai_patient(db, patient_id, professional)
     job = await create_ai_job(
         db,
         professional_id=professional.id,
@@ -469,7 +504,7 @@ async def transcribe(
 ):
     await run_in_threadpool(enforce_assistant_rate_limit, str(professional.id))
     parsed_patient_id = UUID(patient_id)
-    await get_patient_for_professional(parsed_patient_id, professional, db)
+    await _get_ai_patient(db, parsed_patient_id, professional)
     transcription = await transcribe_audio(file)
     job = await create_ai_job(
         db,
@@ -518,7 +553,7 @@ async def speech_analysis_audio(
             detail="Ferramentas de IA não configuradas.",
         )
     parsed_patient_id = UUID(patient_id)
-    await get_patient_for_professional(parsed_patient_id, professional, db)
+    await _get_ai_patient(db, parsed_patient_id, professional)
     transcription = await transcribe_audio(file)
     context = await build_patient_context(db, parsed_patient_id)
     result = await run_llm(

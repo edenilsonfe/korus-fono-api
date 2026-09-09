@@ -26,6 +26,7 @@ from app.core.client_ip import get_client_ip
 from app.core.config import get_settings
 from app.core.deps import get_current_professional
 from app.db.session import get_db
+from app.models.affiliate import AffiliateCode, AffiliateReferral
 from app.models.billing import Plan, Subscription
 from app.models.professional import Professional
 from app.schemas.billing import (
@@ -48,7 +49,12 @@ from app.services.affiliate_credit_service import (
     AffiliateCreditForbiddenError,
     AffiliateCreditService,
 )
-from app.services.affiliate_service import AffiliateService
+from app.services.affiliate_service import (
+    AffiliateConflictError,
+    AffiliateForbiddenError,
+    AffiliateNotFoundError,
+    AffiliateService,
+)
 from app.services.billing_checkout_service import BillingCheckoutService
 from app.services.billing_customer_service import BillingCustomerService
 from app.services.billing_profile_service import asaas_customer_profile
@@ -278,6 +284,12 @@ async def get_billing_me(
     ent = EntitlementService(db)
     can_write = await ent.can_write(professional)
     sub = await _latest_subscription(db, professional.id)
+    referral_code = await db.scalar(
+        select(AffiliateCode.code)
+        .join(AffiliateReferral, AffiliateReferral.code_id == AffiliateCode.id)
+        .where(AffiliateReferral.referred_professional_id == professional.id)
+        .limit(1)
+    )
 
     subscription_summary = None
     if sub and sub.plan:
@@ -328,6 +340,7 @@ async def get_billing_me(
             if professional.signup_payment_required and sub and sub.checkout_session_id
             else None
         ),
+        referral_code=referral_code,
         subscription=subscription_summary,
     )
 
@@ -358,6 +371,14 @@ async def create_billing_checkout(
     db: AsyncSession = Depends(get_db),
     professional: Professional = Depends(get_current_professional),
 ):
+    professional = await db.scalar(
+        select(Professional)
+        .where(Professional.id == professional.id)
+        .execution_options(populate_existing=True)
+        .with_for_update(key_share=True)
+    )
+    if professional is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sessão inválida")
     plan_slug = payload.plan_slug.strip()
     result = await db.execute(
         select(Plan).where(Plan.slug == plan_slug, Plan.is_active.is_(True))
@@ -387,7 +408,44 @@ async def create_billing_checkout(
             ),
         )
 
+    previous_billing_document_type = professional.billing_document_type
+    previous_saved_billing_document = _saved_billing_document(
+        professional, previous_billing_document_type
+    )
+    profile_changed = False
+    if document_was_supplied:
+        if document_type == "cnpj":
+            if professional.billing_cnpj != document:
+                professional.billing_cnpj = document
+                profile_changed = True
+        elif professional.cpf != document:
+            professional.cpf = document
+            profile_changed = True
+    if professional.billing_document_type != document_type:
+        professional.billing_document_type = document_type
+        profile_changed = True
+    if profile_changed:
+        await db.flush()
+
+    if payload.referral_code:
+        try:
+            await AffiliateService(db).register_checkout_referral(
+                code=payload.referral_code,
+                referred_professional=professional,
+                request_ip=get_client_ip(request),
+                user_agent=request.headers.get("user-agent", ""),
+            )
+        except AffiliateNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=exc.detail) from exc
+        except AffiliateForbiddenError as exc:
+            raise HTTPException(status_code=403, detail=exc.detail) from exc
+        except AffiliateConflictError as exc:
+            raise HTTPException(status_code=409, detail=exc.detail) from exc
     existing_sub = await _latest_subscription(db, professional.id)
+    if existing_sub:
+        # The subscription is already a durable checkout marker. Release the
+        # professional lock before paths that may lock the subscription.
+        await db.commit()
     if existing_sub:
         try:
             await AffiliateCreditService(db).advance_overdue_checkout(existing_sub, gateway)
@@ -406,10 +464,7 @@ async def create_billing_checkout(
     if reusable_sub:
         previous_checkout_document = _digits_only(reusable_sub.billing_document)
         if not previous_checkout_document:
-            previous_checkout_document = _saved_billing_document(
-                professional,
-                professional.billing_document_type,
-            )
+            previous_checkout_document = previous_saved_billing_document
     replace_existing_checkout = bool(
         reusable_sub
         and (reusable_sub.external_subscription_id or reusable_sub.external_checkout_id)
@@ -428,22 +483,6 @@ async def create_billing_checkout(
             provider,
             professional_id,
         )
-
-    profile_changed = False
-    if document_was_supplied:
-        if document_type == "cnpj":
-            if professional.billing_cnpj != document:
-                professional.billing_cnpj = document
-                profile_changed = True
-        else:
-            if professional.cpf != document:
-                professional.cpf = document
-                profile_changed = True
-    if professional.billing_document_type != document_type:
-        professional.billing_document_type = document_type
-        profile_changed = True
-    if profile_changed:
-        await db.commit()
 
     if (
         existing_sub

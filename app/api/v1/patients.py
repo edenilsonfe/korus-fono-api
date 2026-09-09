@@ -8,11 +8,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.constants import AVATAR_COLORS
 from app.core.deps import get_patient_for_professional, require_verified_professional
 from app.core.diagnosis_catalog import diagnosis_labels, validate_diagnosis_keys
-from app.core.utils import calculate_age, goal_status_from_progress, guardian_label, utcnow
+from app.core.utils import (
+    calculate_age,
+    guardian_label,
+    utcnow,
+)
 from app.db.session import get_db
-from app.models.assessment import Assessment
+from app.models.anamnese import AnamneseEntry
 from app.models.appointment import Appointment
+from app.models.assessment import Assessment
+from app.models.attachment import Attachment
+from app.models.care_team import PatientSharingConsentEvent
 from app.models.caregiver import Caregiver
+from app.models.evolution import Evolution
+from app.models.goal import Goal
+from app.models.intervention_program import InterventionProgram
 from app.models.patient import Patient
 from app.models.professional import Professional
 from app.models.session import Session
@@ -22,18 +32,31 @@ from app.schemas.patient import (
     CaregiverCreate,
     CaregiverResponse,
     CaregiverUpdate,
+    PatientAccessResponse,
     PatientCreate,
     PatientDetail,
     PatientSummary,
     PatientUpdate,
     TherapyPlanUpdate,
 )
+from app.services.care_team_service import record_access_event
+from app.services.feature_flag_service import FeatureFlagService
+from app.services.google_calendar_service import (
+    dispatch_sync_records,
+    queue_appointment_sync,
+)
 from app.services.patient import (
     get_patient_aggregates,
     get_patient_aggregates_batch,
 )
+from app.services.patient_access import (
+    FEATURE_KEY,
+    ROLE_PERMISSIONS,
+    PatientAccess,
+    list_shared_patient_accesses,
+    resolve_patient_access,
+)
 from app.services.patient_appointment_service import cancel_future_patient_appointments
-from app.services.google_calendar_service import dispatch_sync_records, queue_appointment_sync
 from app.services.timeline import create_timeline_event
 from app.services.whatsapp_queue import enqueue_whatsapp_appointment_event_log
 
@@ -82,8 +105,10 @@ def _summary_from_aggregates(
     professional: Professional,
     aggregates: dict,
     caregivers: list[Caregiver],
+    access: PatientAccess | None = None,
 ) -> PatientSummary:
-    gl = guardian_label(caregivers)
+    shared = access is not None and not access.is_owner
+    gl = "" if shared else guardian_label(caregivers)
     last = aggregates["last_session"]
     keys = patient.diagnosis_keys or []
     labels = diagnosis_labels(keys, professional.specialty_key)
@@ -92,8 +117,8 @@ def _summary_from_aggregates(
         name=patient.name,
         age=calculate_age(patient.birth_date),
         birth_date=patient.birth_date.isoformat(),
-        address=patient.address,
-        notes=patient.notes,
+        address=None if shared else patient.address,
+        notes=None if shared else patient.notes,
         guardian=gl,
         guardian_label=gl,
         diagnoses=labels,
@@ -112,6 +137,17 @@ def _summary_from_aggregates(
         therapy_plan_updated_at=patient.therapy_plan_updated_at.isoformat()
         if patient.therapy_plan_updated_at
         else None,
+        access=_access_response(access),
+    )
+
+
+def _access_response(access: PatientAccess | None) -> PatientAccessResponse | None:
+    if access is None:
+        return None
+    return PatientAccessResponse(
+        role=access.role,
+        is_owner=access.is_owner,
+        permissions=sorted(access.permissions),
     )
 
 
@@ -143,7 +179,13 @@ async def list_patients(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(Patient).where(Patient.professional_id == professional.id)
+    shared_accesses = await list_shared_patient_accesses(db, professional)
+    query = select(Patient).where(
+        or_(
+            Patient.professional_id == professional.id,
+            Patient.id.in_(shared_accesses),
+        )
+    )
     if status_filter:
         query = query.where(Patient.status == status_filter)
     if diagnosis_key:
@@ -156,16 +198,41 @@ async def list_patients(
     patients = result.scalars().all()
 
     patient_ids = [p.id for p in patients]
+    owner_ids = {p.professional_id for p in patients}
+    owners = (
+        (await db.execute(select(Professional).where(Professional.id.in_(owner_ids))))
+        .scalars()
+        .all()
+    )
+    owners_by_id = {owner.id: owner for owner in owners}
+    own_feature_enabled = await FeatureFlagService(db).is_enabled(
+        professional, FEATURE_KEY
+    )
     aggregates_map = await get_patient_aggregates_batch(db, patient_ids)
     caregivers_result = await db.execute(select(Caregiver).where(Caregiver.patient_id.in_(patient_ids)))
     caregivers_by_patient: dict[UUID, list[Caregiver]] = {}
     for caregiver in caregivers_result.scalars().all():
         caregivers_by_patient.setdefault(caregiver.patient_id, []).append(caregiver)
 
-    items = [
-        _summary_from_aggregates(p, professional, aggregates_map[p.id], caregivers_by_patient.get(p.id, []))
-        for p in patients
-    ]
+    items = []
+    for item in patients:
+        access = shared_accesses.get(item.id)
+        if item.professional_id == professional.id and own_feature_enabled:
+            access = PatientAccess(
+                item,
+                "coordinator",
+                True,
+                ROLE_PERMISSIONS["coordinator"],
+            )
+        items.append(
+            _summary_from_aggregates(
+                item,
+                owners_by_id[item.professional_id],
+                aggregates_map[item.id],
+                caregivers_by_patient.get(item.id, []),
+                access,
+            )
+        )
     return PaginatedResponse(items=items, total=total or 0, page=page, limit=limit)
 
 
@@ -324,9 +391,46 @@ async def get_patient(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    patient = await get_patient_for_professional(patient_id, professional, db)
+    patient = await db.get(Patient, patient_id)
+    if patient is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Paciente não encontrado"
+        )
+    if patient.professional_id == professional.id:
+        owner = professional
+        access = await resolve_patient_access(db, patient_id, professional)
+    else:
+        access = await resolve_patient_access(db, patient_id, professional)
+        if access is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Paciente não encontrado",
+            )
+        owner = await db.get(Professional, patient.professional_id)
+        if owner is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Paciente não encontrado",
+            )
     include_set = set(include.split(",")) if include else set()
-    return await _build_detail(db, patient, professional, include_set)
+    detail = await _build_detail(db, patient, owner, include_set)
+    detail.access = _access_response(access)
+    if access is not None and not access.is_owner:
+        detail.address = None
+        detail.notes = None
+        detail.guardian = ""
+        detail.guardian_label = ""
+        detail.caregivers = []
+        record_access_event(
+            db,
+            patient_id=patient.id,
+            actor=professional,
+            actor_role=access.role,
+            action="patient_record_opened",
+            resource_type="patient",
+            resource_id=patient.id,
+        )
+    return detail
 
 
 @router.patch("/{patient_id}", response_model=PatientSummary)
@@ -418,6 +522,30 @@ async def delete_patient(
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(patient_id, professional, db)
+    sharing_history = await db.scalar(
+        select(PatientSharingConsentEvent.id)
+        .where(PatientSharingConsentEvent.patient_id == patient.id)
+        .limit(1)
+    )
+    program_history = await db.scalar(
+        select(InterventionProgram.id)
+        .where(InterventionProgram.patient_id == patient.id)
+        .limit(1)
+    )
+    clinical_history = program_history is not None
+    for model in (Session, Assessment, Goal, Evolution, AnamneseEntry, Attachment):
+        if await db.scalar(select(model.id).where(model.patient_id == patient.id).limit(1)):
+            clinical_history = True
+            break
+    if sharing_history is not None or clinical_history:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Paciente com histórico clínico ou de compartilhamento "
+                "não pode ser excluído; "
+                "altere o status para inativo"
+            ),
+        )
     if patient.is_demo:
         real_patient_id = await db.scalar(
             select(Patient.id)

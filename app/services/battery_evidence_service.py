@@ -45,12 +45,17 @@ class BatteryEvidenceService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def _load_battery(self, battery_id: UUID, *, professional_id: UUID) -> Assessment:
+    async def _load_battery(
+        self, battery_id: UUID, *, professional_id: UUID | None
+    ) -> Assessment:
+        filters = [Assessment.id == battery_id]
+        if professional_id is not None:
+            filters.append(Assessment.professional_id == professional_id)
         record = (
             await self.db.execute(
                 select(Assessment)
                 .options(selectinload(Assessment.patient))
-                .where(Assessment.id == battery_id, Assessment.professional_id == professional_id)
+                .where(*filters)
             )
         ).scalar_one_or_none()
         if not record:
@@ -86,7 +91,7 @@ class BatteryEvidenceService:
         self,
         battery_id: UUID,
         *,
-        professional_id: UUID,
+        professional_id: UUID | None,
         subform_slug: Optional[str] = None,
         item_id: Optional[str] = None,
     ) -> list[dict[str, Any]]:
@@ -241,7 +246,7 @@ class BatteryEvidenceService:
         battery_id: UUID,
         evidence_id: UUID,
         *,
-        professional_id: UUID,
+        professional_id: UUID | None,
     ) -> str:
         await self._load_battery(battery_id, professional_id=professional_id)
         evidence = (
@@ -266,7 +271,7 @@ class BatteryEvidenceService:
         self,
         battery_id: UUID,
         *,
-        professional_id: UUID,
+        professional_id: UUID | None,
     ) -> list[dict[str, Any]]:
         await self._load_battery(battery_id, professional_id=professional_id)
         rows = list(

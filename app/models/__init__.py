@@ -40,8 +40,14 @@ from app.models.battery_evidence import BatteryItemEvidence, BatterySessionEvent
 from app.models.attachment import Attachment
 from app.models.resource import Resource
 from app.models.caregiver import Caregiver
+from app.models.care_team import (
+    PatientAccessEvent,
+    PatientCareTeamMember,
+    PatientSharingConsentEvent,
+)
 from app.models.evolution import Evolution
 from app.models.goal import ClinicalDomainSnapshot, Goal
+from app.models.intervention_program import InterventionProgram, ProgramMeasurement
 from app.models.google_calendar import GoogleCalendarConnection, GoogleCalendarSyncRecord
 from app.models.notification_message_log import NotificationMessageLog
 from app.models.notification_settings import NotificationSettings
@@ -77,6 +83,9 @@ __all__ = [
     "ScheduleBlock",
     "Patient",
     "Caregiver",
+    "PatientSharingConsentEvent",
+    "PatientCareTeamMember",
+    "PatientAccessEvent",
     "Appointment",
     "Session",
     "Evolution",
@@ -91,6 +100,8 @@ __all__ = [
     "BatterySessionEvent",
     "Goal",
     "ClinicalDomainSnapshot",
+    "InterventionProgram",
+    "ProgramMeasurement",
     "GoogleCalendarConnection",
     "GoogleCalendarSyncRecord",
     "AIReport",

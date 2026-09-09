@@ -81,6 +81,19 @@ class CheckoutRequest(CamelModel):
     # Compatibilidade com o contrato anterior, que enviava somente cpf.
     cpf: str | None = None
     coupon_code: str | None = None
+    referral_code: str | None = Field(default=None, max_length=48)
+
+    @field_validator("referral_code")
+    @classmethod
+    def normalize_referral_code(cls, value: str | None) -> str | None:
+        normalized = str(value or "").strip().lower()
+        if normalized and (
+            not 8 <= len(normalized) <= 48
+            or not normalized.isascii()
+            or not normalized.isalnum()
+        ):
+            raise ValueError("Código de indicação inválido")
+        return normalized or None
 
     @field_validator("cpf")
     @classmethod
@@ -186,6 +199,7 @@ class BillingMeResponse(CamelModel):
     signup_payment_required: bool = False
     temporary_access_ends_at: str | None = None
     checkout_session_id: str | None = None
+    referral_code: str | None = None
     subscription: SubscriptionSummary | None = None
 
 

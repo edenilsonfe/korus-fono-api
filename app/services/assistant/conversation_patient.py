@@ -6,9 +6,9 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_patient_for_professional
 from app.models.ai import Conversation
 from app.models.professional import Professional
+from app.services.care_team_service import require_clinical_access
 
 
 async def bind_conversation_patient(
@@ -23,6 +23,7 @@ async def bind_conversation_patient(
     """
     if not patient_id:
         return
-    patient = await get_patient_for_professional(UUID(patient_id), professional, db)
+    access = await require_clinical_access(db, UUID(patient_id), professional)
+    patient = access.patient
     if conversation.patient_id is None:
         conversation.patient_id = patient.id

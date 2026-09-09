@@ -5,12 +5,14 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_patient_for_professional, require_verified_professional
+from app.core.deps import require_verified_professional
 from app.db.session import get_db
 from app.models.patient import Patient
 from app.models.professional import Professional
 from app.models.timeline import TimelineEvent
 from app.schemas.patient import TimelineEventResponse
+from app.services.care_team_service import require_clinical_access
+from app.services.patient_access import list_accessible_patient_ids
 
 router = APIRouter(tags=["timeline"])
 
@@ -35,10 +37,11 @@ async def global_timeline(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
+    patient_ids = await list_accessible_patient_ids(db, professional)
     query = (
         select(TimelineEvent, Patient.name)
         .join(Patient, TimelineEvent.patient_id == Patient.id)
-        .where(TimelineEvent.professional_id == professional.id)
+        .where(Patient.id.in_(patient_ids))
         .order_by(TimelineEvent.date.desc())
         .limit(limit)
     )
@@ -60,7 +63,8 @@ async def patient_timeline(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    patient = await get_patient_for_professional(patient_id, professional, db)
+    access = await require_clinical_access(db, patient_id, professional)
+    patient = access.patient
     query = (
         select(TimelineEvent)
         .where(TimelineEvent.patient_id == patient.id)

@@ -5,7 +5,7 @@ from sqlalchemy import func, literal_column, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_patient_for_professional, require_verified_professional
+from app.core.deps import require_verified_professional
 from app.core.utils import utcnow
 from app.db.session import get_db
 from app.models.appointment import Appointment
@@ -15,7 +15,9 @@ from app.models.professional import Professional
 from app.models.session import Session
 from app.schemas.common import PaginatedResponse
 from app.schemas.session import SessionCreate, SessionGlobalResponse, SessionUpdate
+from app.services.care_team_service import require_clinical_access
 from app.services.clinical_activity import record_session
+from app.services.patient_access import list_accessible_patient_ids
 
 router = APIRouter(tags=["sessions"])
 
@@ -28,10 +30,12 @@ async def list_sessions_global(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
+    patient_ids = await list_accessible_patient_ids(db, professional)
     query = (
-        select(Session, Patient)
+        select(Session, Patient, Professional)
         .join(Patient, Session.patient_id == Patient.id)
-        .where(Patient.professional_id == professional.id)
+        .join(Professional, Professional.id == Session.professional_id)
+        .where(Patient.id.in_(patient_ids))
     )
     if q:
         query = query.where(Patient.name.ilike(f"%{q}%"))
@@ -46,12 +50,12 @@ async def list_sessions_global(
             avatar_color=p.avatar_color,
             date=s.date.isoformat(),
             duration=s.duration,
-            therapist=professional.name,
+            therapist=author.name,
             type=s.type,
             objectives=s.objectives or [],
             notes=s.notes,
         )
-        for s, p in result.all()
+        for s, p, author in result.all()
     ]
     return PaginatedResponse(items=items, total=total or 0, page=page, limit=limit)
 
@@ -65,9 +69,12 @@ async def list_patient_sessions(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    patient = await get_patient_for_professional(patient_id, professional, db)
+    access = await require_clinical_access(db, patient_id, professional)
     result = await db.execute(
-        select(Session).where(Session.patient_id == patient.id).order_by(Session.date.desc())
+        select(Session, Professional)
+        .join(Professional, Professional.id == Session.professional_id)
+        .where(Session.patient_id == access.patient.id)
+        .order_by(Session.date.desc())
     )
     return [
         {
@@ -75,12 +82,12 @@ async def list_patient_sessions(
             "appointmentId": str(s.appointment_id) if s.appointment_id else None,
             "date": s.date.isoformat(),
             "duration": s.duration,
-            "therapist": professional.name,
+            "therapist": author.name,
             "objectives": s.objectives or [],
             "notes": s.notes,
             "type": s.type,
         }
-        for s in result.scalars().all()
+        for s, author in result.all()
     ]
 
 
@@ -91,7 +98,8 @@ async def create_session(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    patient = await get_patient_for_professional(patient_id, professional, db)
+    access = await require_clinical_access(db, patient_id, professional, "clinical:write")
+    patient = access.patient
     if body.appointment_id:
         appointment_result = await db.execute(
             select(Appointment)
@@ -162,8 +170,14 @@ async def update_session(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_patient_for_professional(patient_id, professional, db)
-    result = await db.execute(select(Session).where(Session.id == session_id, Session.patient_id == patient_id))
+    await require_clinical_access(db, patient_id, professional, "clinical:write")
+    result = await db.execute(
+        select(Session).where(
+            Session.id == session_id,
+            Session.patient_id == patient_id,
+            Session.professional_id == professional.id,
+        )
+    )
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="Sessão não encontrada")
@@ -180,12 +194,13 @@ async def list_session_evolutions(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_patient_for_professional(patient_id, professional, db)
+    await require_clinical_access(db, patient_id, professional)
     session_result = await db.execute(select(Session).where(Session.id == session_id, Session.patient_id == patient_id))
     if session_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="Sessão não encontrada")
     result = await db.execute(
-        select(Evolution)
+        select(Evolution, Professional)
+        .join(Professional, Professional.id == Evolution.professional_id)
         .where(Evolution.session_id == session_id, Evolution.patient_id == patient_id)
         .order_by(Evolution.date.desc())
     )
@@ -197,7 +212,7 @@ async def list_session_evolutions(
             "date": e.date.isoformat(),
             "title": e.title,
             "content": e.content,
-            "professional": professional.name,
+            "professional": author.name,
         }
-        for e in result.scalars().all()
+        for e, author in result.all()
     ]

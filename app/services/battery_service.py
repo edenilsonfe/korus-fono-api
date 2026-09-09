@@ -2,12 +2,11 @@ from datetime import date, datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.instrument_aliases import instrument_slug_for_protocol, resolve_protocol_id
 from app.constants.battery import (
     BATTERY_METADATA_KEY,
     BATTERY_STATUS_CANCELLED,
@@ -16,6 +15,10 @@ from app.constants.battery import (
     BATTERY_SUBFORM_STATUS_COMPLETED,
     BATTERY_SUBFORM_STATUS_IN_PROGRESS,
     BATTERY_SUBFORM_STATUS_PENDING,
+)
+from app.core.instrument_aliases import (
+    instrument_slug_for_protocol,
+    resolve_protocol_id,
 )
 from app.core.utils import utcnow
 from app.models.assessment import Assessment
@@ -37,7 +40,10 @@ from app.services.battery_scoring_service import (
     score_battery_subform,
     synthesize_battery_scores,
 )
-from app.services.instrument_content_package import InstrumentContentPackage, get_instrument_content_package
+from app.services.instrument_content_package import (
+    InstrumentContentPackage,
+    get_instrument_content_package,
+)
 from app.services.timeline import create_timeline_event
 
 
@@ -209,21 +215,11 @@ class BatteryService:
         *,
         data: BatteryCreate,
         professional_id: UUID,
+        patient: Patient,
     ) -> BatteryResponse:
         package = self._get_package(data.instrument_slug)
         if not package.modules:
             raise HTTPException(status_code=400, detail="Instrumento não possui módulos de bateria")
-
-        patient = (
-            await self.db.execute(
-                select(Patient).where(
-                    Patient.id == data.patient_id,
-                    Patient.professional_id == professional_id,
-                )
-            )
-        ).scalar_one_or_none()
-        if not patient:
-            raise HTTPException(status_code=404, detail="Paciente não encontrado")
 
         today = utcnow().date()
         battery_meta: dict[str, Any] = {
@@ -288,7 +284,9 @@ class BatteryService:
         await self.db.refresh(record, ["battery_subforms", "patient"])
         return self._to_battery_response(record, package)
 
-    async def get_battery(self, battery_id: UUID, *, professional_id: UUID) -> BatteryResponse:
+    async def get_battery(
+        self, battery_id: UUID, *, professional_id: UUID | None = None
+    ) -> BatteryResponse:
         record = await self._load_battery(battery_id, professional_id=professional_id)
         package = self._get_package(instrument_slug_for_protocol(record.protocol_id))
         return self._to_battery_response(record, package)
@@ -297,13 +295,18 @@ class BatteryService:
         self,
         *,
         professional_id: UUID,
+        accessible_patient_ids: set[UUID] | None = None,
         instrument_slug: Optional[str] = None,
         patient_id: Optional[UUID] = None,
         status_filter: Optional[str] = None,
         page: int = 1,
         limit: int = 20,
     ) -> tuple[list[BatterySummary], int]:
-        query = select(Assessment).where(Assessment.professional_id == professional_id)
+        query = select(Assessment).where(
+            Assessment.patient_id.in_(accessible_patient_ids)
+            if accessible_patient_ids is not None
+            else Assessment.professional_id == professional_id
+        )
         if instrument_slug:
             query = query.where(Assessment.protocol_id == resolve_protocol_id(instrument_slug))
         if patient_id:
@@ -346,7 +349,7 @@ class BatteryService:
         battery_id: UUID,
         subform_slug: str,
         *,
-        professional_id: UUID,
+        professional_id: UUID | None,
     ) -> BatterySubformFormResponse:
         record = await self._load_battery(battery_id, professional_id=professional_id)
         package = self._get_package(instrument_slug_for_protocol(record.protocol_id))

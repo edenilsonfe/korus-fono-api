@@ -1,10 +1,22 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import require_verified_professional
 from app.db.session import get_db
+from app.models.assessment import Assessment
 from app.models.professional import Professional
 from app.schemas.battery import (
     BatteryCreate,
@@ -20,9 +32,33 @@ from app.schemas.common import PaginatedResponse
 from app.services.battery_evidence_service import BatteryEvidenceService
 from app.services.battery_report_service import export_battery_pdf
 from app.services.battery_service import BatteryService
+from app.services.care_team_service import record_access_event, require_clinical_access
 from app.services.instrument_content_package import get_instrument_content_package
+from app.services.patient_access import list_accessible_patient_ids
 
 router = APIRouter(prefix="/batteries", tags=["batteries"])
+
+
+async def _require_battery_read(
+    db: AsyncSession,
+    battery_id: UUID,
+    professional: Professional,
+) -> None:
+    patient_id = await db.scalar(
+        select(Assessment.patient_id).where(Assessment.id == battery_id)
+    )
+    if patient_id is None:
+        raise HTTPException(status_code=404, detail="Bateria não encontrada")
+    access = await require_clinical_access(db, patient_id, professional)
+    record_access_event(
+        db,
+        patient_id=patient_id,
+        actor=professional,
+        actor_role=access.role,
+        action="battery_opened",
+        resource_type="assessment",
+        resource_id=battery_id,
+    )
 
 
 @router.post("", response_model=BatteryResponse, status_code=status.HTTP_201_CREATED)
@@ -31,8 +67,13 @@ async def create_battery(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
+    access = await require_clinical_access(db, data.patient_id, professional, "clinical:write")
     service = BatteryService(db)
-    return await service.create_battery(data=data, professional_id=professional.id)
+    return await service.create_battery(
+        data=data,
+        professional_id=professional.id,
+        patient=access.patient,
+    )
 
 
 @router.get("", response_model=PaginatedResponse)
@@ -46,8 +87,10 @@ async def list_batteries(
     db: AsyncSession = Depends(get_db),
 ):
     service = BatteryService(db)
+    accessible_patient_ids = await list_accessible_patient_ids(db, professional)
     items, total = await service.list_batteries(
         professional_id=professional.id,
+        accessible_patient_ids=accessible_patient_ids,
         instrument_slug=instrument_slug,
         patient_id=patient_id,
         status_filter=status_filter,
@@ -63,8 +106,9 @@ async def get_battery(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_battery_read(db, battery_id, professional)
     service = BatteryService(db)
-    return await service.get_battery(battery_id, professional_id=professional.id)
+    return await service.get_battery(battery_id)
 
 
 @router.get("/{battery_id}/subforms/{subform_slug}/form", response_model=BatterySubformFormResponse)
@@ -74,10 +118,9 @@ async def get_battery_subform_form(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_battery_read(db, battery_id, professional)
     service = BatteryService(db)
-    return await service.get_subform_form(
-        battery_id, subform_slug, professional_id=professional.id
-    )
+    return await service.get_subform_form(battery_id, subform_slug, professional_id=None)
 
 
 @router.patch("/{battery_id}/subforms/{subform_slug}", response_model=BatteryResponse)
@@ -132,8 +175,9 @@ async def download_battery_report(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_battery_read(db, battery_id, professional)
     service = BatteryService(db)
-    battery = await service.get_battery(battery_id, professional_id=professional.id)
+    battery = await service.get_battery(battery_id)
     if battery.status != "completed":
         raise HTTPException(status_code=400, detail="Relatório disponível apenas para baterias finalizadas")
     try:
@@ -157,10 +201,11 @@ async def list_battery_evidences(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_battery_read(db, battery_id, professional)
     service = BatteryEvidenceService(db)
     return await service.list_evidences(
         battery_id,
-        professional_id=professional.id,
+        professional_id=None,
         subform_slug=subform,
         item_id=item_id,
     )
@@ -224,8 +269,9 @@ async def get_battery_evidence_url(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_battery_read(db, battery_id, professional)
     service = BatteryEvidenceService(db)
-    url = await service.get_evidence_url(battery_id, evidence_id, professional_id=professional.id)
+    url = await service.get_evidence_url(battery_id, evidence_id, professional_id=None)
     return {"url": url}
 
 
@@ -235,8 +281,9 @@ async def list_battery_events(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_battery_read(db, battery_id, professional)
     service = BatteryEvidenceService(db)
-    return await service.list_events(battery_id, professional_id=professional.id)
+    return await service.list_events(battery_id, professional_id=None)
 
 
 @router.post("/{battery_id}/events")

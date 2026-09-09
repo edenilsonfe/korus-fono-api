@@ -20,11 +20,13 @@ from app.api.v1 import (
     batteries,
     billing,
     catalog,
+    care_team,
     clinical,
     dashboard,
     finance,
     google_calendar,
     instruments,
+    intervention_programs,
     me,
     notifications,
     patients,
@@ -46,6 +48,7 @@ api_router.include_router(affiliate_portal.router)
 api_router.include_router(billing.router)
 api_router.include_router(me.router)
 api_router.include_router(catalog.router)
+api_router.include_router(care_team.router)
 api_router.include_router(patients.router)
 api_router.include_router(appointments.router)
 api_router.include_router(schedule_blocks.router)
@@ -61,6 +64,7 @@ api_router.include_router(timeline.patient_router)
 api_router.include_router(clinical.router)
 api_router.include_router(clinical.patient_router)
 api_router.include_router(instruments.router)
+api_router.include_router(intervention_programs.router)
 api_router.include_router(batteries.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(ai.router)

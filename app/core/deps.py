@@ -6,17 +6,18 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_cookies import ACCESS_COOKIE
 from app.core.admin_permissions import (
     PERMISSION_ADMIN_ACCESS,
     has_admin_permission,
     permissions_for_role,
     resolve_admin_role,
 )
+from app.core.auth_cookies import ACCESS_COOKIE
 from app.core.security import decode_token
 from app.db.session import get_db
 from app.models.patient import Patient
 from app.models.professional import Professional
+from app.services.patient_access import resolve_clinical_patient_access
 from app.services.temporary_access import signup_payment_blocks_access
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -176,6 +177,19 @@ async def get_patient_for_professional(
     if patient is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paciente não encontrado")
     return patient
+
+
+async def get_patient_for_clinical_access(
+    patient_id: UUID,
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+) -> Patient:
+    access = await resolve_clinical_patient_access(db, patient_id, professional)
+    if access is None or "clinical:read" not in access.permissions:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Paciente não encontrado"
+        )
+    return access.patient
 
 
 async def get_session_for_patient(

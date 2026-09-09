@@ -21,10 +21,11 @@ from app.models.affiliate import (
     AffiliateReferral,
     AffiliateReward,
 )
-from app.models.billing import Subscription
+from app.models.billing import BillingEvent, Subscription
 from app.models.professional import Professional
 from app.services.affiliate_accounting import lock_participant
 from app.services.affiliate_notification_service import AffiliateNotificationService
+from app.services.feature_flag_service import FeatureFlagService
 
 
 class AffiliateError(Exception):
@@ -448,7 +449,7 @@ class AffiliateService:
             "expiresInDays": policy.attribution_window_days,
         }
 
-    async def register_referral(
+    async def register_checkout_referral(
         self,
         *,
         code: str,
@@ -456,27 +457,133 @@ class AffiliateService:
         request_ip: str,
         user_agent: str,
     ) -> AffiliateReferral:
+        locked_professional = await self.db.scalar(
+            select(Professional)
+            .where(Professional.id == referred_professional.id)
+            .execution_options(populate_existing=True)
+            .with_for_update(key_share=True)
+        )
+        if locked_professional is None:
+            raise AffiliateConflictError("Conta não encontrada")
+        referred_professional = locked_professional
+        existing = await self.db.scalar(
+            select(AffiliateReferral)
+            .join(AffiliateCode, AffiliateReferral.code_id == AffiliateCode.id)
+            .where(
+                AffiliateReferral.referred_professional_id == referred_professional.id,
+                AffiliateCode.code == code.strip().lower(),
+            )
+        )
+        if existing is None:
+            public_referral = await self.resolve_public_code(code)
+            flag_key = (
+                "affiliate_customer_program"
+                if public_referral["mode"] == "customer"
+                else "affiliate_partner_program"
+            )
+            if not await FeatureFlagService(self.db).is_enabled(
+                referred_professional, flag_key
+            ):
+                raise AffiliateForbiddenError(
+                    "Programa de indicação ainda não está disponível"
+                )
+        return await self.register_referral(
+            code=code,
+            referred_professional=referred_professional,
+            request_ip=request_ip,
+            user_agent=user_agent,
+            manual_checkout=True,
+        )
+
+    async def register_referral(
+        self,
+        *,
+        code: str,
+        referred_professional: Professional,
+        request_ip: str,
+        user_agent: str,
+        manual_checkout: bool = False,
+    ) -> AffiliateReferral:
+        locked_professional = await self.db.scalar(
+            select(Professional)
+            .where(Professional.id == referred_professional.id)
+            .execution_options(populate_existing=True)
+            .with_for_update(key_share=True)
+        )
+        if locked_professional is None:
+            raise AffiliateConflictError("Conta não encontrada")
+        referred_professional = locked_professional
+
         existing = (
             await self.db.execute(
-                select(AffiliateReferral).where(
+                select(AffiliateReferral)
+                .where(
                     AffiliateReferral.referred_professional_id
                     == referred_professional.id
                 )
             )
         ).scalar_one_or_none()
-        if existing is not None:
-            raise AffiliateConflictError("Esta conta já foi atribuída a uma indicação")
-
         code_row = (
             await self.db.execute(
                 select(AffiliateCode).where(
                     AffiliateCode.code == code.strip().lower(),
-                    AffiliateCode.status == "active",
                 )
             )
         ).scalar_one_or_none()
-        if code_row is None:
+        if existing is not None:
+            if code_row is not None and existing.code_id == code_row.id:
+                return existing
+            raise AffiliateConflictError("Esta conta já foi atribuída a uma indicação")
+        if code_row is None or code_row.status != "active":
             raise AffiliateNotFoundError("Código de indicação inválido")
+
+        if manual_checkout:
+            existing_subscription = await self.db.scalar(
+                select(Subscription)
+                .where(Subscription.professional_id == referred_professional.id)
+                .limit(1)
+            )
+            if existing_subscription is not None:
+                if existing_subscription.last_payment_at or existing_subscription.status in {
+                    "active",
+                    "past_due",
+                    "canceled",
+                    "cancelled",
+                    "refunded",
+                    "unpaid",
+                }:
+                    raise AffiliateConflictError(
+                        "Esta conta já possui histórico de pagamento. "
+                        "Não foi possível aplicar a indicação; procure o suporte."
+                    )
+                raise AffiliateConflictError(
+                    "Esta conta já possui um checkout ou assinatura iniciada. "
+                    "Não foi possível aplicar uma nova indicação; procure o suporte."
+                )
+            payment_history = await self.db.scalar(
+                select(BillingEvent.id)
+                .where(
+                    BillingEvent.professional_id == referred_professional.id,
+                )
+                .limit(1)
+            )
+            if payment_history is not None:
+                raise AffiliateConflictError(
+                    "Esta conta já possui histórico de pagamento. "
+                    "Não foi possível aplicar a indicação; procure o suporte."
+                )
+            if referred_professional.subscription_status in {
+                "active",
+                "past_due",
+                "canceled",
+                "cancelled",
+                "refunded",
+                "unpaid",
+            }:
+                raise AffiliateConflictError(
+                    "Esta conta já possui histórico de pagamento. "
+                    "Não foi possível aplicar a indicação; procure o suporte."
+                )
         participant = await self.db.get(AffiliateParticipant, code_row.participant_id)
         if participant is None or participant.status != "active":
             raise AffiliateForbiddenError("Participante não está ativo")

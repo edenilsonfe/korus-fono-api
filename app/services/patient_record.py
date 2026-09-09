@@ -125,18 +125,24 @@ async def build_patient_detail(
     detail_data["files"] = []
 
     if "goals" in include or not include:
-        goals = (await db.execute(select(Goal).where(Goal.patient_id == patient.id))).scalars().all()
+        goals = (
+            await db.execute(
+                select(Goal, Professional)
+                .join(Professional, Professional.id == Goal.professional_id)
+                .where(Goal.patient_id == patient.id)
+            )
+        ).all()
         detail_data["goals"] = [
             {
                 "id": str(g.id),
                 "title": g.title,
                 "progress": g.progress,
                 "area": g.area,
-                "professional": professional.name,
+                "professional": author.name,
                 "startDate": g.start_date.isoformat(),
                 "status": g.status,
             }
-            for g in goals
+            for g, author in goals
         ]
 
     if "clinicalDomains" in include or "clinical_domains" in include or not include:
@@ -145,35 +151,41 @@ async def build_patient_detail(
     if "assessments" in include or not include:
         assessments = (
             await db.execute(
-                select(Assessment)
+                select(Assessment, Professional)
+                .join(Professional, Professional.id == Assessment.professional_id)
                 .where(Assessment.patient_id == patient.id)
                 .options(selectinload(Assessment.protocol))
             )
-        ).scalars().all()
+        ).all()
         detail_data["assessments"] = [
             map_assessment(
                 a,
                 a.protocol.name if a.protocol else a.protocol_id,
-                professional.name,
+                author.name,
             )
-            for a in assessments
+            for a, author in assessments
         ]
 
     if "sessions" in include or not include:
         sessions = (
-            await db.execute(select(Session).where(Session.patient_id == patient.id).order_by(Session.date.desc()))
-        ).scalars().all()
+            await db.execute(
+                select(Session, Professional)
+                .join(Professional, Professional.id == Session.professional_id)
+                .where(Session.patient_id == patient.id)
+                .order_by(Session.date.desc())
+            )
+        ).all()
         detail_data["sessions"] = [
             {
                 "id": str(s.id),
                 "date": s.date.isoformat(),
                 "duration": s.duration,
-                "therapist": professional.name,
+                "therapist": author.name,
                 "objectives": s.objectives or [],
                 "notes": s.notes,
                 "type": s.type,
             }
-            for s in sessions
+            for s, author in sessions
         ]
 
     if "timeline" in include or not include:

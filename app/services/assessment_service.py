@@ -7,7 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.assessment import Assessment, ProtocolCatalog
 from app.models.patient import Patient
 from app.models.professional import Professional
-from app.schemas.clinical import AssessmentCreate, AssessmentDraftUpsert, AssessmentFinalize
+from app.schemas.clinical import (
+    AssessmentCreate,
+    AssessmentDraftUpsert,
+    AssessmentFinalize,
+)
 from app.services.assessment_scoring import get_protocol_scoring_mode
 from app.services.clinical_activity import record_assessment
 from app.services.mchat_validation import validate_mchat_submission
@@ -99,11 +103,13 @@ async def get_assessment_draft(
     db: AsyncSession,
     patient_id,
     protocol_id: str,
+    professional_id,
 ) -> Assessment | None:
     return await db.scalar(
         select(Assessment)
         .where(
             Assessment.patient_id == patient_id,
+            Assessment.professional_id == professional_id,
             Assessment.protocol_id == protocol_id.lower(),
             Assessment.status == "draft",
         )
@@ -128,7 +134,9 @@ async def upsert_assessment_draft(
     protocol = await _active_protocol(db, protocol_id)
     # Serializa autosaves concorrentes para manter um único rascunho ativo.
     await _lock_patient(db, patient.id)
-    assessment = await get_assessment_draft(db, patient.id, protocol.id)
+    assessment = await get_assessment_draft(
+        db, patient.id, protocol.id, professional.id
+    )
     if assessment is None:
         assessment = Assessment(
             patient_id=patient.id,
@@ -170,7 +178,9 @@ async def complete_assessment_draft(
     validate_mchat_submission(patient, protocol.id, create_body)
     values = _prepare_values(protocol, create_body)
     await _lock_patient(db, patient.id)
-    assessment = await get_assessment_draft(db, patient.id, protocol.id)
+    assessment = await get_assessment_draft(
+        db, patient.id, protocol.id, professional.id
+    )
     if assessment is None:
         assessment = Assessment(
             patient_id=patient.id,

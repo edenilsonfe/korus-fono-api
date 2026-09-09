@@ -5,19 +5,24 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_patient_for_professional, require_verified_professional
+from app.core.deps import require_verified_professional
 from app.db.session import get_db
 from app.models.appointment import Appointment
 from app.models.patient import Patient
 from app.models.professional import Professional
 from app.schemas.appointment import (
-    AppointmentCreate,
-    AppointmentCreateResponse,
     AppointmentCompleteRequest,
     AppointmentCompleteResponse,
+    AppointmentCreate,
+    AppointmentCreateResponse,
     AppointmentResponse,
     AppointmentUpdate,
     WeekdaySlot,
+)
+from app.services.appointment_completion_service import complete_appointment
+from app.services.appointment_finance_service import (
+    get_active_service_for_appointment,
+    service_snapshot,
 )
 from app.services.appointment_series_slots import (
     WeekdaySlotRule,
@@ -25,14 +30,10 @@ from app.services.appointment_series_slots import (
     iter_recurring_child_slots,
     validate_recurrent_range,
 )
-from app.services.appointment_completion_service import complete_appointment
-from app.services.appointment_finance_service import (
-    get_active_service_for_appointment,
-    service_snapshot,
-)
 from app.services.appointment_whatsapp_events import (
     resolve_appointment_update_whatsapp_event,
 )
+from app.services.care_team_service import require_clinical_access
 from app.services.google_calendar_service import (
     dispatch_sync_records,
     queue_appointment_sync,
@@ -176,7 +177,10 @@ async def create_appointment(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    patient = await get_patient_for_professional(UUID(body.patient_id), professional, db)
+    access = await require_clinical_access(
+        db, UUID(body.patient_id), professional, "clinical:write"
+    )
+    patient = access.patient
     scheduled_service = None
     if body.service_id:
         scheduled_service = await get_active_service_for_appointment(

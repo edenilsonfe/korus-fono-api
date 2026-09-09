@@ -198,6 +198,12 @@ class AttachmentResponse(CamelModel):
     size: str | None = None  # formatted for UI compat
 
 
+class PatientAccessResponse(CamelModel):
+    role: Literal["coordinator", "supervisor", "practitioner"]
+    is_owner: bool
+    permissions: list[str]
+
+
 class PatientSummary(CamelModel):
     id: str
     name: str
@@ -221,6 +227,7 @@ class PatientSummary(CamelModel):
     is_demo: bool = False
     therapy_plan_content: str | None = None
     therapy_plan_updated_at: str | None = None
+    access: PatientAccessResponse | None = None
 
 
 class PatientDetail(PatientSummary):

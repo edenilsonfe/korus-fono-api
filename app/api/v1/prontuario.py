@@ -1,17 +1,26 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.mappers import format_size_bytes
 from app.core.config import get_settings
-from app.core.deps import get_patient_for_professional, get_session_for_patient, require_verified_professional
+from app.core.deps import get_patient_for_professional, require_verified_professional
 from app.core.utils import utcnow
 from app.db.session import get_db
 from app.models.attachment import Attachment
 from app.models.evolution import Evolution
 from app.models.professional import Professional
+from app.models.session import Session
 from app.schemas.prontuario import (
     AnamneseBulkUpsert,
     AnamneseComplete,
@@ -27,8 +36,9 @@ from app.services.attachment_upload import (
     validate_attachment_category,
     validate_attachment_upload,
 )
-from app.services.storage import safe_content_disposition_filename, storage_service
+from app.services.care_team_service import record_access_event, require_clinical_access
 from app.services.clinical_activity import record_evolution
+from app.services.storage import safe_content_disposition_filename, storage_service
 from app.services.timeline import create_timeline_event
 
 router = APIRouter(prefix="/patients/{patient_id}", tags=["prontuario"])
@@ -40,9 +50,12 @@ async def list_evolutions(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_patient_for_professional(patient_id, professional, db)
+    await require_clinical_access(db, patient_id, professional)
     result = await db.execute(
-        select(Evolution).where(Evolution.patient_id == patient_id).order_by(Evolution.date.desc())
+        select(Evolution, Professional)
+        .join(Professional, Professional.id == Evolution.professional_id)
+        .where(Evolution.patient_id == patient_id)
+        .order_by(Evolution.date.desc())
     )
     return [
         EvolutionResponse(
@@ -52,9 +65,9 @@ async def list_evolutions(
             date=e.date.isoformat(),
             title=e.title,
             content=e.content,
-            professional=professional.name,
+            professional=author.name,
         )
-        for e in result.scalars().all()
+        for e, author in result.all()
     ]
 
 
@@ -65,9 +78,17 @@ async def create_evolution(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_patient_for_professional(patient_id, professional, db)
+    await require_clinical_access(db, patient_id, professional, "clinical:write")
     if body.session_id is not None:
-        await get_session_for_patient(body.session_id, patient_id, professional, db)
+        session = await db.scalar(
+            select(Session).where(
+                Session.id == body.session_id,
+                Session.patient_id == patient_id,
+                Session.professional_id == professional.id,
+            )
+        )
+        if session is None:
+            raise HTTPException(status_code=404, detail="Sessão não encontrada")
     evolution = Evolution(
         patient_id=patient_id,
         session_id=body.session_id,
@@ -96,7 +117,8 @@ async def list_anamnese(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    patient = await get_patient_for_professional(patient_id, professional, db)
+    access = await require_clinical_access(db, patient_id, professional)
+    patient = access.patient
     entries = await anamnese_service.list_entries(db, patient_id)
     return anamnese_service.document_response(patient, entries)
 
@@ -165,7 +187,7 @@ async def list_attachments(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_patient_for_professional(patient_id, professional, db)
+    await require_clinical_access(db, patient_id, professional)
     result = await db.execute(
         select(Attachment).where(Attachment.patient_id == patient_id).order_by(Attachment.date.desc())
     )
@@ -190,7 +212,7 @@ async def upload_attachment(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_patient_for_professional(patient_id, professional, db)
+    await require_clinical_access(db, patient_id, professional, "clinical:write")
     category = validate_attachment_category(category)
     max_bytes = get_settings().max_upload_bytes
     chunks: list[bytes] = []
@@ -254,13 +276,22 @@ async def get_attachment_url(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_patient_for_professional(patient_id, professional, db)
+    access = await require_clinical_access(db, patient_id, professional)
     result = await db.execute(
         select(Attachment).where(Attachment.id == attachment_id, Attachment.patient_id == patient_id)
     )
     attachment = result.scalar_one_or_none()
     if not attachment:
         raise HTTPException(status_code=404, detail="Anexo não encontrado")
+    record_access_event(
+        db,
+        patient_id=patient_id,
+        actor=professional,
+        actor_role=access.role,
+        action="attachment_opened",
+        resource_type="attachment",
+        resource_id=attachment.id,
+    )
     # Preview (img/iframe) needs inline; downloads still get a safe filename.
     url = await storage_service.presigned_url(
         attachment.storage_key,
@@ -278,13 +309,22 @@ async def get_attachment_file(
     db: AsyncSession = Depends(get_db),
 ):
     """Stream the object content same-origin (inline), bypassing CSP/mixed-content blocks."""
-    await get_patient_for_professional(patient_id, professional, db)
+    access = await require_clinical_access(db, patient_id, professional)
     result = await db.execute(
         select(Attachment).where(Attachment.id == attachment_id, Attachment.patient_id == patient_id)
     )
     attachment = result.scalar_one_or_none()
     if not attachment:
         raise HTTPException(status_code=404, detail="Anexo não encontrado")
+    record_access_event(
+        db,
+        patient_id=patient_id,
+        actor=professional,
+        actor_role=access.role,
+        action="attachment_downloaded",
+        resource_type="attachment",
+        resource_id=attachment.id,
+    )
     body, content_type = await storage_service.download(attachment.storage_key)
     safe = safe_content_disposition_filename(attachment.storage_key, attachment.name)
     return Response(

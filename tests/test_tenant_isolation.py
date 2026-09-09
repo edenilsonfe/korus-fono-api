@@ -28,8 +28,10 @@ from app.db.session import get_db
 from app.main import app
 from app.models.appointment import Appointment
 from app.models.assessment import Assessment
+from app.models.care_team import PatientCareTeamMember
 from app.models.caregiver import Caregiver
 from app.models.evolution import Evolution
+from app.models.feature_flag import FeatureFlag
 from app.models.goal import Goal
 from app.models.patient import Patient
 from app.models.professional import Professional
@@ -61,6 +63,7 @@ async def _engine():
                 bind=sync_conn,
                 tables=[
                     Professional.__table__,
+                    FeatureFlag.__table__,
                     Patient.__table__,
                     Caregiver.__table__,
                     ClinicalSession.__table__,
@@ -69,6 +72,7 @@ async def _engine():
                     Evolution.__table__,
                     Appointment.__table__,
                     TimelineEvent.__table__,
+                    PatientCareTeamMember.__table__,
                 ],
             )
         )

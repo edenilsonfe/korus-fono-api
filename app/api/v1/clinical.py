@@ -5,11 +5,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_patient_for_professional, require_verified_professional
-from app.core.utils import goal_status_from_progress, utcnow
+from app.core.deps import require_verified_professional
+from app.core.utils import goal_status_from_progress
 from app.db.session import get_db
-from app.models.assessment import Assessment, ASSESSMENT_STATUS_COMPLETED, ProtocolCatalog
-from app.models.goal import ClinicalDomainSnapshot, Goal
+from app.models.assessment import (
+    ASSESSMENT_STATUS_COMPLETED,
+    Assessment,
+    ProtocolCatalog,
+)
+from app.models.goal import Goal
 from app.models.patient import Patient
 from app.models.professional import Professional
 from app.schemas.clinical import (
@@ -17,8 +21,8 @@ from app.schemas.clinical import (
     AssessmentCreate,
     AssessmentDraftUpsert,
     AssessmentFinalize,
-    AssessmentStatusCounts,
     AssessmentsPage,
+    AssessmentStatusCounts,
     GoalCreate,
     GoalUpdate,
     ProtocolResponse,
@@ -35,7 +39,9 @@ from app.services.assessment_service import (
     get_assessment_draft,
     upsert_assessment_draft,
 )
+from app.services.care_team_service import require_clinical_access
 from app.services.patient import build_clinical_domains, build_development_analytics
+from app.services.patient_access import list_accessible_patient_ids
 from app.services.timeline import create_timeline_event
 
 ANALYTICS_PERIODS = frozenset({"30d", "90d", "6m", "1y"})
@@ -83,10 +89,11 @@ async def list_protocols(
         .order_by(ProtocolCatalog.sort_order.asc(), ProtocolCatalog.name.asc())
     )
     protocols = result.scalars().all()
+    patient_ids = await list_accessible_patient_ids(db, professional)
     stats_rows = await db.execute(
         select(Assessment.protocol_id, func.count(), func.avg(Assessment.percentage), func.max(Assessment.date))
         .join(Patient, Assessment.patient_id == Patient.id)
-        .where(Patient.professional_id == professional.id, Assessment.status == ASSESSMENT_STATUS_COMPLETED)
+        .where(Patient.id.in_(patient_ids), Assessment.status == ASSESSMENT_STATUS_COMPLETED)
         .group_by(Assessment.protocol_id)
     )
     stats_by_protocol = {row[0]: tuple(row[1:]) for row in stats_rows}
@@ -167,7 +174,8 @@ async def list_assessments_global(
         raise HTTPException(status_code=400, detail="Período inválido. Use: week, month, all")
 
     awaiting_clause = Assessment.result.ilike("%aguardando%")
-    scope = [Patient.professional_id == professional.id]
+    patient_ids = await list_accessible_patient_ids(db, professional)
+    scope = [Patient.id.in_(patient_ids)]
     if protocol:
         scope.append(Assessment.protocol_id == protocol.lower())
     period_start = _assessment_period_start(period)
@@ -221,9 +229,10 @@ async def list_assessments_global(
     )
 
     query = (
-        select(Assessment, Patient, ProtocolCatalog)
+        select(Assessment, Patient, ProtocolCatalog, Professional)
         .join(Patient, Assessment.patient_id == Patient.id)
         .join(ProtocolCatalog, Assessment.protocol_id == ProtocolCatalog.id)
+        .join(Professional, Professional.id == Assessment.professional_id)
         .where(*scope)
     )
     if status_filter:
@@ -246,8 +255,8 @@ async def list_assessments_global(
         query.order_by(Assessment.date.desc()).offset((page - 1) * limit).limit(limit)
     )
     items = [
-        _assessment_response(a, proto.name, professional.name, patient=patient)
-        for a, patient, proto in result.all()
+        _assessment_response(a, proto.name, author.name, patient=patient)
+        for a, patient, proto, author in result.all()
     ]
     return AssessmentsPage(
         items=items,
@@ -268,17 +277,16 @@ async def cancel_assessment(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(Assessment, Patient)
-        .join(Patient, Assessment.patient_id == Patient.id)
+        select(Assessment)
         .where(
             Assessment.id == assessment_id,
-            Patient.professional_id == professional.id,
+            Assessment.professional_id == professional.id,
         )
     )
-    row = result.one_or_none()
-    if row is None:
+    assessment = result.scalar_one_or_none()
+    if assessment is None:
         raise HTTPException(status_code=404, detail="Avaliação não encontrada")
-    assessment, _patient = row
+    await require_clinical_access(db, assessment.patient_id, professional, "clinical:write")
     if assessment.status != "draft":
         raise HTTPException(
             status_code=400,
@@ -305,16 +313,17 @@ async def list_patient_assessments(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_patient_for_professional(patient_id, professional, db)
+    await require_clinical_access(db, patient_id, professional)
     result = await db.execute(
-        select(Assessment, ProtocolCatalog)
+        select(Assessment, ProtocolCatalog, Professional)
         .join(ProtocolCatalog, Assessment.protocol_id == ProtocolCatalog.id)
+        .join(Professional, Professional.id == Assessment.professional_id)
         .where(Assessment.patient_id == patient_id)
         .order_by(Assessment.date.desc())
     )
     return [
-        _assessment_response(a, p.name, professional.name)
-        for a, p in result.all()
+        _assessment_response(a, p.name, author.name)
+        for a, p, author in result.all()
     ]
 
 
@@ -328,8 +337,10 @@ async def get_patient_assessment_draft(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_patient_for_professional(patient_id, professional, db)
-    assessment = await get_assessment_draft(db, patient_id, protocol_id)
+    await require_clinical_access(db, patient_id, professional)
+    assessment = await get_assessment_draft(
+        db, patient_id, protocol_id, professional.id
+    )
     if assessment is None:
         return None
     protocol = await db.get(ProtocolCatalog, assessment.protocol_id)
@@ -349,7 +360,8 @@ async def save_patient_assessment_draft(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    patient = await get_patient_for_professional(patient_id, professional, db)
+    access = await require_clinical_access(db, patient_id, professional, "clinical:write")
+    patient = access.patient
     assessment, protocol = await upsert_assessment_draft(
         db,
         patient,
@@ -371,7 +383,8 @@ async def finalize_patient_assessment_draft(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    patient = await get_patient_for_professional(patient_id, professional, db)
+    access = await require_clinical_access(db, patient_id, professional, "clinical:write")
+    patient = access.patient
     assessment, protocol = await complete_assessment_draft(
         db,
         patient,
@@ -389,7 +402,8 @@ async def create_assessment(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    patient = await get_patient_for_professional(patient_id, professional, db)
+    access = await require_clinical_access(db, patient_id, professional, "clinical:write")
+    patient = access.patient
     assessment, protocol = await create_assessment_record(
         db,
         patient,
@@ -405,19 +419,23 @@ async def list_goals(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_patient_for_professional(patient_id, professional, db)
-    result = await db.execute(select(Goal).where(Goal.patient_id == patient_id))
+    await require_clinical_access(db, patient_id, professional)
+    result = await db.execute(
+        select(Goal, Professional)
+        .join(Professional, Professional.id == Goal.professional_id)
+        .where(Goal.patient_id == patient_id)
+    )
     return [
         GoalResponse(
             id=str(g.id),
             title=g.title,
             progress=g.progress,
             area=g.area,
-            professional=professional.name,
+            professional=author.name,
             start_date=g.start_date.isoformat(),
             status=g.status,
         )
-        for g in result.scalars().all()
+        for g, author in result.all()
     ]
 
 
@@ -428,7 +446,7 @@ async def create_goal(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_patient_for_professional(patient_id, professional, db)
+    await require_clinical_access(db, patient_id, professional, "clinical:write")
     progress = body.progress
     status_val = body.status or goal_status_from_progress(progress)
     goal = Goal(
@@ -461,8 +479,14 @@ async def update_goal(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_patient_for_professional(patient_id, professional, db)
-    result = await db.execute(select(Goal).where(Goal.id == goal_id, Goal.patient_id == patient_id))
+    await require_clinical_access(db, patient_id, professional, "clinical:write")
+    result = await db.execute(
+        select(Goal).where(
+            Goal.id == goal_id,
+            Goal.patient_id == patient_id,
+            Goal.professional_id == professional.id,
+        )
+    )
     goal = result.scalar_one_or_none()
     if not goal:
         raise HTTPException(status_code=404, detail="Meta não encontrada")
@@ -499,7 +523,7 @@ async def get_clinical_domains(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_patient_for_professional(patient_id, professional, db)
+    await require_clinical_access(db, patient_id, professional)
     return await build_clinical_domains(db, patient_id)
 
 
@@ -517,7 +541,7 @@ async def analytics_development(
         )
     if not patient_id:
         return {"areas": []}
-    await get_patient_for_professional(patient_id, professional, db)
+    await require_clinical_access(db, patient_id, professional)
     domains = await build_development_analytics(db, patient_id, period)
     return {
         "areas": [DevelopmentAnalyticsAreaResponse.model_validate(d) for d in domains]

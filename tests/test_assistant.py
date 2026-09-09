@@ -20,7 +20,9 @@ from app.db.base import Base
 from app.models.ai import AIReport, ChatMessage, Conversation
 from app.models.appointment import Appointment
 from app.models.assessment import Assessment, ProtocolCatalog
+from app.models.care_team import PatientAccessEvent, PatientCareTeamMember
 from app.models.evolution import Evolution
+from app.models.feature_flag import FeatureFlag, FeatureFlagOverride
 from app.models.goal import Goal, ClinicalDomainSnapshot
 from app.models.patient import Patient
 from app.models.professional import Professional
@@ -55,6 +57,10 @@ async def engine():
                     Evolution.__table__,
                     Goal.__table__,
                     ClinicalDomainSnapshot.__table__,
+                    FeatureFlag.__table__,
+                    FeatureFlagOverride.__table__,
+                    PatientCareTeamMember.__table__,
+                    PatientAccessEvent.__table__,
                     Conversation.__table__,
                     ChatMessage.__table__,
                 ],

@@ -93,6 +93,45 @@ def email_verification_email(
     return RenderedEmail(subject=subject, html=_layout("Confirme seu e-mail", inner), text=text)
 
 
+def care_team_invitation_email(
+    recipient_name: str,
+    inviter_name: str,
+    invitation_url: str,
+    expires_days: int,
+) -> RenderedEmail:
+    """Invitation without patient identifiers or clinical data."""
+    subject = f"Convite para uma equipe assistencial - {PRODUCT_NAME}"
+    safe_recipient = escape(recipient_name, quote=True)
+    safe_inviter = escape(inviter_name, quote=True)
+    safe_url = escape(invitation_url, quote=True)
+    inner = f"""
+      <p>Olá {safe_recipient},</p>
+      <p>{safe_inviter} convidou você para participar de uma equipe assistencial no
+      {PRODUCT_NAME}.</p>
+      <p style="margin: 28px 0;">
+        <a href="{safe_url}"
+           style="background: #0ea5a4; color: #ffffff; text-decoration: none; padding: 12px 20px; border-radius: 9999px;">
+          Revisar convite
+        </a>
+      </p>
+      <p>Entre com o e-mail que recebeu esta mensagem. O convite expira em
+      {expires_days} dias e só pode ser usado uma vez.</p>
+      <p>Se você não esperava este convite, ignore esta mensagem.</p>
+    """
+    text = (
+        f"Olá {recipient_name},\n\n"
+        f"{inviter_name} convidou você para uma equipe assistencial no {PRODUCT_NAME}.\n"
+        f"Revise o convite em: {invitation_url}\n\n"
+        f"O convite expira em {expires_days} dias e só pode ser usado uma vez.\n"
+        "Se você não esperava este convite, ignore esta mensagem."
+    )
+    return RenderedEmail(
+        subject=subject,
+        html=_layout("Convite para equipe assistencial", inner),
+        text=text,
+    )
+
+
 def trial_expiration_email(
     user_name: str,
     audience: str,

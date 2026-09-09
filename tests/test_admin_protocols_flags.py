@@ -15,6 +15,7 @@ from app.db.session import get_db
 from app.main import app
 from app.models.admin_audit_log import AdminAuditLog
 from app.models.assessment import Assessment, ProtocolCatalog
+from app.models.care_team import PatientCareTeamMember
 from app.models.feature_flag import FeatureFlag, FeatureFlagOverride
 from app.models.patient import Patient
 from app.models.professional import Professional
@@ -44,6 +45,7 @@ async def engine():
         ProtocolCatalog.__table__,
         Patient.__table__,
         Assessment.__table__,
+        PatientCareTeamMember.__table__,
         FeatureFlag.__table__,
         FeatureFlagOverride.__table__,
     ]

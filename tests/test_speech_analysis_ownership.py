@@ -27,7 +27,9 @@ from app.db.session import get_db
 from app.main import app
 from app.models.ai import AIJob
 from app.models.assessment import Assessment
+from app.models.care_team import PatientAccessEvent, PatientCareTeamMember
 from app.models.evolution import Evolution
+from app.models.feature_flag import FeatureFlag, FeatureFlagOverride
 from app.models.goal import Goal
 from app.models.patient import Patient
 from app.models.professional import Professional
@@ -65,6 +67,10 @@ async def _engine():
                     Goal.__table__,
                     Evolution.__table__,
                     Assessment.__table__,
+                    FeatureFlag.__table__,
+                    FeatureFlagOverride.__table__,
+                    PatientCareTeamMember.__table__,
+                    PatientAccessEvent.__table__,
                 ],
             )
         )
