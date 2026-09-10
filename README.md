@@ -233,6 +233,12 @@ uv run arq worker.WorkerSettings
 
 Configure `OPENCODE_API_KEY` no `.env` (chave em [opencode.ai/auth](https://opencode.ai/auth)). Modelos disponíveis: [OpenCode Zen](https://opencode.ai/docs/zen/).
 
+O cliente envia `User-Agent: korus-fono/0.1.0` e `x-opencode-session`, exigido pelo
+[OpenCode Go](https://opencode.ai/docs/go/#where-can-i-use-it). No chat, a sessão é
+o UUID da conversa, preservado entre mensagens e chamadas de ferramentas; nas
+gerações avulsas, cada execução de `run_llm` recebe um UUID novo. Esses cabeçalhos
+não contêm nomes ou dados de pacientes e não exigem configuração no frontend.
+
 O mesmo worker recupera a fila persistida do Google Agenda. Configuração completa
 do OAuth, callback e variáveis: [`docs/google-calendar-setup.md`](docs/google-calendar-setup.md).
 

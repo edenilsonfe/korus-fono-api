@@ -99,12 +99,14 @@ async def run_llm(prompt: str, system: str = "", output: str = "plain") -> str:
             detail="Ferramentas de IA não configuradas.",
         )
     from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
+    from app.services.assistant.llm_client import opencode_request_headers
 
     client = AsyncOpenAI(
         api_key=settings.opencode_api_key,
         base_url=settings.opencode_base_url,
         timeout=settings.assistant_llm_timeout_seconds,
         max_retries=0,
+        default_headers=opencode_request_headers(),
     )
     messages = []
     if system:

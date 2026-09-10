@@ -88,4 +88,4 @@ async def patch_activation(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    return await update_onboarding(db, professional, body.action)
+    return await update_onboarding(db, professional, body.action, report_id=body.report_id)

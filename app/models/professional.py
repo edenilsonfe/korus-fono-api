@@ -58,7 +58,7 @@ class Professional(Base, TimestampMixin):
         DateTime(timezone=True), nullable=True
     )
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    onboarding_version: Mapped[int] = mapped_column(Integer, nullable=False, default=2, server_default="2")
+    onboarding_version: Mapped[int] = mapped_column(Integer, nullable=False, default=3, server_default="3")
     onboarding_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     onboarding_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     onboarding_dismissed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -66,6 +66,12 @@ class Professional(Base, TimestampMixin):
         DateTime(timezone=True), nullable=True
     )
     onboarding_viewed_demo_result_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    onboarding_reviewed_demo_report_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    onboarding_skipped_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 

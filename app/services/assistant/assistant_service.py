@@ -65,7 +65,7 @@ class AssistantService:
     @property
     def client(self) -> AsyncOpenAI:
         if self._client is None:
-            self._client = create_opencode_client()
+            self._client = create_opencode_client(session_id=self.conversation.id)
         return self._client
 
     # ------------------------------------------------------------------ #

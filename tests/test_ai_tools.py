@@ -101,6 +101,59 @@ async def test_run_llm_output_modes():
             assert "Bold" in plain
 
 
+@pytest.mark.parametrize("kind", ["tool", "chat"])
+async def test_opencode_session_headers_reach_provider(monkeypatch, kind):
+    from uuid import UUID, uuid4
+
+    from openai import AsyncOpenAI
+
+    from app.models.ai import Conversation
+    from app.services.ai_service import run_llm
+    from app.services.assistant.assistant_service import AssistantService
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "opencode_api_key", "test-key")
+    monkeypatch.setattr(settings, "opencode_base_url", "https://opencode.ai/zen/go/v1")
+    monkeypatch.setattr(settings, "opencode_model", "deepseek-v4-flash")
+    requests = []
+
+    def provider(request):
+        requests.append(request)
+        if not request.headers.get("x-opencode-session"):
+            return httpx.Response(400, json={"error": {"type": "MissingSessionID"}})
+        assert request.headers["user-agent"] == "korus-fono/0.1.0"
+        return httpx.Response(200, json={
+            "choices": [{"message": {"role": "assistant", "content": "OK"}}],
+        })
+
+    def client(**kwargs):
+        return AsyncOpenAI(
+            **kwargs,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(provider)),
+        )
+
+    monkeypatch.setattr("openai.AsyncOpenAI", client)
+    monkeypatch.setattr("app.services.assistant.llm_client.AsyncOpenAI", client)
+    if kind == "tool":
+        assert await run_llm("Synthetic request") == "OK"
+        assert await run_llm("Synthetic request") == "OK"
+        sessions = [UUID(request.headers["x-opencode-session"]) for request in requests]
+        assert len(sessions) == 2 and sessions[0] != sessions[1]
+    else:
+        first, second = uuid4(), uuid4()
+        for conversation_id in (first, first, second):
+            service = AssistantService(None, None, Conversation(id=conversation_id))
+            try:
+                messages = [{"role": "user", "content": "Synthetic request"}]
+                await service._call_tool_selection(messages)
+                assert await service._call_final(messages) == "OK"
+            finally:
+                await service.client.close()
+        assert [request.headers["x-opencode-session"] for request in requests] == [
+            str(first), str(first), str(first), str(first), str(second), str(second),
+        ]
+
+
 @pytest.mark.asyncio
 async def test_run_llm_rejects_unconfigured_provider_instead_of_simulating():
     from app.services.ai_service import run_llm

@@ -1,4 +1,5 @@
 from datetime import UTC, timedelta
+from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -83,24 +84,23 @@ async def build_onboarding_response(
                 AIReport.professional_id == professional.id,
                 AIReport.patient_id == demo_id,
             )
+            .order_by(AIReport.created_at.asc(), AIReport.id.asc())
             .limit(1)
         )
 
     steps = OnboardingSteps(
-        viewed_demo_patient=(
-            professional.onboarding_viewed_demo_patient_at is not None
-            or completed_assessment
-            or real_patient is not None
-        ),
-        completed_demo_assessment=completed_assessment or real_patient is not None,
-        viewed_demo_result=(
-            professional.onboarding_viewed_demo_result_at is not None or real_patient is not None
-        ),
-        created_demo_report=report_id is not None or real_patient is not None,
+        viewed_demo_patient=professional.onboarding_viewed_demo_patient_at is not None,
+        completed_demo_assessment=completed_assessment,
+        viewed_demo_result=professional.onboarding_viewed_demo_result_at is not None,
+        created_demo_report=report_id is not None,
+        reviewed_demo_report=professional.onboarding_reviewed_demo_report_at is not None,
         configured_service=configured_service is not None,
         created_real_patient=real_patient is not None,
     )
     is_complete = steps.configured_service and steps.created_real_patient
+    is_demo_complete = (
+        steps.viewed_demo_patient and steps.viewed_demo_result and steps.reviewed_demo_report
+    )
     completion_moments = [
         moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment
         for moment in (
@@ -114,22 +114,27 @@ async def build_onboarding_response(
 
     if is_complete:
         next_step = "completed"
+    elif steps.created_real_patient:
+        next_step = "configure_service"
+    elif is_demo_complete:
+        next_step = "create_real_patient"
     elif not steps.viewed_demo_patient:
         next_step = "view_demo_patient"
-    elif not steps.completed_demo_assessment:
-        next_step = "complete_demo_assessment"
     elif not steps.viewed_demo_result:
         next_step = "view_demo_result"
     elif not steps.created_demo_report:
         next_step = "create_demo_report"
-    elif not steps.configured_service:
-        next_step = "configure_service"
     else:
-        next_step = "create_real_patient"
+        next_step = "review_demo_report"
 
     return OnboardingResponse(
-        version=professional.onboarding_version,
+        version=3,
         demo_patient_id=str(demo.id) if demo else None,
+        demo_report_id=str(report_id) if report_id else None,
+        demo_started_at=professional.onboarding_viewed_demo_patient_at,
+        demo_completed_at=professional.onboarding_reviewed_demo_report_at if is_demo_complete else None,
+        is_demo_complete=is_demo_complete,
+        skipped_at=professional.onboarding_skipped_at,
         started_at=professional.onboarding_started_at or professional.created_at,
         completed_at=completed_at,
         dismissed_until=professional.onboarding_dismissed_until,
@@ -140,7 +145,7 @@ async def build_onboarding_response(
 
 
 async def update_onboarding(
-    db: AsyncSession, professional: Professional, action: str
+    db: AsyncSession, professional: Professional, action: str, *, report_id: UUID | None = None
 ) -> OnboardingResponse:
     now = utcnow()
     if professional.onboarding_started_at is None:
@@ -153,19 +158,46 @@ async def update_onboarding(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Paciente demonstração não encontrado",
             )
-        professional.onboarding_viewed_demo_patient_at = now
+        if professional.onboarding_viewed_demo_patient_at is None:
+            professional.onboarding_viewed_demo_patient_at = now
     elif action == "viewed_demo_result":
         demo = await _ensure_demo_while_onboarding(db, professional)
-        if demo is None or not await _has_completed_demo_assessment(db, demo.id):
+        if demo is None or professional.onboarding_viewed_demo_patient_at is None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Conclua a avaliação demonstrativa antes de ver o resultado",
+                detail="Conheça o caso demonstrativo antes de ver sua evolução",
             )
-        professional.onboarding_viewed_demo_result_at = now
+        if professional.onboarding_viewed_demo_result_at is None:
+            professional.onboarding_viewed_demo_result_at = now
+    elif action == "reviewed_demo_report":
+        demo = await _demo_patient(db, professional.id)
+        report = None
+        if demo is not None and report_id is not None:
+            report = await db.scalar(
+                select(AIReport).where(
+                    AIReport.id == report_id,
+                    AIReport.professional_id == professional.id,
+                    AIReport.patient_id == demo.id,
+                )
+            )
+        if report is None or not report.content.strip():
+            raise HTTPException(status_code=404, detail="Relatório demonstrativo não encontrado")
+        if (
+            professional.onboarding_viewed_demo_patient_at is None
+            or professional.onboarding_viewed_demo_result_at is None
+        ):
+            raise HTTPException(status_code=409, detail="Conheça o caso e sua evolução antes de concluir")
+        # Reviewing the demonstration never finalizes or changes a clinical report.
+        if professional.onboarding_reviewed_demo_report_at is None:
+            professional.onboarding_reviewed_demo_report_at = now
+    elif action == "skip":
+        professional.onboarding_skipped_at = now
     elif action == "postpone":
         professional.onboarding_dismissed_until = now + timedelta(days=1)
     elif action == "resume":
         professional.onboarding_dismissed_until = None
+        professional.onboarding_skipped_at = None
+        await ensure_demo_patient(db, professional)
 
     await db.flush()
     return await build_onboarding_response(db, professional)

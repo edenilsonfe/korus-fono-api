@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ai import AIReport, AIReportRevision
+from app.models.patient import Patient
 from app.schemas.ai import AIReportUpdate
 
 
@@ -14,7 +15,8 @@ async def revise_report(db: AsyncSession, report_id: UUID, professional_id: UUID
     ).with_for_update().execution_options(populate_existing=True))
     if report is None:
         raise HTTPException(status_code=404, detail="Relatório não encontrado")
-    next_status = body.status or "finalized"
+    is_demo = await db.scalar(select(Patient.is_demo).where(Patient.id == report.patient_id))
+    next_status = body.status or (report.status if is_demo else "finalized")
     if report.status == "finalized" and next_status == "draft":
         raise HTTPException(status_code=409, detail="Um relatório finalizado não pode voltar a rascunho. Salve uma revisão.")
     if report.content != body.content or report.status != next_status:
