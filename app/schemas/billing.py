@@ -203,6 +203,15 @@ class BillingMeResponse(CamelModel):
     subscription: SubscriptionSummary | None = None
 
 
+class NextPaymentResponse(CamelModel):
+    payment_id: str
+    due_date: str
+    days_until_due: int
+    amount_cents: int
+    payment_method: Literal["pix", "credit_card"] | None = None
+    invoice_url: str
+
+
 class PaymentSessionPlan(CamelModel):
     slug: str
     name: str

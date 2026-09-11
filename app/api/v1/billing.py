@@ -8,6 +8,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
+import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +37,7 @@ from app.schemas.billing import (
     CheckoutResponse,
     CreditCardPaymentRequest,
     CreditCardPaymentResponse,
+    NextPaymentResponse,
     PaymentSessionResponse,
     PendingPlanSummary,
     PixCheckoutResponse,
@@ -343,6 +345,23 @@ async def get_billing_me(
         referral_code=referral_code,
         subscription=subscription_summary,
     )
+
+
+@router.get("/next-payment", response_model=NextPaymentResponse | None)
+async def get_next_payment(
+    db: AsyncSession = Depends(get_db),
+    professional: Professional = Depends(get_current_professional),
+):
+    sub = await _latest_subscription(db, professional.id)
+    try:
+        return await BillingCheckoutService(db).get_next_payment(
+            professional=professional, subscription=sub
+        )
+    except (PaymentGatewayConfigError, PaymentGatewayError, httpx.HTTPError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Não foi possível consultar a mensalidade. Tente novamente em instantes.",
+        ) from exc
 
 
 @router.get("/plan-change/preview", response_model=PlanChangePreviewResponse)

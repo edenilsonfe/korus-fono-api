@@ -33,7 +33,7 @@ async def test_new_monthly_checkout_exposes_provider_method_in_admin(
     async def fake_request_json(method, url, **kwargs):
         if method == "POST" and url.endswith("/subscriptions"):
             return {"id": "sub_new", "status": "ACTIVE"}
-        if method == "GET" and url.endswith("/subscriptions/sub_new/payments"):
+        if method == "GET" and url.split("?")[0].endswith("/subscriptions/sub_new/payments"):
             return {"data": [
                 {
                     "id": "pay_new",

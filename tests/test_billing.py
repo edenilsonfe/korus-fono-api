@@ -509,7 +509,7 @@ async def test_asaas_replaces_pending_subscription_before_creating_charge_for_ne
             return {"deleted": True}
         if method == "POST" and url.endswith("/subscriptions"):
             return {"id": "sub_cnpj_new"}
-        if method == "GET" and url.endswith("/subscriptions/sub_cnpj_new/payments"):
+        if method == "GET" and url.split("?")[0].endswith("/subscriptions/sub_cnpj_new/payments"):
             return {
                 "data": [
                     {
@@ -578,7 +578,7 @@ async def test_asaas_cancels_pending_annual_checkout_before_switching_to_monthly
             return {"id": "chk_annual_pending", "status": "CANCELED"}
         if method == "POST" and url.endswith("/subscriptions"):
             return {"id": "sub_monthly_new"}
-        if method == "GET" and url.endswith("/subscriptions/sub_monthly_new/payments"):
+        if method == "GET" and url.split("?")[0].endswith("/subscriptions/sub_monthly_new/payments"):
             return {
                 "data": [
                     {
@@ -1368,7 +1368,7 @@ async def test_asaas_creates_monthly_subscription_with_card_and_immediate_first_
             captured.update(kwargs["json_body"])
             assert kwargs["timeout"] == 60.0
             return {"id": "sub_card_monthly", "status": "ACTIVE"}
-        if method == "GET" and url.endswith("/subscriptions/sub_card_monthly/payments"):
+        if method == "GET" and url.split("?")[0].endswith("/subscriptions/sub_card_monthly/payments"):
             return {
                 "data": [
                     {

@@ -174,16 +174,23 @@ class AsaasPaymentGateway:
         )
 
     async def list_subscription_payments(self, subscription_id: str) -> list[dict[str, Any]]:
-        data = await request_json(
-            "GET",
-            f"{self._base_url}/subscriptions/{subscription_id}/payments",
-            headers=self._headers(),
-        )
-        if isinstance(data.get("data"), list):
-            return [p for p in data["data"] if isinstance(p, dict)]
-        if isinstance(data, list):
-            return [p for p in data if isinstance(p, dict)]
-        return []
+        payments: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            data = await request_json(
+                "GET",
+                f"{self._base_url}/subscriptions/{subscription_id}/payments?limit=100&offset={offset}",
+                headers=self._headers(),
+            )
+            page = data.get("data")
+            if not isinstance(page, list):
+                raise PaymentGatewayError("Asaas retornou uma lista de cobranças inválida")
+            payments.extend(p for p in page if isinstance(p, dict))
+            if not data.get("hasMore"):
+                return payments
+            if not page:
+                raise PaymentGatewayError("Asaas retornou paginação de cobranças inválida")
+            offset += len(page)
 
     async def get_payment(self, payment_id: str) -> dict[str, Any]:
         data = await request_json(

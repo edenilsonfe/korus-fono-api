@@ -26,7 +26,7 @@ async def test_pending_monthly_checkout_suspends_provider_subscription(monkeypat
         calls.append((method, url, kwargs.get("json_body")))
         if method == "POST" and url.endswith("/subscriptions"):
             return {"id": "sub_unpaid_monthly", "status": "ACTIVE"}
-        if method == "GET" and url.endswith(
+        if method == "GET" and url.split("?")[0].endswith(
             "/subscriptions/sub_unpaid_monthly/payments"
         ):
             return {
@@ -84,7 +84,7 @@ async def test_pending_monthly_card_suspends_provider_subscription(monkeypatch):
         calls.append((method, url, kwargs.get("json_body")))
         if method == "POST" and url.endswith("/subscriptions"):
             return {"id": "sub_card_pending", "status": "ACTIVE"}
-        if method == "GET" and url.endswith(
+        if method == "GET" and url.split("?")[0].endswith(
             "/subscriptions/sub_card_pending/payments"
         ):
             return {

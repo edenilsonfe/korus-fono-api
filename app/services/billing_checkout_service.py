@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import logging
-import httpx
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,10 +18,12 @@ from sqlalchemy.orm import joinedload
 
 from app.billing.asaas_gateway import AsaasPaymentGateway
 from app.billing.errors import PaymentGatewayConfigError, PaymentGatewayError
+from app.billing.payment_methods import payment_method_from_payload
 from app.billing.stub_gateway import StubPaymentGateway
+from app.core.config import get_settings
 from app.models.billing import Subscription
 from app.models.professional import Professional
-from app.schemas.billing import CreditCardPaymentRequest
+from app.schemas.billing import CreditCardPaymentRequest, NextPaymentResponse
 from app.services.billing_customer_service import BillingCustomerService
 from app.services.billing_profile_service import asaas_customer_profile
 from app.services.plan_proration import (
@@ -37,6 +43,61 @@ logger = logging.getLogger(__name__)
 class BillingCheckoutService:
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def get_next_payment(
+        self, *, professional: Professional, subscription: Subscription | None
+    ) -> NextPaymentResponse | None:
+        """Read an issued renewal without changing the original checkout or access."""
+        if (
+            professional.signup_payment_required
+            or professional.subscription_status not in {"active", "past_due"}
+            or not subscription
+            or subscription.professional_id != professional.id
+            or subscription.status not in {"active", "past_due"}
+            or subscription.provider != "asaas"
+            or not subscription.external_subscription_id
+        ):
+            return None
+
+        payments = await AsaasPaymentGateway().list_subscription_payments(
+            subscription.external_subscription_id
+        )
+        pending = [
+            payment
+            for payment in payments
+            if payment.get("id")
+            and payment.get("subscription") == subscription.external_subscription_id
+            and payment.get("status") in {"PENDING", "OVERDUE"}
+            and not payment.get("deleted")
+        ]
+        if not pending:
+            return None
+        payment = min(pending, key=lambda p: (str(p.get("dueDate") or ""), p["id"]))
+        try:
+            due_date = date.fromisoformat(payment["dueDate"])
+            amount_cents = int((Decimal(str(payment["value"])) * 100).quantize(Decimal("1")))
+            invoice_url = str(payment["invoiceUrl"])
+            url = urlsplit(invoice_url)
+            host = url.hostname or ""
+            if (
+                amount_cents < 0
+                or url.scheme != "https"
+                or not (host == "asaas.com" or host.endswith(".asaas.com"))
+                or url.username
+                or url.password
+            ):
+                raise ValueError("Invalid payment")
+        except (KeyError, TypeError, ValueError, OverflowError, InvalidOperation) as exc:
+            raise PaymentGatewayError("Asaas retornou dados de cobrança inválidos") from exc
+        today = datetime.now(ZoneInfo(get_settings().clinic_timezone)).date()
+        return NextPaymentResponse(
+            payment_id=str(payment["id"]),
+            due_date=due_date.isoformat(),
+            days_until_due=(due_date - today).days,
+            amount_cents=amount_cents,
+            payment_method=payment_method_from_payload(payment),
+            invoice_url=invoice_url,
+        )
 
     async def _get_subscription(
         self, *, session_id: str, professional_id: str, lock: bool = False
