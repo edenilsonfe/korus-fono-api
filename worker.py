@@ -101,6 +101,17 @@ async def run_affiliate_maintenance(ctx) -> None:
         await session.commit()
 
 
+async def run_storage_cleanup_job(ctx) -> None:
+    """F17 — janitor de blobs órfãos; lote limitado a 100 por execução."""
+    from app.services.storage_cleanup_service import (
+        STORAGE_CLEANUP_BATCH_LIMIT,
+        run_storage_cleanup,
+    )
+
+    async with AsyncSessionLocal() as session:
+        await run_storage_cleanup(session, limit=STORAGE_CLEANUP_BATCH_LIMIT)
+
+
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     functions = [
@@ -111,6 +122,7 @@ class WorkerSettings:
         run_trial_email_campaign,
         retry_google_calendar_syncs,
         run_affiliate_maintenance,
+        run_storage_cleanup_job,
     ]
     cron_jobs = [
         cron(
@@ -120,6 +132,8 @@ class WorkerSettings:
         ),
         cron(retry_google_calendar_syncs, minute={5, 20, 35, 50}, run_at_startup=False),
         cron(run_affiliate_maintenance, minute=10, run_at_startup=False),
+        # F17 — limpeza de blobs a cada 15 min (deslocada dos demais crons).
+        cron(run_storage_cleanup_job, minute={2, 17, 32, 47}, run_at_startup=False),
     ]
 
     @staticmethod

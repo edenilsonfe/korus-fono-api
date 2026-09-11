@@ -10,11 +10,13 @@ from app.core.resource_catalog import (
     RESOURCE_FORMATS,
 )
 from app.schemas.common import CamelModel
+from app.schemas.resource_license import ResourceLicenseSummary
 
 ResourceScope = Literal["all", "global", "mine"]
 ResourceFormat = Literal["PDF", "Imagem"]
 ResourceDifficulty = Literal["Básico", "Intermediário", "Avançado"]
 ResourceAccent = Literal["primary", "info", "success", "warning", "destructive"]
+ResourcePublicationStatus = Literal["draft", "published", "archived"]
 
 
 def _validate_categories(value: list[str]) -> list[str]:
@@ -44,6 +46,16 @@ class ResourceResponse(CamelModel):
     difficulty: ResourceDifficulty | None = None
     is_mine: bool = False
     shared_with_platform: bool = False
+    # F17 — estado editorial/licença. Nunca expor comprovação administrativa,
+    # storage_key ou os pacientes vinculados.
+    publication_status: ResourcePublicationStatus = "draft"
+    # Vínculos canônicos de domínio (ResourceDomainLink, tarefa 4.2) — somente
+    # leitura aqui; vínculo não amplia a visibilidade/ACL do recurso.
+    domain_keys: list[str] = Field(default_factory=list)
+    license: ResourceLicenseSummary | None = None
+    content_sha256: str | None = None
+    can_deliver_to_family: bool = False
+    unavailable_reason: str | None = None
 
 
 class ResourceDownloadUrl(CamelModel):

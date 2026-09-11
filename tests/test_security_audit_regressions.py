@@ -60,12 +60,22 @@ async def test_finalized_report_preserves_history(api_client, patient, professio
     path = f"/api/v1/ai/reports/{report_id}"
     changed = await api_client.patch(path, headers=auth_headers, json={"content": "Revisado"})
     assert changed.status_code == 200
+    assert changed.json()["version"] == 2
     history = await api_client.get(path + "/revisions", headers=auth_headers)
     assert history.status_code == 200
     assert history.json()[0]["content"] == "Original"
     assert history.json()[0]["status"] == "finalized"
+    assert history.json()[0]["version"] == 1
+    # A historical revision written before numeric versioning keeps version null.
+    db_session.add(AIReportRevision(report_id=report.id, professional_id=professional.id, content="Legado", status="finalized", version=None))
+    await db_session.commit()
+    legacy = await api_client.get(path + "/revisions", headers=auth_headers)
+    assert any(item["version"] is None for item in legacy.json())
     assert (await api_client.patch(path, headers=auth_headers, json={"content": "Revisado", "status": "draft"})).status_code == 409
     assert (await api_client.patch(path, headers=auth_headers, json={"content": "Revisado", "status": "inventado"})).status_code == 422
+    # Stale optimistic version is rejected without touching the stored content.
+    assert (await api_client.patch(path, headers=auth_headers, json={"content": "Concorrente", "expectedVersion": 1})).status_code == 409
+    assert (await api_client.patch(path, headers=auth_headers, json={"content": "Concorrente", "expectedVersion": 0})).status_code == 422
     assert (await api_client.get(f"/api/v1/ai/reports/{uuid4()}/revisions", headers=auth_headers)).status_code == 404
 
 

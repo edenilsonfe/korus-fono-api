@@ -21,7 +21,17 @@ REPORT_TYPE_LABELS = {
     "escolar": "Relatório Escolar",
     "pais": "Relatório para Pais",
     "evolutivo": "Relatório Evolutivo",
+    "consolidado": "Laudo Consolidado",
 }
+
+_UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def sanitize_filename_component(value: str) -> str:
+    """Keep only header-safe characters for Content-Disposition filenames."""
+    cleaned = _UNSAFE_FILENAME_CHARS.sub("-", (value or "").strip()).strip("-.")
+    return cleaned or "documento"
+
 
 _HEADING2 = re.compile(r"^##\s+(.+)$")
 _HEADING3 = re.compile(r"^###\s+(.+)$")

@@ -21,6 +21,9 @@ EXEMPT_PATH_PREFIXES: tuple[str, ...] = (
     "/api/v1/auth",
     # Public signed attendance response from the 24h WhatsApp reminder.
     "/api/v1/appointment-responses",
+    # Public family surface of home programs (X-Home-Program-Token, no JWT) —
+    # the service layer revalidates EntitlementService.can_write(owner).
+    "/api/v1/home-program-responses",
     "/api/v1/billing/checkout",
     "/api/v1/billing/reconcile",
     "/api/v1/billing/webhooks",
@@ -59,6 +62,55 @@ class EntitlementMiddleware(BaseHTTPMiddleware):
         # Revoking a public report link must remain possible in read-only mode.
         if request.method == "DELETE" and re.fullmatch(
             r"/api/v1/ai/reports/[^/]+/deliveries/[^/]+/?", path
+        ):
+            return await call_next(request)
+        # F20 — the public school acknowledgement is the school confirming a
+        # delivery, not a mutation of the professional's data: stale cookies of
+        # a professional with an expired plan must not block it. Exact path
+        # only; token validity and the public rate limit still apply.
+        if request.method == "POST" and re.fullmatch(
+            r"/api/v1/report-deliveries/[^/]+/acknowledgement/?", path
+        ):
+            return await call_next(request)
+        # F6 — exportar o próprio prontuário é leitura do acervo: permanece
+        # possível em read-only. Exceção exata de método/path (UUID canônico);
+        # auth, e-mail verificado e bloqueio por pagamento inicial continuam.
+        if request.method == "POST" and re.fullmatch(
+            r"/api/v1/patients/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/record-exports/?",
+            path,
+        ):
+            return await call_next(request)
+        # F17 — arquivar o próprio material é ação protetiva (bloqueia novas
+        # distribuições e prescrições): permanece possível em read-only.
+        # Exceção exata de método/path (UUID canônico); ACL, autoria e demais
+        # gates de negócio continuam valendo.
+        if request.method == "POST" and re.fullmatch(
+            r"/api/v1/resources/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/archive/?",
+            path,
+        ):
+            return await call_next(request)
+        # F16 — arquivar o programa de casa e revogar o link da família são
+        # ações protetivas (encerram compartilhamento e distribuição): permanecem
+        # possíveis em read-only. Exceção exata de método/path (UUID canônico);
+        # ACL, autoria e gates de negócio continuam valendo.
+        if request.method == "POST" and re.fullmatch(
+            r"/api/v1/patients/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/home-programs/"
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/archive/?",
+            path,
+        ):
+            return await call_next(request)
+        if request.method == "DELETE" and re.fullmatch(
+            r"/api/v1/patients/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/home-programs/"
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/grants/"
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/?",
+            path,
         ):
             return await call_next(request)
         if path in EXEMPT_PATHS:

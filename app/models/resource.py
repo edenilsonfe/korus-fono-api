@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
@@ -36,5 +37,11 @@ class Resource(Base, TimestampMixin):
     skill: Mapped[str | None] = mapped_column(String(255), nullable=True)
     related_protocol: Mapped[str | None] = mapped_column(String(255), nullable=True)
     difficulty: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # F17 — estado editorial e vínculo com o conteúdo verificado.
+    publication_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="draft", server_default="draft"
+    )
+    content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     owner: Mapped["Professional | None"] = relationship()  # noqa: F821

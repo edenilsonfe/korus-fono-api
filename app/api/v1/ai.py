@@ -25,6 +25,8 @@ from app.core.utils import utcnow
 from app.db.session import get_db
 from app.models.ai import AIReport, AIReportRevision, ChatMessage, Conversation
 from app.models.professional import Professional
+from app.models.report_composition import AIReportComposition
+from app.models.report_delivery import RECIPIENT_KIND_STANDARD
 from app.schemas.ai import (
     AICapabilitiesResponse,
     AIJobResponse,
@@ -39,8 +41,12 @@ from app.schemas.ai import (
     MessageCreate,
 )
 from app.schemas.assistant import ChatResponse
-from app.schemas.report_delivery import ReportDeliveryCreate, ReportDeliveryResponse
-from app.services import report_delivery_service
+from app.schemas.report_delivery import (
+    ReportDeliveryCreate,
+    ReportDeliveryResponse,
+    SchoolAuthorizationRecord,
+)
+from app.services import report_composition_service, report_delivery_service
 from app.services.ai_context import build_context
 from app.services.ai_prompts import (
     AI_TOOL_SPECS,
@@ -58,8 +64,8 @@ from app.services.assistant.conversation_patient import bind_conversation_patien
 from app.services.assistant.rate_limit import enforce_assistant_rate_limit
 from app.services.audio_transcription_service import transcribe_audio
 from app.services.care_team_service import record_access_event, require_clinical_access
-from app.services.report_export import export_report
 from app.services.professional_branding import build_document_identity
+from app.services.report_export import export_report, sanitize_filename_component
 from app.services.report_service import revise_report
 from app.services.timeline import create_timeline_event
 
@@ -80,6 +86,34 @@ async def _get_ai_patient(
         resource_id=patient_id,
     )
     return access.patient
+
+
+def _report_response(
+    report: AIReport,
+    patient_name: str,
+    *,
+    content: str | None = None,
+    composition_id: str | None = None,
+) -> AIReportResponse:
+    return AIReportResponse(
+        id=str(report.id),
+        type=report.type,
+        patient_id=str(report.patient_id),
+        patient=patient_name,
+        date=report.date.isoformat(),
+        preview=report.preview,
+        content=report.content if content is None else content,
+        status=report.status,
+        version=report.version or 1,
+        composition_id=composition_id,
+    )
+
+
+async def _composition_id_for(db: AsyncSession, report_id: UUID) -> str | None:
+    composition_id = await db.scalar(
+        select(AIReportComposition.id).where(AIReportComposition.report_id == report_id)
+    )
+    return str(composition_id) if composition_id else None
 
 
 @router.get("/capabilities", response_model=AICapabilitiesResponse)
@@ -176,18 +210,25 @@ async def list_reports(
     if not include_content:
         query = query.options(defer(AIReport.content))
     result = await db.execute(query)
-    return [
-        AIReportResponse(
-            id=str(r.id),
-            type=r.type,
-            patient_id=str(r.patient_id),
-            patient=name,
-            date=r.date.isoformat(),
-            preview=r.preview,
-            content=r.content if include_content else "",
-            status=r.status,
+    rows = result.all()
+    composition_ids: dict[UUID, str] = {}
+    if rows:
+        mapping = await db.execute(
+            select(AIReportComposition.report_id, AIReportComposition.id).where(
+                AIReportComposition.report_id.in_([report.id for report, _ in rows])
+            )
         )
-        for r, name in result.all()
+        composition_ids = {
+            report_id: str(composition_id) for report_id, composition_id in mapping.all()
+        }
+    return [
+        _report_response(
+            r,
+            name,
+            content=r.content if include_content else "",
+            composition_id=composition_ids.get(r.id),
+        )
+        for r, name in rows
     ]
 
 
@@ -212,16 +253,8 @@ async def update_report(
         raise HTTPException(status_code=404, detail="Relatório não encontrado")
     report, patient_name = row
     await db.flush()
-    return AIReportResponse(
-        id=str(report.id),
-        type=report.type,
-        patient_id=str(report.patient_id),
-        patient=patient_name,
-        date=report.date.isoformat(),
-        preview=report.preview,
-        content=report.content,
-        status=report.status,
-    )
+    composition_id = await _composition_id_for(db, report_id)
+    return _report_response(report, patient_name, composition_id=composition_id)
 
 
 @router.get("/reports/{report_id}", response_model=AIReportResponse)
@@ -236,9 +269,8 @@ async def get_report(
     if row is None:
         raise HTTPException(status_code=404, detail="Relatório não encontrado")
     report, patient_name = row
-    return AIReportResponse(id=str(report.id), type=report.type, patient_id=str(report.patient_id),
-        patient=patient_name, date=report.date.isoformat(), preview=report.preview,
-        content=report.content, status=report.status)
+    composition_id = await _composition_id_for(db, report_id)
+    return _report_response(report, patient_name, composition_id=composition_id)
 
 
 @router.get("/reports/{report_id}/revisions", response_model=list[AIReportRevisionResponse])
@@ -253,7 +285,7 @@ async def get_report_revisions(
     rows = (await db.scalars(select(AIReportRevision).where(AIReportRevision.report_id == report_id)
         .order_by(AIReportRevision.created_at.desc(), AIReportRevision.id.desc()).offset(offset).limit(limit))).all()
     return [AIReportRevisionResponse(id=str(row.id), content=row.content, status=row.status,
-        professional_id=str(row.professional_id), created_at=row.created_at) for row in rows]
+        professional_id=str(row.professional_id), created_at=row.created_at, version=row.version) for row in rows]
 
 
 @router.get("/reports/{report_id}/export")
@@ -281,11 +313,28 @@ async def export_report_file(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    filename = f"relatorio-{report.type}-{report.date.isoformat()}.{suffix}"
+    filename = f"relatorio-{sanitize_filename_component(report.type)}-{report.date.isoformat()}.{suffix}"
     return Response(
         content=data,
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _school_authorization_response(delivery) -> SchoolAuthorizationRecord | None:
+    """Owner-only view of the recorded authorization (restricted JSON + columns)."""
+    stored = delivery.school_authorization
+    if not stored or not stored.get("caregiverId"):
+        return None
+    return SchoolAuthorizationRecord(
+        caregiver_id=str(stored.get("caregiverId")),
+        authorized_at=stored.get("authorizedAt"),
+        evidence_reference=stored.get("evidenceReference") or None,
+        evidence_attachment_id=stored.get("evidenceAttachmentId") or None,
+        reviewed=bool(stored.get("reviewed", True)),
+        purpose=stored.get("purpose") or "school_report",
+        recorded_at=delivery.authorization_recorded_at,
+        recorded_by_professional_id=str(delivery.professional_id),
     )
 
 
@@ -306,6 +355,17 @@ def _delivery_response(delivery, *, url: str | None = None) -> ReportDeliveryRes
         last_downloaded_at=delivery.last_downloaded_at,
         last_error=delivery.last_error,
         created_at=delivery.created_at,
+        report_version=report_delivery_service.delivery_report_version(delivery),
+        content_hash=report_delivery_service.delivery_content_hash(delivery),
+        snapshot_mode=report_delivery_service.delivery_snapshot_mode(delivery),
+        recipient_kind=delivery.recipient_kind or RECIPIENT_KIND_STANDARD,
+        school_name=delivery.school_name,
+        school_recipient_name=delivery.school_recipient_name,
+        school_authorization=_school_authorization_response(delivery),
+        authorization_recorded_at=delivery.authorization_recorded_at,
+        received_at=delivery.received_at,
+        received_by_name=delivery.received_by_name,
+        received_by_role=delivery.received_by_role,
     )
 
 
@@ -381,6 +441,12 @@ async def create_report(
     db: AsyncSession = Depends(get_db),
 ):
     await run_in_threadpool(enforce_assistant_rate_limit, str(professional.id))
+    if body.type == "consolidado":
+        report, composition, patient = await report_composition_service.create_consolidated_report(
+            db, professional=professional, body=body
+        )
+        return _report_response(report, patient.name, composition_id=str(composition.id))
+
     patient = await _get_ai_patient(db, UUID(body.patient_id), professional)
     spec_key = f"report:{body.type}"
     if spec_key not in AI_TOOL_SPECS:
@@ -423,16 +489,7 @@ async def create_report(
     )
     # ponytail: commit before response — get_db commits after send, so a follow-up GET can miss the row
     await db.commit()
-    return AIReportResponse(
-        id=str(report.id),
-        type=report.type,
-        patient_id=str(report.patient_id),
-        patient=patient.name,
-        date=report.date.isoformat(),
-        preview=report.preview,
-        content=report.content,
-        status=report.status,
-    )
+    return _report_response(report, patient.name, composition_id=None)
 
 
 @router.get("/conversations", response_model=list[ConversationResponse])

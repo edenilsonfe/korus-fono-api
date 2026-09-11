@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, String, Text
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -23,6 +23,9 @@ class AIReport(Base, TimestampMixin):
     preview: Mapped[str] = mapped_column(String(500), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
+    # Numeric version: starts at 1 for current records; legacy rows are backfilled by
+    # the F3 migration and must not be renumbered.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
     patient: Mapped["Patient"] = relationship(back_populates="ai_reports")  # noqa: F821
 
@@ -35,6 +38,8 @@ class AIReportRevision(Base, TimestampMixin):
     professional_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("professionals.id"), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Nullable for historical revisions written before numeric versioning existed.
+    version: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Conversation(Base, TimestampMixin):

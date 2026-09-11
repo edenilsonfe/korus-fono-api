@@ -42,14 +42,21 @@ services:
       timeout: 5s
       retries: 5
 
+  # NOTE: os serviços uv usam um venv Linux PRÓPRIO em /opt/venv (volume uv_venv),
+  # separado do .venv do host Windows. O repo é montado em /app — sem isso, host
+  # (layout Lib/Scripts) e container (layout lib/bin) disputam o MESMO diretório
+  # .venv através do mount e cada `uv sync` reconstrói o venv do outro lado
+  # (erros intermitentes de permissão/lib64/Scripts e startup quebrado).
   migrate:
     image: ghcr.io/astral-sh/uv:python3.11-bookworm-slim
     working_dir: /app
     volumes:
       - .:/app
+      - uv_venv:/opt/venv
     environment:
       DATABASE_URL: postgresql+asyncpg://korus:korus@postgres:5432/korus_one
       REDIS_URL: redis://redis:6379
+      UV_PROJECT_ENVIRONMENT: /opt/venv
     depends_on:
       postgres:
         condition: service_healthy
@@ -62,9 +69,11 @@ services:
     working_dir: /app
     volumes:
       - .:/app
+      - uv_venv:/opt/venv
     environment:
       DATABASE_URL: postgresql+asyncpg://korus:korus@postgres:5432/korus_one
       REDIS_URL: redis://redis:6379
+      UV_PROJECT_ENVIRONMENT: /opt/venv
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -76,6 +85,7 @@ services:
     working_dir: /app
     volumes:
       - .:/app
+      - uv_venv:/opt/venv
     env_file:
       - .env
     ports:
@@ -86,6 +96,7 @@ services:
       S3_ENDPOINT: http://minio:9000
       CORS_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:5173,http://localhost:4173,http://localhost:8080,http://127.0.0.1:3000,http://127.0.0.1:5173,http://127.0.0.1:4173,http://127.0.0.1:8080
       DEBUG: "true"
+      UV_PROJECT_ENVIRONMENT: /opt/venv
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -100,3 +111,4 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  uv_venv:

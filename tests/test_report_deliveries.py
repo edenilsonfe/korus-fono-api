@@ -1,5 +1,6 @@
 """Report deliveries: revocable links, WhatsApp/e-mail dispatch and public access."""
 
+import hashlib
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -76,6 +77,9 @@ async def test_link_delivery_public_flow_and_counters(
     data = response.json()
     assert data["status"] == "created"
     assert data["url"] and "/relatorio/" in data["url"]
+    assert data["snapshotMode"] == "fixed"
+    assert data["reportVersion"] == 1
+    assert data["contentHash"] == hashlib.sha256(report.content.encode("utf-8")).hexdigest()
     token = data["url"].rsplit("/", 1)[-1]
 
     stored = await db_session.scalar(
@@ -96,6 +100,9 @@ async def test_link_delivery_public_flow_and_counters(
     assert body["patientName"] == "João Silva"
     assert body["professionalName"] == "Dra. Teste"
     assert body["reportTypeLabel"] == "Relatório para Pais"
+    assert body["snapshotMode"] == "fixed"
+    assert body["reportVersion"] == 1
+    assert body["contentHash"] == data["contentHash"]
 
     export = await api_client.get(
         f"/api/v1/report-deliveries/{token}/export", params={"format": "pdf"}

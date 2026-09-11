@@ -25,13 +25,18 @@ from app.api.v1 import (
     dashboard,
     finance,
     google_calendar,
+    home_program_responses,
+    home_programs,
     instruments,
     intervention_programs,
     me,
     notifications,
+    patient_exports,
     patients,
     prontuario,
+    report_compositions,
     report_deliveries,
+    resource_links,
     resources,
     schedule_blocks,
     sessions,
@@ -51,6 +56,7 @@ api_router.include_router(me.router)
 api_router.include_router(catalog.router)
 api_router.include_router(care_team.router)
 api_router.include_router(patients.router)
+api_router.include_router(patient_exports.router)
 api_router.include_router(appointments.router)
 api_router.include_router(schedule_blocks.router)
 api_router.include_router(appointment_responses.router)
@@ -61,12 +67,16 @@ api_router.include_router(google_calendar.router)
 api_router.include_router(sessions.router)
 api_router.include_router(sessions.patient_router)
 api_router.include_router(prontuario.router)
+api_router.include_router(report_compositions.router)
+api_router.include_router(report_compositions.ai_reports_router)
 api_router.include_router(timeline.router)
 api_router.include_router(timeline.patient_router)
 api_router.include_router(clinical.router)
 api_router.include_router(clinical.patient_router)
 api_router.include_router(instruments.router)
 api_router.include_router(intervention_programs.router)
+api_router.include_router(home_programs.router)
+api_router.include_router(home_program_responses.router)
 api_router.include_router(batteries.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(ai.router)
@@ -81,6 +91,7 @@ api_router.include_router(admin_protocols.router)
 api_router.include_router(admin_feature_flags.router)
 api_router.include_router(admin_billing.router)
 api_router.include_router(resources.router)
+api_router.include_router(resource_links.router)
 api_router.include_router(admin_resources.router)
 api_router.include_router(admin_trial_emails.router)
 api_router.include_router(admin_whatsapp.router)

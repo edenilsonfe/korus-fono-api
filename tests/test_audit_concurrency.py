@@ -132,3 +132,35 @@ async def test_concurrent_report_revisions_preserve_every_version(audit_pg_facto
         revisions = (await reader.scalars(select(AIReportRevision))).all()
         assert len(revisions) == 2
         assert {current.content, *(row.content for row in revisions)} == {"Original", "A", "B"}
+
+
+async def test_optimistic_version_has_one_winner(audit_pg_factory):
+    """Two editors read version 1; only the first save commits."""
+    factory = audit_pg_factory
+    owner, patient = await seed(factory)
+    async with factory() as db:
+        report = AIReport(professional_id=owner, patient_id=patient, type="clinico", date=date.today(), preview="Original", content="Original", status="finalized")
+        db.add(report)
+        await db.commit()
+        report_id = report.id
+
+    async def revise(content):
+        async with factory() as db:
+            try:
+                await revise_report(db, report_id, owner, AIReportUpdate(content=content, expected_version=1))
+                await db.commit()
+                return "saved"
+            except HTTPException as exc:
+                await db.rollback()
+                return exc.status_code
+
+    results = await asyncio.wait_for(asyncio.gather(revise("A"), revise("B")), timeout=5)
+    assert sorted(results, key=str) == [409, "saved"]
+    async with factory() as reader:
+        current = await reader.get(AIReport, report_id)
+        revisions = (await reader.scalars(select(AIReportRevision))).all()
+        assert current.version == 2
+        assert current.content in {"A", "B"}
+        assert len(revisions) == 1
+        assert revisions[0].version == 1
+        assert revisions[0].content == "Original"

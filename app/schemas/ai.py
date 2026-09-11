@@ -1,15 +1,30 @@
 from typing import Literal
 from datetime import datetime
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from app.schemas.common import CamelModel
+from app.schemas.report_composition import ReportCompositionCreate
 
 
 class AIReportCreate(CamelModel):
     patient_id: str
-    type: str  # clinico | escolar | pais | evolutivo
-    prompt: str | None = None
+    type: str  # clinico | escolar | pais | evolutivo | consolidado
+    prompt: str | None = Field(default=None, max_length=2000)
+    composition: ReportCompositionCreate | None = None
+
+    @model_validator(mode="after")
+    def _validate_composition_for_type(self) -> "AIReportCreate":
+        if self.type == "consolidado":
+            if self.composition is None:
+                raise ValueError(
+                    "O campo composition é obrigatório para relatórios do tipo consolidado."
+                )
+        elif self.composition is not None:
+            raise ValueError(
+                "O campo composition é permitido apenas para relatórios do tipo consolidado."
+            )
+        return self
 
 
 class AIReportResponse(CamelModel):
@@ -21,11 +36,16 @@ class AIReportResponse(CamelModel):
     preview: str
     content: str
     status: str
+    version: int
+    composition_id: str | None = None
 
 
 class AIReportUpdate(CamelModel):
     content: str
     status: Literal["draft", "finalized"] | None = None
+    # Optimistic control (F3): required for consolidated reports, optional for
+    # legacy report types so their PATCH contract stays compatible.
+    expected_version: int | None = Field(default=None, ge=1)
 
 
 class AIReportRevisionResponse(CamelModel):
@@ -34,6 +54,8 @@ class AIReportRevisionResponse(CamelModel):
     status: str
     professional_id: str
     created_at: datetime
+    # Null for historical revisions written before numeric versioning (F3).
+    version: int | None = None
 
 
 class AIJobResponse(CamelModel):

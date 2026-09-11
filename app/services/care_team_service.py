@@ -172,6 +172,19 @@ async def record_consent(
                 resource_type="care_team_member",
                 resource_id=member.id,
             )
+        # F16: a retirada invalida a derivação ABA dos programas de casa —
+        # grants ativos de programas com tarefas ABA são revogados aqui (mesma
+        # transação); uma concessão posterior nunca reativa o link antigo.
+        from app.services.home_program_access import (  # noqa: PLC0415
+            revoke_aba_derived_grants,
+        )
+
+        await revoke_aba_derived_grants(
+            db,
+            patient_id=patient_id,
+            actor=actor,
+            actor_role=access.role,
+        )
 
     record_access_event(
         db,

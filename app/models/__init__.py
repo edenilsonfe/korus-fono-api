@@ -39,6 +39,9 @@ from app.models.battery import BatterySubformAssessment
 from app.models.battery_evidence import BatteryItemEvidence, BatterySessionEvent
 from app.models.attachment import Attachment
 from app.models.resource import Resource
+from app.models.resource_license import ResourceLicense, ResourceLicenseDecision
+from app.models.resource_link import GoalResourceLink, ProgramResourceLink, ResourceDomainLink
+from app.models.storage_cleanup import StorageCleanupTask
 from app.models.caregiver import Caregiver
 from app.models.care_team import (
     PatientAccessEvent,
@@ -47,15 +50,27 @@ from app.models.care_team import (
 )
 from app.models.evolution import Evolution
 from app.models.goal import ClinicalDomainSnapshot, Goal
+from app.models.home_program import (
+    HomeProgram,
+    HomeProgramCheckIn,
+    HomeProgramCheckInRevision,
+    HomeProgramEvent,
+    HomeProgramGrant,
+    HomeProgramPhoto,
+    HomeProgramTask,
+    HomeProgramTaskResource,
+)
 from app.models.intervention_program import InterventionProgram, ProgramMeasurement
 from app.models.google_calendar import GoogleCalendarConnection, GoogleCalendarSyncRecord
 from app.models.notification_message_log import NotificationMessageLog
 from app.models.notification_settings import NotificationSettings
+from app.models.report_composition import AIReportComposition
 from app.models.report_delivery import ReportDelivery
 from app.models.password_reset_token import PasswordResetToken
 from app.models.refresh_session import RefreshSession
 from app.models.schedule_block import ScheduleBlock
 from app.models.patient import Patient
+from app.models.patient_record_export import PatientRecordExport
 from app.models.professional import Professional
 from app.models.session import Session
 from app.models.timeline import TimelineEvent
@@ -83,6 +98,7 @@ __all__ = [
     "RefreshSession",
     "ScheduleBlock",
     "Patient",
+    "PatientRecordExport",
     "Caregiver",
     "PatientSharingConsentEvent",
     "PatientCareTeamMember",
@@ -93,6 +109,12 @@ __all__ = [
     "AnamneseEntry",
     "Attachment",
     "Resource",
+    "ResourceLicense",
+    "ResourceLicenseDecision",
+    "ResourceDomainLink",
+    "GoalResourceLink",
+    "ProgramResourceLink",
+    "StorageCleanupTask",
     "TimelineEvent",
     "ProtocolCatalog",
     "Assessment",
@@ -101,6 +123,14 @@ __all__ = [
     "BatterySessionEvent",
     "Goal",
     "ClinicalDomainSnapshot",
+    "HomeProgram",
+    "HomeProgramTask",
+    "HomeProgramTaskResource",
+    "HomeProgramGrant",
+    "HomeProgramCheckIn",
+    "HomeProgramCheckInRevision",
+    "HomeProgramPhoto",
+    "HomeProgramEvent",
     "InterventionProgram",
     "ProgramMeasurement",
     "GoogleCalendarConnection",
@@ -114,6 +144,7 @@ __all__ = [
     "NotificationSettings",
     "NotificationMessageLog",
     "ReportDelivery",
+    "AIReportComposition",
     "AppNotification",
     "AppNotificationRead",
     "AdminAuditLog",

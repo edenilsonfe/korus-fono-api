@@ -47,6 +47,7 @@ def test_tool_specs_cover_expected_keys():
         "report:escolar",
         "report:pais",
         "report:evolutivo",
+        "report:consolidado",
         "therapy-plan",
         "suggest-goals",
         "clinical-trends",

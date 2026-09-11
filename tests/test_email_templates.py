@@ -1,6 +1,10 @@
 """Tests for transactional email HTML escaping."""
 
-from app.services.email.templates import password_reset_email, trial_expiration_email
+from app.services.email.templates import (
+    password_reset_email,
+    school_report_delivery_email,
+    trial_expiration_email,
+)
 
 
 def test_password_reset_email_plain_name_ok():
@@ -52,3 +56,37 @@ def test_trial_expiration_email_has_audience_specific_copy_and_escapes_name():
     assert "&lt;Dra. Ana&gt;" in expiring.html
     assert "terminou" in expired.subject.lower()
     assert "10/08/2026" in expired.text
+
+
+def test_school_report_delivery_email_is_minimized_and_escapes_user_data():
+    rendered = school_report_delivery_email(
+        professional_name='Dra. <Ana> & "Cia"',
+        school_name='Escola "Vila" <img src=x onerror=alert(1)>',
+        school_recipient_name="Coordenação <Pedagógica>",
+        delivery_url="https://app.example.com/relatorio/token-abc123",
+        expires_days=30,
+    )
+
+    # Generic subject: no patient name, no diagnosis.
+    assert rendered.subject == "Documento escolar disponível"
+    assert "<" not in rendered.subject
+
+    # User-provided values are escaped in HTML...
+    assert "<img" not in rendered.html
+    assert "&lt;img" in rendered.html
+    assert "&lt;Ana&gt;" in rendered.html
+    assert "&quot;Vila&quot;" in rendered.html
+    assert "&lt;Pedagógica&gt;" in rendered.html
+    # ...while the plain-text variant keeps them readable.
+    assert "Escola \"Vila\"" in rendered.text
+    assert "Coordenação <Pedagógica>" in rendered.text
+
+    assert 'href="https://app.example.com/relatorio/token-abc123"' in rendered.html
+    assert "https://app.example.com/relatorio/token-abc123" in rendered.text
+    assert "30 dias" in rendered.text
+    assert "30 dias" in rendered.html
+    # Minimized copy: nothing clinical in the message.
+    assert "diagn" not in rendered.html.lower()
+    assert "diagn" not in rendered.text.lower()
+    assert "João" not in rendered.html
+    assert "João" not in rendered.subject

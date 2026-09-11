@@ -279,3 +279,45 @@ def report_delivery_email(
         f"Atenciosamente,\n{PRODUCT_NAME}"
     )
     return RenderedEmail(subject=subject, html=_layout(report_label, inner), text=text)
+
+
+def school_report_delivery_email(
+    professional_name: str,
+    school_name: str,
+    school_recipient_name: str,
+    delivery_url: str,
+    expires_days: int,
+) -> RenderedEmail:
+    """School delivery notice (F20), minimized on purpose: generic subject, no
+    patient name, diagnosis or attachment — just the school, the link and its
+    validity. Reuses the shared layout and escapes every user-provided value."""
+    subject = "Documento escolar disponível"
+    safe_professional = escape(professional_name, quote=True)
+    safe_school = escape(school_name, quote=True)
+    safe_recipient = escape(school_recipient_name, quote=True)
+    safe_url = escape(delivery_url, quote=True)
+    inner = f"""
+      <p>Olá, {safe_recipient}.</p>
+      <p><strong>{safe_professional}</strong> disponibilizou um documento escolar
+      de <strong>{safe_school}</strong> no {PRODUCT_NAME}.</p>
+      <p style="margin: 28px 0;">
+        <a href="{safe_url}"
+           style="background: #0ea5a4; color: #ffffff; text-decoration: none; padding: 12px 20px; border-radius: 9999px;">
+          Abrir documento
+        </a>
+      </p>
+      <p>Este link é pessoal e válido por {expires_days} dias. Não o compartilhe
+      sem necessidade.</p>
+    """
+    text = (
+        f"Olá, {school_recipient_name}.\n\n"
+        f"{professional_name} disponibilizou um documento escolar de "
+        f"{school_name} no {PRODUCT_NAME}.\n\n"
+        f"Acesse: {delivery_url}\n\n"
+        f"Este link é pessoal e válido por {expires_days} dias. "
+        "Não o compartilhe sem necessidade.\n\n"
+        f"Atenciosamente,\n{PRODUCT_NAME}"
+    )
+    return RenderedEmail(
+        subject=subject, html=_layout("Documento escolar disponível", inner), text=text
+    )

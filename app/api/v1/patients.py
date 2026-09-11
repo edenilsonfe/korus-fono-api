@@ -22,8 +22,10 @@ from app.models.care_team import PatientSharingConsentEvent
 from app.models.caregiver import Caregiver
 from app.models.evolution import Evolution
 from app.models.goal import Goal
+from app.models.home_program import HomeProgram
 from app.models.intervention_program import InterventionProgram
 from app.models.patient import Patient
+from app.models.patient_record_export import PatientRecordExport
 from app.models.professional import Professional
 from app.models.session import Session
 from app.schemas.common import PaginatedResponse
@@ -45,6 +47,7 @@ from app.services.google_calendar_service import (
     dispatch_sync_records,
     queue_appointment_sync,
 )
+from app.services.home_program_access import revoke_grants_for_caregiver
 from app.services.patient import (
     get_patient_aggregates,
     get_patient_aggregates_batch,
@@ -57,6 +60,9 @@ from app.services.patient_access import (
     resolve_patient_access,
 )
 from app.services.patient_appointment_service import cancel_future_patient_appointments
+from app.services.school_report_delivery_service import (
+    revoke_school_deliveries_for_caregiver,
+)
 from app.services.timeline import create_timeline_event
 from app.services.whatsapp_queue import enqueue_whatsapp_appointment_event_log
 
@@ -373,6 +379,19 @@ async def delete_caregiver(
 ):
     caregiver = await _get_caregiver_for_patient(patient_id, caregiver_id, professional, db)
     was_primary = caregiver.is_primary
+    # F20: school deliveries derived from this caregiver's authorization are
+    # revoked before the row disappears; the historical snapshot is preserved.
+    await revoke_school_deliveries_for_caregiver(
+        db, patient_id=patient_id, caregiver_id=caregiver_id
+    )
+    # F16: home program grants issued to this caregiver are revoked before the
+    # row disappears; the author snapshot is preserved (FK would SET NULL).
+    await revoke_grants_for_caregiver(
+        db,
+        patient_id=patient_id,
+        caregiver_id=caregiver_id,
+        actor=professional,
+    )
     await db.delete(caregiver)
     await db.flush()
 
@@ -542,6 +561,34 @@ async def delete_patient(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
                 "Paciente com histórico clínico ou de compartilhamento "
+                "não pode ser excluído; "
+                "altere o status para inativo"
+            ),
+        )
+    export_history = await db.scalar(
+        select(PatientRecordExport.id)
+        .where(PatientRecordExport.patient_id == patient.id)
+        .limit(1)
+    )
+    if export_history is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Paciente com histórico de exportação do prontuário "
+                "não pode ser excluído; "
+                "altere o status para inativo"
+            ),
+        )
+    home_program_history = await db.scalar(
+        select(HomeProgram.id)
+        .where(HomeProgram.patient_id == patient.id)
+        .limit(1)
+    )
+    if home_program_history is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Paciente com histórico de programa de casa "
                 "não pode ser excluído; "
                 "altere o status para inativo"
             ),

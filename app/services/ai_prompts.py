@@ -97,6 +97,30 @@ AI_TOOL_SPECS: dict[str, ToolSpec] = {
         ),
         output="markdown",
     ),
+    "report:consolidado": ToolSpec(
+        system=(
+            f"{BASE_PERSONA}\n\n"
+            "Público-alvo do documento: profissional de saúde (fonoaudiólogo responsável). "
+            "Você redige apenas as seções 'Síntese' e 'Conduta' de um laudo consolidado "
+            "multi-instrumento; a identificação e a lista de instrumentos já foram montadas "
+            "deterministicamente fora do seu texto. Baseie-se somente no contexto fornecido: "
+            "nunca invente normas, tabelas, escores, percentuais ou datas, e nunca compare "
+            "percentuais de instrumentos diferentes como se fossem a mesma escala."
+        ),
+        sections=[],
+        limits={},
+        prompt_template=(
+            "Redija a Síntese e a Conduta do laudo consolidado como rascunho para revisão da "
+            "profissional. Use exatamente estas duas seções em markdown, nesta ordem e sem "
+            "nenhum texto antes delas:\n"
+            "## Síntese\n"
+            "## Conduta\n"
+            "Na Síntese você pode usar subtítulos para avaliações, evoluções, sessões, metas e "
+            "comparativos selecionados. Em cada seção, use apenas os dados do contexto; para "
+            "dados ausentes, informe que não foram registrados; não crie conteúdo clínico."
+        ),
+        output="markdown",
+    ),
     "therapy-plan": ToolSpec(
         system=f"{BASE_PERSONA}\n\nElabore planos terapêuticos estruturados e revisões de planos existentes.",
         sections=[

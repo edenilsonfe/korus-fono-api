@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass, replace
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -24,13 +24,15 @@ from app.models.report_delivery import (
     DELIVERY_CHANNEL_WHATSAPP,
     DELIVERY_STATUS_FAILED,
     DELIVERY_STATUS_SENT,
+    RECIPIENT_KIND_SCHOOL,
     ReportDelivery,
 )
 from app.schemas.report_delivery import ReportDeliveryCreate
+from app.services import school_report_delivery_service
 from app.services.email.resend_client import send_email
 from app.services.email.templates import report_delivery_email
 from app.services.evolution_whatsapp_service import mask_phone
-from app.services.report_export import REPORT_TYPE_LABELS
+from app.services.report_export import REPORT_TYPE_LABELS, DocumentIdentity
 from app.services.whatsapp_provider import get_active_whatsapp_provider
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,10 @@ logger = logging.getLogger(__name__)
 PUBLIC_PATH_PREFIX = "/relatorio"
 INVALID_DELIVERY_MESSAGE = "Link inválido ou expirado."
 REVOKED_DELIVERY_MESSAGE = "Este link foi revogado pelo profissional."
+
+SNAPSHOT_FORMAT_VERSION = 1
+SNAPSHOT_MODE_FIXED = "fixed"
+SNAPSHOT_MODE_LEGACY_LIVE = "legacy_live"
 
 
 class InvalidReportDeliveryToken(ValueError):
@@ -52,8 +58,128 @@ class PublicDeliveryContext:
     patient: Patient
 
 
+@dataclass(frozen=True)
+class PublicDocument:
+    """What a public link shows: the frozen snapshot (fixed) or the live report."""
+
+    report_type: str
+    report_date: date
+    patient_name: str
+    professional_name: str
+    professional_council: str
+    content: str
+    report_version: int | None
+    content_hash: str | None
+    snapshot_mode: str
+
+
+def _content_hash(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def build_delivery_snapshot(
+    *, report: AIReport, patient: Patient, professional: Professional
+) -> dict:
+    """Freeze the delivered document: clinical text plus minimal textual metadata.
+
+    Deliberately excludes the raw token, its URL, protected answers and binary
+    assets — those never belong to the delivery record.
+    """
+    return {
+        "formatVersion": SNAPSHOT_FORMAT_VERSION,
+        "reportType": report.type,
+        "reportDate": report.date.isoformat(),
+        "patientName": patient.name,
+        "professionalName": professional.name,
+        "professionalCouncil": professional.council or "",
+        "reportVersion": report.version if report.version is not None else 1,
+        "contentHash": _content_hash(report.content),
+        "content": report.content,
+        "capturedAt": datetime.now(UTC).isoformat(),
+    }
+
+
+def delivery_snapshot_mode(delivery: ReportDelivery) -> str:
+    return SNAPSHOT_MODE_FIXED if delivery.document_snapshot else SNAPSHOT_MODE_LEGACY_LIVE
+
+
+def delivery_report_version(delivery: ReportDelivery) -> int | None:
+    snapshot = delivery.document_snapshot or {}
+    value = snapshot.get("reportVersion")
+    return value if isinstance(value, int) else None
+
+
+def delivery_content_hash(delivery: ReportDelivery) -> str | None:
+    snapshot = delivery.document_snapshot or {}
+    value = snapshot.get("contentHash")
+    return value if isinstance(value, str) and value else None
+
+
+def _snapshot_date(value: object) -> date | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def resolve_public_document(context: PublicDeliveryContext) -> PublicDocument:
+    """Use the frozen snapshot when present; legacy rows keep reading the report."""
+    snapshot = context.delivery.document_snapshot
+    if not snapshot:
+        return PublicDocument(
+            report_type=context.report.type,
+            report_date=context.report.date,
+            patient_name=context.patient.name,
+            professional_name=context.professional.name,
+            professional_council=context.professional.council or "",
+            content=context.report.content,
+            report_version=None,
+            content_hash=None,
+            snapshot_mode=SNAPSHOT_MODE_LEGACY_LIVE,
+        )
+    raw_content = snapshot.get("content")
+    raw_council = snapshot.get("professionalCouncil")
+    return PublicDocument(
+        report_type=str(snapshot.get("reportType") or context.report.type),
+        report_date=_snapshot_date(snapshot.get("reportDate")) or context.report.date,
+        patient_name=str(snapshot.get("patientName") or context.patient.name),
+        professional_name=str(snapshot.get("professionalName") or context.professional.name),
+        professional_council=(
+            raw_council if isinstance(raw_council, str) else (context.professional.council or "")
+        ),
+        content=raw_content if isinstance(raw_content, str) else context.report.content,
+        report_version=delivery_report_version(context.delivery),
+        content_hash=delivery_content_hash(context.delivery),
+        snapshot_mode=SNAPSHOT_MODE_FIXED,
+    )
+
+
+def apply_snapshot_identity(
+    identity: DocumentIdentity, document: PublicDocument
+) -> DocumentIdentity:
+    """Frozen textual identity wins; logo/signature bytes keep following F2."""
+    if document.snapshot_mode != SNAPSHOT_MODE_FIXED:
+        return identity
+    return replace(
+        identity,
+        professional_name=document.professional_name,
+        council=document.professional_council,
+    )
+
+
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def hash_delivery_token(token: str) -> str:
+    """Public digest of a raw delivery token.
+
+    Callers that need the lookup/rate-limit key (school receipt service, public
+    endpoints) hash here; the raw token is never stored, keyed or logged.
+    """
+    return _hash_token(token)
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -164,7 +290,19 @@ async def create_report_delivery(
     report: AIReport,
     body: ReportDeliveryCreate,
 ) -> tuple[ReportDelivery, str]:
-    """Create the delivery row, dispatch it when needed and return (row, raw token)."""
+    """Create the delivery row, dispatch it when needed and return (row, raw token).
+
+    The report row is locked here so the snapshot freezes exactly one persisted
+    version even if a revision is saved at the same time.
+    """
+    report = await db.scalar(
+        select(AIReport)
+        .where(AIReport.id == report.id, AIReport.professional_id == professional.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if report is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Relatório não encontrado")
     if report.status != "finalized":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -173,6 +311,13 @@ async def create_report_delivery(
     patient = await db.get(Patient, report.patient_id)
     if patient is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paciente não encontrado")
+
+    if body.recipient_kind == RECIPIENT_KIND_SCHOOL:
+        return await _create_school_report_delivery(
+            db, professional=professional, report=report, patient=patient, body=body
+        )
+    # F1 delivery: the school-only fields are forbidden on a standard payload.
+    school_report_delivery_service.validate_school_payload(body)
 
     caregiver: Caregiver | None = None
     if body.caregiver_id and body.channel in (DELIVERY_CHANNEL_WHATSAPP, DELIVERY_CHANNEL_EMAIL):
@@ -241,6 +386,9 @@ async def create_report_delivery(
         recipient_label=recipient_label,
         token_hash=_hash_token(token),
         expires_at=datetime.now(UTC) + timedelta(days=body.expires_in_days),
+        document_snapshot=build_delivery_snapshot(
+            report=report, patient=patient, professional=professional
+        ),
     )
     db.add(delivery)
     await db.flush()
@@ -270,6 +418,62 @@ async def create_report_delivery(
     return delivery, token
 
 
+async def _create_school_report_delivery(
+    db: AsyncSession,
+    *,
+    professional: Professional,
+    report: AIReport,
+    patient: Patient,
+    body: ReportDeliveryCreate,
+) -> tuple[ReportDelivery, str]:
+    """F20 — persist the school delivery + authorization, then (only for e-mail)
+    dispatch the minimized notice.
+
+    Delivery and authorization are committed *before* the provider call; the send
+    result is written afterwards by the caller's transaction. If the process dies
+    between both, the row stays ``created`` — not a failure and never retried
+    automatically. Only an explicit provider success marks ``sent``.
+    """
+    validated = await school_report_delivery_service.validate_school_delivery(
+        db, professional=professional, report=report, patient=patient, body=body
+    )
+    token = secrets.token_urlsafe(32)
+    now = datetime.now(UTC)
+    delivery = ReportDelivery(
+        report_id=report.id,
+        professional_id=professional.id,
+        patient_id=patient.id,
+        channel=body.channel,
+        recipient_kind=RECIPIENT_KIND_SCHOOL,
+        recipient_label=f"{validated.school_name} · {validated.school_recipient_name}",
+        token_hash=_hash_token(token),
+        expires_at=now + timedelta(days=body.expires_in_days),
+        school_name=validated.school_name,
+        school_recipient_name=validated.school_recipient_name,
+        school_authorization=validated.authorization,
+        authorization_recorded_at=now,
+        document_snapshot=build_delivery_snapshot(
+            report=report, patient=patient, professional=professional
+        ),
+    )
+    db.add(delivery)
+    # Persist before the e-mail I/O: the authorization must survive a crash and a
+    # later result transaction must not be the only record of this delivery.
+    await db.commit()
+
+    if body.channel == DELIVERY_CHANNEL_EMAIL:
+        await school_report_delivery_service.send_school_delivery_email(
+            professional=professional,
+            school_name=validated.school_name,
+            school_recipient_name=validated.school_recipient_name,
+            target_email=validated.target_email,
+            delivery_url=build_delivery_url(token),
+            expires_days=body.expires_in_days,
+            delivery=delivery,
+        )
+    return delivery, token
+
+
 async def list_report_deliveries(db: AsyncSession, *, report_id: UUID) -> list[ReportDelivery]:
     rows = await db.scalars(
         select(ReportDelivery)
@@ -282,11 +486,16 @@ async def list_report_deliveries(db: AsyncSession, *, report_id: UUID) -> list[R
 async def revoke_report_delivery(
     db: AsyncSession, *, report_id: UUID, delivery_id: UUID
 ) -> ReportDelivery:
+    # Same single-row lock order as the public acknowledgement (F20): revoking
+    # and confirming serialize on the delivery row, so a receipt and a
+    # revocation can never interleave halfway.
     delivery = await db.scalar(
-        select(ReportDelivery).where(
+        select(ReportDelivery)
+        .where(
             ReportDelivery.id == delivery_id,
             ReportDelivery.report_id == report_id,
         )
+        .with_for_update()
     )
     if delivery is None:
         raise HTTPException(
@@ -315,7 +524,12 @@ async def load_public_delivery(db: AsyncSession, token: str) -> PublicDeliveryCo
     report = await db.get(AIReport, delivery.report_id)
     professional = await db.get(Professional, delivery.professional_id)
     patient = await db.get(Patient, delivery.patient_id)
-    if report is None or professional is None or patient is None:
+    if (
+        report is None
+        or professional is None
+        or professional.is_disabled
+        or patient is None
+    ):
         raise InvalidReportDeliveryToken(INVALID_DELIVERY_MESSAGE)
     return PublicDeliveryContext(
         delivery=delivery, report=report, professional=professional, patient=patient

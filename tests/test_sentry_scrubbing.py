@@ -79,6 +79,110 @@ def test_scrub_returns_event_when_request_missing():
     assert scrub_sentry_event(event, {}) == {"message": "boom"}
 
 
+def test_scrub_masks_report_delivery_token_in_api_url():
+    raw = "sEcretTokenValue123"
+    event = {
+        "request": {
+            "url": f"https://api.example.com/api/v1/report-deliveries/{raw}/export?format=pdf"
+        },
+        "transaction": f"/api/v1/report-deliveries/{raw}/export",
+    }
+    scrubbed = scrub_sentry_event(event, {})
+    assert raw not in scrubbed["request"]["url"]
+    assert "report-deliveries/[Filtered]" in scrubbed["request"]["url"]
+    assert raw not in scrubbed["transaction"]
+    assert scrubbed["transaction"].endswith("/report-deliveries/[Filtered]/export")
+
+
+def test_scrub_masks_relatorio_web_token_in_url_and_breadcrumbs():
+    raw = "sEcretTokenValue456"
+    event = {
+        "request": {"url": f"https://app.example.com/relatorio/{raw}"},
+        "breadcrumbs": {
+            "values": [
+                {
+                    "category": "navigation",
+                    "data": {"url": f"https://app.example.com/relatorio/{raw}"},
+                }
+            ]
+        },
+    }
+    scrubbed = scrub_sentry_event(event, {})
+    assert raw not in scrubbed["request"]["url"]
+    assert scrubbed["request"]["url"].endswith("/relatorio/[Filtered]")
+    breadcrumb_url = scrubbed["breadcrumbs"]["values"][0]["data"]["url"]
+    assert raw not in breadcrumb_url
+    assert breadcrumb_url.endswith("/relatorio/[Filtered]")
+
+
+def test_scrub_redacts_receiver_identity_and_school_evidence_extras():
+    event = {
+        "extra": {
+            "receiver_name": "Ana Coordenadora",
+            "receiverName": "Ana Coordenadora",
+            "school_authorization": {"caregiverId": "care-1"},
+            "safe": "ok",
+        }
+    }
+    scrubbed = scrub_sentry_event(event, {})
+    assert scrubbed["extra"]["receiver_name"] == "[Filtered]"
+    assert scrubbed["extra"]["receiverName"] == "[Filtered]"
+    assert scrubbed["extra"]["school_authorization"] == "[Filtered]"
+    assert scrubbed["extra"]["safe"] == "ok"
+
+
+def test_scrub_redacts_home_program_token_header_and_fragment():
+    raw = "hpSecretTokenValue789"
+    event = {
+        "request": {
+            "headers": {
+                "X-Home-Program-Token": raw,
+                "Content-Type": "application/json",
+            },
+            "url": f"https://app.example.com/programa-de-casa#token={raw}",
+        },
+        "transaction": f"/api/v1/home-program-responses?token={raw}",
+        "breadcrumbs": {
+            "values": [
+                {
+                    "category": "navigation",
+                    "data": {
+                        "url": f"https://app.example.com/programa-de-casa#token={raw}"
+                    },
+                }
+            ]
+        },
+    }
+    scrubbed = scrub_sentry_event(event, {})
+    assert scrubbed["request"]["headers"]["X-Home-Program-Token"] == "[Filtered]"
+    assert scrubbed["request"]["headers"]["Content-Type"] == "application/json"
+    assert raw not in scrubbed["request"]["url"]
+    assert scrubbed["request"]["url"].endswith("#token=[Filtered]")
+    assert raw not in scrubbed["transaction"]
+    assert "[Filtered]" in scrubbed["transaction"]
+    breadcrumb_url = scrubbed["breadcrumbs"]["values"][0]["data"]["url"]
+    assert raw not in breadcrumb_url
+    assert breadcrumb_url.endswith("#token=[Filtered]")
+
+
+def test_scrub_redacts_home_program_token_and_family_authorization_extras():
+    event = {
+        "extra": {
+            "home_program_token": "raw-token",
+            "homeProgramToken": "raw-token",
+            "family_authorization": {"reference": "termo"},
+            "familyAuthorization": {"reference": "termo"},
+            "safe": "ok",
+        }
+    }
+    scrubbed = scrub_sentry_event(event, {})
+    assert scrubbed["extra"]["home_program_token"] == "[Filtered]"
+    assert scrubbed["extra"]["homeProgramToken"] == "[Filtered]"
+    assert scrubbed["extra"]["family_authorization"] == "[Filtered]"
+    assert scrubbed["extra"]["familyAuthorization"] == "[Filtered]"
+    assert scrubbed["extra"]["safe"] == "ok"
+
+
 def test_sentry_bootstrap_delivers_ai_errors_to_transport(monkeypatch):
     import logging
     import sentry_sdk

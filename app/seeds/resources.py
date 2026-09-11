@@ -1,5 +1,7 @@
 """Seed global resources catalog into DB + object storage."""
 
+import hashlib
+import logging
 import uuid
 
 from sqlalchemy import select
@@ -7,6 +9,8 @@ from sqlalchemy import select
 from app.models.resource import Resource
 from app.seeds.resources_data import GLOBAL_RESOURCE_SEED
 from app.services.storage import storage_service
+
+logger = logging.getLogger(__name__)
 
 
 async def seed_resources(session) -> None:
@@ -24,8 +28,12 @@ async def seed_resources(session) -> None:
         try:
             await storage_service.upload(storage_key, file_bytes, item["content_type"])
         except Exception:
-            # ponytail: seed tolerates missing MinIO in dev without blocking demo users
-            pass
+            # Conservador: sem arquivo no storage a linha não é persistida
+            # (nem como rascunho órfão). Seed tolera MinIO ausente em dev.
+            logger.warning(
+                "seed_resources: upload falhou para %s; item não será inserido", filename
+            )
+            continue
 
         session.add(
             Resource(
@@ -48,5 +56,9 @@ async def seed_resources(session) -> None:
                 skill=item.get("skill"),
                 related_protocol=item.get("related_protocol"),
                 difficulty=item.get("difficulty"),
+                content_sha256=hashlib.sha256(file_bytes).hexdigest(),
+                # Placeholders do seed não são publicados nem licenciados:
+                # curadoria/liberação é gate operacional separado (F17).
+                publication_status="draft",
             )
         )
