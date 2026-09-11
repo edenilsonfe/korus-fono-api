@@ -31,6 +31,7 @@ from app.api.v1 import (
     notifications,
     patients,
     prontuario,
+    report_deliveries,
     resources,
     schedule_blocks,
     sessions,
@@ -53,6 +54,7 @@ api_router.include_router(patients.router)
 api_router.include_router(appointments.router)
 api_router.include_router(schedule_blocks.router)
 api_router.include_router(appointment_responses.router)
+api_router.include_router(report_deliveries.router)
 api_router.include_router(finance.router)
 api_router.include_router(finance.patient_router)
 api_router.include_router(google_calendar.router)

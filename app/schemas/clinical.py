@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import Field
 
 from app.schemas.common import CamelModel
@@ -78,6 +80,40 @@ class AssessmentsPage(CamelModel):
 class AssessmentCancelResponse(CamelModel):
     id: str
     status: str
+
+
+class AssessmentComparisonSideResponse(CamelModel):
+    id: str
+    date: str
+    result: str
+    percentage: int
+
+
+class AssessmentComparisonMetricResponse(CamelModel):
+    key: str
+    label: str
+    base: float | None = None
+    target: float | None = None
+    delta: float | None = None
+
+
+class AssessmentChangedItemResponse(CamelModel):
+    key: str
+    base: Any = None
+    target: Any = None
+
+
+class AssessmentComparisonResponse(CamelModel):
+    protocol_id: str
+    protocol_name: str
+    base: AssessmentComparisonSideResponse
+    target: AssessmentComparisonSideResponse
+    percentage_delta: int
+    metrics: list[AssessmentComparisonMetricResponse] = Field(default_factory=list)
+    answers_changed: int = 0
+    answers_total: int = 0
+    changed_items: list[AssessmentChangedItemResponse] = Field(default_factory=list)
+    summary: str = ""
 
 
 class GoalCreate(CamelModel):

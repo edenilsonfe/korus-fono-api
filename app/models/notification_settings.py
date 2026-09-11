@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, String
+from sqlalchemy import Boolean, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,3 +24,7 @@ class NotificationSettings(Base, TimestampMixin):
     )
     whatsapp_events: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     whatsapp_message_templates: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    # Reassessment reminders: null keeps the code default (6 months).
+    reassessment_reminder_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Free-text no-show notice appended to the 24h appointment reminder.
+    no_show_policy: Mapped[str | None] = mapped_column(String(400), nullable=True)

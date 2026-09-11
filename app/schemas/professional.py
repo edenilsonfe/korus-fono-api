@@ -36,6 +36,13 @@ class AnalyticsConsentUpdate(CamelModel):
     analytics_consent: bool
 
 
+class BrandingAssetsResponse(CamelModel):
+    """Inline (presigned) URLs for the professional's document identity assets."""
+
+    logo_url: str | None = None
+    signature_url: str | None = None
+
+
 class ProfessionalUpdate(CamelModel):
     name: str | None = None
     specialty_key: str | None = None

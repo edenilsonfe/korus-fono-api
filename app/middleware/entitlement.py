@@ -1,5 +1,6 @@
 """Block mutating API calls when trial/subscription does not allow writes."""
 
+import re
 from collections.abc import Callable
 
 from fastapi import HTTPException
@@ -55,6 +56,11 @@ class EntitlementMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         path = request.url.path
+        # Revoking a public report link must remain possible in read-only mode.
+        if request.method == "DELETE" and re.fullmatch(
+            r"/api/v1/ai/reports/[^/]+/deliveries/[^/]+/?", path
+        ):
+            return await call_next(request)
         if path in EXEMPT_PATHS:
             return await call_next(request)
         if any(path.startswith(prefix) for prefix in EXEMPT_PATH_PREFIXES):

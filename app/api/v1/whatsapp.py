@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants.whatsapp_events import DEFAULT_EVENT_MESSAGE_TEMPLATES
+from app.constants.whatsapp_events import (
+    DEFAULT_EVENT_MESSAGE_TEMPLATES,
+    REASSESSMENT_DEFAULT_MONTHS,
+)
 from app.core.config import get_settings
 from app.core.deps import require_verified_professional
 from app.db.session import get_db
@@ -72,6 +75,10 @@ def _settings_response(settings) -> WhatsAppSettingsResponse:
         appointment_confirmation_link_enabled=(
             settings.appointment_confirmation_link_enabled
         ),
+        reassessment_reminder_months=(
+            settings.reassessment_reminder_months or REASSESSMENT_DEFAULT_MONTHS
+        ),
+        no_show_policy=settings.no_show_policy,
         whatsapp_events=WhatsAppEventSettings.from_dict(settings.whatsapp_events),
         whatsapp_message_templates={
             key: stored_templates.get(key) for key in DEFAULT_EVENT_MESSAGE_TEMPLATES
@@ -195,6 +202,11 @@ async def update_whatsapp_settings(
         appointment_confirmation_link_enabled=(
             body.appointment_confirmation_link_enabled
         ),
+        reassessment_reminder_months=body.reassessment_reminder_months,
+        update_reassessment_months="reassessment_reminder_months" in body.model_fields_set
+        and body.reassessment_reminder_months is not None,
+        no_show_policy=(body.no_show_policy or "").strip() or None,
+        update_no_show_policy="no_show_policy" in body.model_fields_set,
         whatsapp_events=body.whatsapp_events.to_update_dict() if body.whatsapp_events else None,
         whatsapp_message_templates=(
             body.whatsapp_message_templates.to_update_dict()

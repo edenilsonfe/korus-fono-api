@@ -46,6 +46,10 @@ class NotificationSettingsService:
         appointment_confirmation_link_enabled: bool | None = None,
         appointment_confirmation_deadline_time: str | None = None,
         update_confirmation_deadline: bool = False,
+        reassessment_reminder_months: int | None = None,
+        update_reassessment_months: bool = False,
+        no_show_policy: str | None = None,
+        update_no_show_policy: bool = False,
         whatsapp_events: dict[str, bool | None] | None = None,
         whatsapp_message_templates: dict[str, str | None] | None = None,
     ) -> NotificationSettings:
@@ -53,6 +57,12 @@ class NotificationSettingsService:
 
         if update_confirmation_deadline:
             settings.appointment_confirmation_deadline_time = appointment_confirmation_deadline_time
+
+        if update_reassessment_months:
+            settings.reassessment_reminder_months = reassessment_reminder_months
+
+        if update_no_show_policy:
+            settings.no_show_policy = no_show_policy
 
         if birthday_in_app_enabled is not None:
             settings.birthday_in_app_enabled = birthday_in_app_enabled

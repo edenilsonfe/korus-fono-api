@@ -24,6 +24,7 @@ from app.models.care_team import PatientAccessEvent, PatientCareTeamMember
 from app.models.evolution import Evolution
 from app.models.feature_flag import FeatureFlag, FeatureFlagOverride
 from app.models.goal import Goal, ClinicalDomainSnapshot
+from app.models.notification_settings import NotificationSettings
 from app.models.patient import Patient
 from app.models.professional import Professional
 from app.models.session import Session
@@ -57,6 +58,7 @@ async def engine():
                     Evolution.__table__,
                     Goal.__table__,
                     ClinicalDomainSnapshot.__table__,
+                    NotificationSettings.__table__,
                     FeatureFlag.__table__,
                     FeatureFlagOverride.__table__,
                     PatientCareTeamMember.__table__,

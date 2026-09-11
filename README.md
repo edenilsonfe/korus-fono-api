@@ -121,6 +121,15 @@ Aplicar a migration `y6z7a8b9c0d1` antes de publicar API e frontend. Nenhuma con
 
 ### Pagamento no checkout
 
+Profissionais com assinatura recorrente podem acessar a próxima fatura emitida em
+**Planos e assinatura**. O aviso global surge três dias antes do vencimento, com valor,
+data e link para pagar no Asaas em nova aba (cartão: “Ver fatura”).
+`GET /api/v1/billing/next-payment` consulta apenas cobranças da assinatura autenticada,
+incluindo paginação, sem criar cobranças ou substituir o checkout original. Datas seguem
+`CLINIC_TIMEZONE`; falhas do provedor retornam 502 e permitem tentar novamente.
+Pagamentos confirmados deixam de aparecer na próxima consulta. A restrição após atraso
+e a confirmação por webhook permanecem iguais. Não há migration.
+
 O cartão é processado no formulário do KorusFono: o frontend envia PAN/CVV por HTTPS ao endpoint
 autenticado de billing, que os repassa imediatamente ao Asaas sem persistir ou registrar esses
 campos. Essa arquitetura exige operação em conformidade com PCI DSS SAQ-D; não habilite o Asaas em

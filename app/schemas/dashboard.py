@@ -48,6 +48,7 @@ class DashboardPending(CamelModel):
     sessions: int
     assessment_drafts: int
     awaiting_informant: int
+    reassessment_due: int = 0
 
 
 class DashboardSuggestion(CamelModel):

@@ -12,6 +12,7 @@ class WhatsAppEventSettings(CamelModel):
     appointment_rescheduled: bool = False
     billing_reminder: bool = False
     billing_overdue: bool = False
+    reassessment_reminder: bool = False
 
     @classmethod
     def from_dict(cls, raw: dict | None) -> "WhatsAppEventSettings":
@@ -31,6 +32,7 @@ class WhatsAppEventSettingsUpdate(CamelModel):
     appointment_rescheduled: bool | None = None
     billing_reminder: bool | None = None
     billing_overdue: bool | None = None
+    reassessment_reminder: bool | None = None
 
     def to_update_dict(self) -> dict[str, bool]:
         return {
@@ -48,6 +50,7 @@ class WhatsAppMessageTemplates(CamelModel):
     appointment_rescheduled: str | None = None
     billing_reminder: str | None = None
     billing_overdue: str | None = None
+    reassessment_reminder: str | None = None
 
 
 class WhatsAppMessageTemplatesUpdate(CamelModel):
@@ -58,6 +61,7 @@ class WhatsAppMessageTemplatesUpdate(CamelModel):
     appointment_rescheduled: str | None = Field(default=None)
     billing_reminder: str | None = Field(default=None)
     billing_overdue: str | None = Field(default=None)
+    reassessment_reminder: str | None = Field(default=None, max_length=4000)
 
     def to_update_dict(self) -> dict[str, str | None]:
         from app.constants.whatsapp_events import WHATSAPP_EVENT_IDS
@@ -73,6 +77,8 @@ class WhatsAppSettingsResponse(CamelModel):
     appointment_confirmation_deadline_time: str | None = None
     whatsapp_enabled: bool
     appointment_confirmation_link_enabled: bool
+    reassessment_reminder_months: int = 6
+    no_show_policy: str | None = None
     whatsapp_events: WhatsAppEventSettings
     whatsapp_message_templates: dict[str, str | None]
     template_defaults: dict[str, str]
@@ -84,5 +90,7 @@ class WhatsAppSettingsUpdate(CamelModel):
     )
     whatsapp_enabled: bool | None = None
     appointment_confirmation_link_enabled: bool | None = None
+    reassessment_reminder_months: int | None = Field(default=None, ge=1, le=24)
+    no_show_policy: str | None = Field(default=None, max_length=400)
     whatsapp_events: WhatsAppEventSettingsUpdate | None = None
     whatsapp_message_templates: WhatsAppMessageTemplatesUpdate | None = None

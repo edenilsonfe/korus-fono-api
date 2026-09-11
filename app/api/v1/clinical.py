@@ -18,11 +18,15 @@ from app.models.patient import Patient
 from app.models.professional import Professional
 from app.schemas.clinical import (
     AssessmentCancelResponse,
+    AssessmentComparisonMetricResponse,
+    AssessmentComparisonResponse,
+    AssessmentComparisonSideResponse,
     AssessmentCreate,
     AssessmentDraftUpsert,
     AssessmentFinalize,
     AssessmentsPage,
     AssessmentStatusCounts,
+    AssessmentChangedItemResponse,
     GoalCreate,
     GoalUpdate,
     ProtocolResponse,
@@ -33,6 +37,7 @@ from app.schemas.patient import (
     GoalResponse,
 )
 from app.services.assessment_scoring import get_protocol_scoring_mode
+from app.services.assessment_comparison import compare_assessments
 from app.services.assessment_service import (
     complete_assessment_draft,
     create_assessment_record,
@@ -325,6 +330,60 @@ async def list_patient_assessments(
         _assessment_response(a, p.name, author.name)
         for a, p, author in result.all()
     ]
+
+
+@patient_router.get("/assessments/compare", response_model=AssessmentComparisonResponse)
+async def compare_patient_assessments(
+    patient_id: UUID,
+    base_id: UUID = Query(..., alias="baseId"),
+    target_id: UUID = Query(..., alias="targetId"),
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delta entre duas aplicações concluídas do mesmo protocolo (reavaliação)."""
+    await require_clinical_access(db, patient_id, professional)
+    result = await compare_assessments(
+        db,
+        patient_id=patient_id,
+        base_id=base_id,
+        target_id=target_id,
+    )
+    return AssessmentComparisonResponse(
+        protocol_id=result.protocol_id,
+        protocol_name=result.protocol_name,
+        base=AssessmentComparisonSideResponse(
+            id=result.base.id,
+            date=result.base.date,
+            result=result.base.result,
+            percentage=result.base.percentage,
+        ),
+        target=AssessmentComparisonSideResponse(
+            id=result.target.id,
+            date=result.target.date,
+            result=result.target.result,
+            percentage=result.target.percentage,
+        ),
+        percentage_delta=result.percentage_delta,
+        metrics=[
+            AssessmentComparisonMetricResponse(
+                key=metric.key,
+                label=metric.label,
+                base=metric.base,
+                target=metric.target,
+                delta=metric.delta,
+            )
+            for metric in result.metrics
+        ],
+        answers_changed=result.answers_changed,
+        answers_total=result.answers_total,
+        changed_items=[
+            AssessmentChangedItemResponse(
+                key=item.key, base=item.base, target=item.target
+            )
+            for item in result.changed_items
+        ],
+        summary=result.summary,
+    )
 
 
 @patient_router.get(

@@ -201,6 +201,7 @@ async def test_template_save_preserves_disabled_events_and_dispatches_only_enabl
         "appointmentRescheduled": True,
         "billingReminder": False,
         "billingOverdue": False,
+        "reassessmentReminder": False,
     }
 
     caregiver = (
@@ -289,4 +290,5 @@ async def test_template_save_preserves_disabled_events_and_dispatches_only_enabl
             "appointment_rescheduled": True,
             "billing_reminder": False,
             "billing_overdue": False,
+            "reassessment_reminder": False,
         }

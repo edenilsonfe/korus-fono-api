@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import io
 import re
+from dataclasses import dataclass
 from datetime import date
 
 from docx import Document
+from docx.shared import Inches
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+from reportlab.lib.utils import ImageReader
+from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer
 
 from app.services.assistant.format_reply import sanitize_llm_plain_text
 
@@ -25,6 +28,36 @@ _HEADING3 = re.compile(r"^###\s+(.+)$")
 _BULLET = re.compile(r"^[-*]\s+(.+)$")
 _TABLE_SEPARATOR = re.compile(r"^\|[\s\-:|]+\|?\s*$")
 _BOLD = re.compile(r"\*\*(.+?)\*\*")
+
+
+@dataclass(frozen=True)
+class DocumentIdentity:
+    """Professional identity carried by delivered/exported documents."""
+
+    professional_name: str = ""
+    council: str = ""
+    issued_at: date | None = None
+    logo_bytes: bytes | None = None
+    signature_bytes: bytes | None = None
+
+    @property
+    def has_content(self) -> bool:
+        return bool(self.professional_name or self.council or self.logo_bytes or self.signature_bytes)
+
+
+def _identity_headline(identity: DocumentIdentity | None) -> str:
+    if identity is None:
+        return ""
+    name = identity.professional_name.strip()
+    council = identity.council.strip()
+    if name and council:
+        return f"{name} — {council}"
+    return name or council
+
+
+def _issued_label(identity: DocumentIdentity | None, fallback: date) -> str:
+    issued = identity.issued_at if identity and identity.issued_at else fallback
+    return issued.isoformat()
 
 
 def _format_table_row(line: str) -> str:
@@ -77,42 +110,107 @@ def _add_bold_runs(paragraph, text: str) -> None:
             run.bold = True
 
 
-def _header_lines(report_type: str, patient_name: str, report_date: date) -> list[str]:
+def _header_lines(
+    report_type: str,
+    patient_name: str,
+    report_date: date,
+    identity: DocumentIdentity | None = None,
+) -> list[str]:
     type_label = REPORT_TYPE_LABELS.get(report_type, report_type)
-    return [
+    lines = [
         "KorusFono",
         type_label,
         f"Paciente: {patient_name}",
         f"Data: {report_date.isoformat()}",
+    ]
+    headline = _identity_headline(identity)
+    if headline:
+        lines.append(f"Profissional: {headline}")
+    lines.append("")
+    return lines
+
+
+def _footer_text_lines(
+    report_date: date, identity: DocumentIdentity | None = None
+) -> list[str]:
+    headline = _identity_headline(identity)
+    if not headline:
+        return []
+    return [
+        "",
+        "—",
+        headline,
+        f"Emitido em {_issued_label(identity, report_date)}",
         "",
     ]
 
 
-def export_txt(report_type: str, patient_name: str, report_date: date, content: str) -> bytes:
-    lines = _header_lines(report_type, patient_name, report_date)
+def export_txt(
+    report_type: str,
+    patient_name: str,
+    report_date: date,
+    content: str,
+    identity: DocumentIdentity | None = None,
+) -> bytes:
+    lines = _header_lines(report_type, patient_name, report_date, identity)
     lines.append(sanitize_llm_plain_text(content))
+    lines.extend(_footer_text_lines(report_date, identity))
     return "\n".join(lines).encode("utf-8")
 
 
-def export_md(report_type: str, patient_name: str, report_date: date, content: str) -> bytes:
+def export_md(
+    report_type: str,
+    patient_name: str,
+    report_date: date,
+    content: str,
+    identity: DocumentIdentity | None = None,
+) -> bytes:
     type_label = REPORT_TYPE_LABELS.get(report_type, report_type)
+    headline = _identity_headline(identity)
+    professional_line = f"**Profissional:** {headline}  \n" if headline else ""
     body = (
         f"# {type_label}\n\n"
         f"**Paciente:** {patient_name}  \n"
-        f"**Data:** {report_date.isoformat()}\n\n"
-        f"---\n\n"
+        f"**Data:** {report_date.isoformat()}  \n"
+        f"{professional_line}"
+        f"\n---\n\n"
         f"{content}\n"
     )
+    if headline:
+        body += (
+            f"\n---\n\n"
+            f"{headline}  \n"
+            f"Emitido em {_issued_label(identity, report_date)}\n"
+        )
     return body.encode("utf-8")
 
 
-def export_docx(report_type: str, patient_name: str, report_date: date, content: str) -> bytes:
+def _docx_add_image(doc, data: bytes | None, *, width_inches: float) -> None:
+    if not data:
+        return
+    try:
+        doc.add_picture(io.BytesIO(data), width=Inches(width_inches))
+    except Exception:  # noqa: BLE001 - a broken image must not break the document
+        pass
+
+
+def export_docx(
+    report_type: str,
+    patient_name: str,
+    report_date: date,
+    content: str,
+    identity: DocumentIdentity | None = None,
+) -> bytes:
     doc = Document()
+    _docx_add_image(doc, identity.logo_bytes if identity else None, width_inches=1.1)
     doc.add_heading("KorusFono", level=1)
     type_label = REPORT_TYPE_LABELS.get(report_type, report_type)
     doc.add_heading(type_label, level=2)
     doc.add_paragraph(f"Paciente: {patient_name}")
     doc.add_paragraph(f"Data: {report_date.isoformat()}")
+    headline = _identity_headline(identity)
+    if headline:
+        doc.add_paragraph(f"Profissional: {headline}")
     doc.add_paragraph("")
 
     for kind, value in _iter_markdown_lines(content):
@@ -129,23 +227,60 @@ def export_docx(report_type: str, patient_name: str, report_date: date, content:
             paragraph = doc.add_paragraph()
             _add_bold_runs(paragraph, value)
 
+    if headline:
+        doc.add_paragraph("")
+        _docx_add_image(doc, identity.signature_bytes if identity else None, width_inches=1.6)
+        doc.add_paragraph(headline)
+        doc.add_paragraph(f"Emitido em {_issued_label(identity, report_date)}")
+
     buffer = io.BytesIO()
     doc.save(buffer)
     return buffer.getvalue()
 
 
-def export_pdf(report_type: str, patient_name: str, report_date: date, content: str) -> bytes:
+def _pdf_image_flowable(data: bytes | None, *, width: float) -> Image | None:
+    if not data:
+        return None
+    try:
+        reader = ImageReader(io.BytesIO(data))
+        original_width, original_height = reader.getSize()
+        if not original_width or not original_height:
+            return None
+        return Image(io.BytesIO(data), width=width, height=width * original_height / original_width)
+    except Exception:  # noqa: BLE001 - skip images that reportlab cannot decode
+        return None
+
+
+def export_pdf(
+    report_type: str,
+    patient_name: str,
+    report_date: date,
+    content: str,
+    identity: DocumentIdentity | None = None,
+) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4)
     styles = getSampleStyleSheet()
     type_label = REPORT_TYPE_LABELS.get(report_type, report_type)
-    story = [
-        Paragraph("KorusFono", styles["Title"]),
-        Paragraph(type_label, styles["Heading2"]),
-        Paragraph(f"Paciente: {patient_name}", styles["Normal"]),
-        Paragraph(f"Data: {report_date.isoformat()}", styles["Normal"]),
-        Spacer(1, 12),
-    ]
+    story = []
+    logo = _pdf_image_flowable(
+        identity.logo_bytes if identity else None, width=110
+    )
+    if logo is not None:
+        story.append(logo)
+        story.append(Spacer(1, 8))
+    story.extend(
+        [
+            Paragraph("KorusFono", styles["Title"]),
+            Paragraph(type_label, styles["Heading2"]),
+            Paragraph(f"Paciente: {patient_name}", styles["Normal"]),
+            Paragraph(f"Data: {report_date.isoformat()}", styles["Normal"]),
+        ]
+    )
+    headline = _identity_headline(identity)
+    if headline:
+        story.append(Paragraph(f"Profissional: {headline}", styles["Normal"]))
+    story.append(Spacer(1, 12))
     for kind, value in _iter_markdown_lines(content):
         if kind == "blank":
             story.append(Spacer(1, 6))
@@ -157,6 +292,21 @@ def export_pdf(report_type: str, patient_name: str, report_date: date, content: 
             story.append(Paragraph(f"• {_apply_bold_reportlab(value)}", styles["Normal"]))
         else:
             story.append(Paragraph(_apply_bold_reportlab(value), styles["Normal"]))
+    if headline:
+        signature = _pdf_image_flowable(
+            identity.signature_bytes if identity else None, width=140
+        )
+        story.append(Spacer(1, 24))
+        if signature is not None:
+            story.append(signature)
+            story.append(Spacer(1, 4))
+        story.append(Paragraph(headline, styles["Normal"]))
+        story.append(
+            Paragraph(
+                f"Emitido em {_issued_label(identity, report_date)}",
+                styles["Normal"],
+            )
+        )
     doc.build(story)
     return buffer.getvalue()
 
@@ -167,21 +317,22 @@ def export_report(
     patient_name: str,
     report_date: date,
     content: str,
+    identity: DocumentIdentity | None = None,
 ) -> tuple[bytes, str, str]:
     """Return (bytes, media_type, filename_suffix)."""
     if format in ("txt", "md"):
         exporter = export_txt if format == "txt" else export_md
         media = "text/plain; charset=utf-8" if format == "txt" else "text/markdown; charset=utf-8"
-        return exporter(report_type, patient_name, report_date, content), media, format
+        return exporter(report_type, patient_name, report_date, content, identity), media, format
     if format == "docx":
         return (
-            export_docx(report_type, patient_name, report_date, content),
+            export_docx(report_type, patient_name, report_date, content, identity),
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "docx",
         )
     if format == "pdf":
         return (
-            export_pdf(report_type, patient_name, report_date, content),
+            export_pdf(report_type, patient_name, report_date, content, identity),
             "application/pdf",
             "pdf",
         )

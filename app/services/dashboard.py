@@ -13,6 +13,7 @@ from app.models.patient import Patient
 from app.models.session import Session
 from app.models.ai import AIReport
 from app.services.birthday_service import birthday_conditions
+from app.services.reassessment_service import count_due_reassessments
 
 MONTH_NAMES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
 
@@ -113,6 +114,21 @@ def build_suggestions(pending: dict) -> list[dict]:
             ),
             "ctaLabel": "Ver agenda",
             "ctaTo": "/agenda",
+        })
+    reassessment_due = pending.get("reassessmentDue", 0) or pending.get(
+        "reassessment_due", 0
+    )
+    if reassessment_due > 0:
+        suggestions.append({
+            "id": "pending-reassessment",
+            "title": "Reavaliações sugeridas",
+            "text": (
+                "Você tem 1 paciente sem reavaliação no período recomendado."
+                if reassessment_due == 1
+                else f"Você tem {reassessment_due} pacientes sem reavaliação no período recomendado."
+            ),
+            "ctaLabel": "Ver pacientes",
+            "ctaTo": "/pacientes",
         })
     return suggestions
 
@@ -409,12 +425,15 @@ async def build_dashboard(db: AsyncSession, professional_id) -> dict:
     assessment_drafts = int(assessment_counts[0] or 0)
     awaiting_informant = int(assessment_counts[1] or 0)
 
+    reassessment_due = await count_due_reassessments(db, professional_id, today)
+
     pending = {
         "evolutions": evolutions_pending,
         "reports": reports_draft or 0,
         "sessions": sessions_pending or 0,
         "assessmentDrafts": assessment_drafts,
         "awaitingInformant": awaiting_informant,
+        "reassessmentDue": reassessment_due,
     }
     suggestions = build_suggestions(pending)
 

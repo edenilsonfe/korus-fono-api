@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+from typing import Literal
+
+from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.admin_permissions import resolve_admin_role
@@ -6,11 +8,21 @@ from app.core.deps import admin_permissions_for, get_current_professional, requi
 from app.core.specialty_catalog import specialty_label
 from app.db.session import get_db
 from app.models.professional import Professional
-from app.schemas.professional import AnalyticsConsentUpdate, ProfessionalResponse, ProfessionalUpdate
+from app.schemas.professional import (
+    AnalyticsConsentUpdate,
+    BrandingAssetsResponse,
+    ProfessionalResponse,
+    ProfessionalUpdate,
+)
 from app.services.analytics_consent import has_analytics_consent, set_analytics_consent
 from app.schemas.onboarding import OnboardingResponse, OnboardingUpdate
 from app.services.onboarding_service import build_onboarding_response, update_onboarding
 from app.services.billing_profile_service import billing_profile_is_complete
+from app.services.professional_branding import (
+    branding_urls,
+    delete_branding_image,
+    store_branding_image,
+)
 
 router = APIRouter(prefix="/me", tags=["me"])
 
@@ -89,3 +101,39 @@ async def patch_activation(
     db: AsyncSession = Depends(get_db),
 ):
     return await update_onboarding(db, professional, body.action, report_id=body.report_id)
+
+
+@router.get("/branding", response_model=BrandingAssetsResponse)
+async def get_branding(
+    professional: Professional = Depends(require_verified_professional),
+):
+    logo_url, signature_url = await branding_urls(professional)
+    return BrandingAssetsResponse(logo_url=logo_url, signature_url=signature_url)
+
+
+@router.post("/branding/{asset}", response_model=BrandingAssetsResponse)
+async def upload_branding_asset(
+    asset: Literal["logo", "signature"],
+    file: UploadFile = File(...),
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    body = await file.read()
+    await store_branding_image(
+        db, professional, asset, content_type=file.content_type, body=body
+    )
+    await db.commit()
+    logo_url, signature_url = await branding_urls(professional)
+    return BrandingAssetsResponse(logo_url=logo_url, signature_url=signature_url)
+
+
+@router.delete("/branding/{asset}", response_model=BrandingAssetsResponse)
+async def remove_branding_asset(
+    asset: Literal["logo", "signature"],
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    await delete_branding_image(db, professional, asset)
+    await db.commit()
+    logo_url, signature_url = await branding_urls(professional)
+    return BrandingAssetsResponse(logo_url=logo_url, signature_url=signature_url)

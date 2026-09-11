@@ -39,6 +39,8 @@ from app.schemas.ai import (
     MessageCreate,
 )
 from app.schemas.assistant import ChatResponse
+from app.schemas.report_delivery import ReportDeliveryCreate, ReportDeliveryResponse
+from app.services import report_delivery_service
 from app.services.ai_context import build_context
 from app.services.ai_prompts import (
     AI_TOOL_SPECS,
@@ -57,6 +59,7 @@ from app.services.assistant.rate_limit import enforce_assistant_rate_limit
 from app.services.audio_transcription_service import transcribe_audio
 from app.services.care_team_service import record_access_event, require_clinical_access
 from app.services.report_export import export_report
+from app.services.professional_branding import build_document_identity
 from app.services.report_service import revise_report
 from app.services.timeline import create_timeline_event
 
@@ -271,9 +274,10 @@ async def export_report_file(
     if not row:
         raise HTTPException(status_code=404, detail="Relatório não encontrado")
     report, patient_name = row
+    identity = await build_document_identity(professional)
     try:
         data, media_type, suffix = export_report(
-            format, report.type, patient_name, report.date, report.content
+            format, report.type, patient_name, report.date, report.content, identity=identity
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -283,6 +287,91 @@ async def export_report_file(
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+def _delivery_response(delivery, *, url: str | None = None) -> ReportDeliveryResponse:
+    return ReportDeliveryResponse(
+        id=str(delivery.id),
+        report_id=str(delivery.report_id),
+        channel=delivery.channel,
+        recipient_label=delivery.recipient_label,
+        status=delivery.delivery_status,
+        url=url,
+        expires_at=delivery.expires_at,
+        revoked_at=delivery.revoked_at,
+        view_count=delivery.view_count or 0,
+        download_count=delivery.download_count or 0,
+        first_viewed_at=delivery.first_viewed_at,
+        last_viewed_at=delivery.last_viewed_at,
+        last_downloaded_at=delivery.last_downloaded_at,
+        last_error=delivery.last_error,
+        created_at=delivery.created_at,
+    )
+
+
+async def _get_owned_report(
+    db: AsyncSession, report_id: UUID, professional_id: UUID
+) -> AIReport:
+    report = await db.scalar(
+        select(AIReport).where(
+            AIReport.id == report_id,
+            AIReport.professional_id == professional_id,
+        )
+    )
+    if report is None:
+        raise HTTPException(status_code=404, detail="Relatório não encontrado")
+    return report
+
+
+@router.post(
+    "/reports/{report_id}/deliveries",
+    response_model=ReportDeliveryResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_report_delivery(
+    report_id: UUID,
+    body: ReportDeliveryCreate,
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    """Cria e envia a entrega (link/WhatsApp/e-mail) de um relatório finalizado."""
+    report = await _get_owned_report(db, report_id, professional.id)
+    delivery, token = await report_delivery_service.create_report_delivery(
+        db, professional=professional, report=report, body=body
+    )
+    await db.commit()
+    return _delivery_response(
+        delivery, url=report_delivery_service.build_delivery_url(token)
+    )
+
+
+@router.get("/reports/{report_id}/deliveries", response_model=list[ReportDeliveryResponse])
+async def list_report_deliveries(
+    report_id: UUID,
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_owned_report(db, report_id, professional.id)
+    rows = await report_delivery_service.list_report_deliveries(db, report_id=report_id)
+    return [_delivery_response(row) for row in rows]
+
+
+@router.delete(
+    "/reports/{report_id}/deliveries/{delivery_id}",
+    response_model=ReportDeliveryResponse,
+)
+async def revoke_report_delivery(
+    report_id: UUID,
+    delivery_id: UUID,
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_owned_report(db, report_id, professional.id)
+    delivery = await report_delivery_service.revoke_report_delivery(
+        db, report_id=report_id, delivery_id=delivery_id
+    )
+    await db.commit()
+    return _delivery_response(delivery)
 
 
 @router.post("/reports", response_model=AIReportResponse, status_code=status.HTTP_201_CREATED)

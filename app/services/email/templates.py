@@ -244,3 +244,38 @@ def new_account_notification_email(
         f"Atenciosamente,\n{PRODUCT_NAME}"
     )
     return RenderedEmail(subject=subject, html=_layout("Novo cadastro", inner), text=text)
+
+
+def report_delivery_email(
+    professional_name: str,
+    patient_name: str,
+    report_label: str,
+    delivery_url: str,
+    expires_days: int,
+) -> RenderedEmail:
+    """Delivery of a finalized clinical document to a caregiver/school e-mail."""
+    subject = f"{report_label} — {patient_name}"
+    safe_professional = escape(professional_name, quote=True)
+    safe_patient = escape(patient_name, quote=True)
+    safe_label = escape(report_label, quote=True)
+    safe_url = escape(delivery_url, quote=True)
+    inner = f"""
+      <p>Olá,</p>
+      <p><strong>{safe_professional}</strong> enviou o documento
+      <strong>{safe_label}</strong> de {safe_patient}.</p>
+      <p style="margin: 28px 0;">
+        <a href="{safe_url}"
+           style="background: #0ea5a4; color: #ffffff; text-decoration: none; padding: 12px 20px; border-radius: 9999px;">
+          Abrir documento
+        </a>
+      </p>
+      <p>Este link é pessoal e válido por {expires_days} dias. Não o compartilhe
+      sem necessidade.</p>
+    """
+    text = (
+        f"{professional_name} enviou o documento \"{report_label}\" de {patient_name}.\n\n"
+        f"Acesse: {delivery_url}\n\n"
+        f"Este link é pessoal e válido por {expires_days} dias.\n\n"
+        f"Atenciosamente,\n{PRODUCT_NAME}"
+    )
+    return RenderedEmail(subject=subject, html=_layout(report_label, inner), text=text)

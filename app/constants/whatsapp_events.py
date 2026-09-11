@@ -13,6 +13,11 @@ WHATSAPP_EVENT_BILLING_REMINDER = "billing_reminder"
 WHATSAPP_EVENT_BILLING_OVERDUE = "billing_overdue"
 WHATSAPP_EVENT_WELCOME = "welcome"
 WHATSAPP_EVENT_BIRTHDAY = "patient_birthday"
+WHATSAPP_EVENT_REASSESSMENT = "reassessment_reminder"
+
+REASSESSMENT_DEFAULT_MONTHS = 6
+REASSESSMENT_MIN_MONTHS = 1
+REASSESSMENT_MAX_MONTHS = 24
 
 WHATSAPP_EVENT_IDS: tuple[str, ...] = (
     WHATSAPP_EVENT_BIRTHDAY,
@@ -22,6 +27,7 @@ WHATSAPP_EVENT_IDS: tuple[str, ...] = (
     WHATSAPP_EVENT_RESCHEDULED,
     WHATSAPP_EVENT_BILLING_REMINDER,
     WHATSAPP_EVENT_BILLING_OVERDUE,
+    WHATSAPP_EVENT_REASSESSMENT,
 )
 
 DEFAULT_WHATSAPP_EVENTS: dict[str, bool] = {event_id: False for event_id in WHATSAPP_EVENT_IDS}
@@ -109,6 +115,13 @@ DEFAULT_EVENT_MESSAGE_TEMPLATES: dict[str, str] = {
         "(vencimento {{dataVencimento}}).\n\n"
         "Entre em contato para regularizar."
     ),
+    WHATSAPP_EVENT_REASSESSMENT: (
+        "Olá, {{nomeResponsavel}}! Tudo bem?\n\n"
+        "A última avaliação de {{nomePaciente}} foi em {{dataUltimaAvaliacao}}. "
+        "Para acompanharmos a evolução, que tal agendarmos uma reavaliação?\n\n"
+        "É só me responder por aqui.\n\n"
+        "Com carinho, {{nomeProfissional}}."
+    ),
 }
 
 EVENT_MESSAGE_TEMPLATES = DEFAULT_EVENT_MESSAGE_TEMPLATES
@@ -144,6 +157,7 @@ def build_template_context(raw: dict[str, str]) -> dict[str, str]:
     clinic_name = raw.get("clinic_name", "")
     amount = raw.get("amount", "")
     due_date = raw.get("due_date", "")
+    last_assessment_date = raw.get("last_assessment_date", "")
     return {
         # Nomes em português são o contrato exibido no editor.
         "nomePaciente": patient_first_name,
@@ -155,6 +169,7 @@ def build_template_context(raw: dict[str, str]) -> dict[str, str]:
         "nomeClinica": clinic_name,
         "valor": amount,
         "dataVencimento": due_date,
+        "dataUltimaAvaliacao": last_assessment_date,
         # Aliases legados mantêm templates já salvos em inglês funcionando.
         "patientName": patient_first_name,
         "caregiverName": caregiver_first_name,
@@ -165,6 +180,7 @@ def build_template_context(raw: dict[str, str]) -> dict[str, str]:
         "clinicName": clinic_name,
         "amount": amount,
         "dueDate": due_date,
+        "lastAssessmentDate": last_assessment_date,
     }
 
 

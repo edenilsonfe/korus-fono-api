@@ -74,6 +74,8 @@ class Professional(Base, TimestampMixin):
     onboarding_skipped_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    branding_logo_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    branding_signature_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     patients: Mapped[list["Patient"]] = relationship(back_populates="professional")  # noqa: F821
     subscriptions: Mapped[list["Subscription"]] = relationship(back_populates="professional")  # noqa: F821

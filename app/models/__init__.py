@@ -51,6 +51,7 @@ from app.models.intervention_program import InterventionProgram, ProgramMeasurem
 from app.models.google_calendar import GoogleCalendarConnection, GoogleCalendarSyncRecord
 from app.models.notification_message_log import NotificationMessageLog
 from app.models.notification_settings import NotificationSettings
+from app.models.report_delivery import ReportDelivery
 from app.models.password_reset_token import PasswordResetToken
 from app.models.refresh_session import RefreshSession
 from app.models.schedule_block import ScheduleBlock
@@ -112,6 +113,7 @@ __all__ = [
     "PlatformWhatsAppConnection",
     "NotificationSettings",
     "NotificationMessageLog",
+    "ReportDelivery",
     "AppNotification",
     "AppNotificationRead",
     "AdminAuditLog",

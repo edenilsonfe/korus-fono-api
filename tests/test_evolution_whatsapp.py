@@ -525,6 +525,7 @@ async def test_dispatch_uses_claim_before_send(
             "appointment_rescheduled": False,
             "billing_reminder": False,
             "billing_overdue": False,
+            "reassessment_reminder": False,
         },
         "settings_updated_at": settings_row.updated_at.isoformat(),
     }

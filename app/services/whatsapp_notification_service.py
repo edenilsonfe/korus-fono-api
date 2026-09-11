@@ -9,14 +9,16 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.constants.whatsapp_events import (
     APPOINTMENT_NOTIFICATION_EVENT_MAP,
+    REASSESSMENT_DEFAULT_MONTHS,
     WHATSAPP_EVENT_BIRTHDAY,
+    WHATSAPP_EVENT_REASSESSMENT,
     WHATSAPP_EVENT_REMINDER_24H,
     format_event_message,
     normalize_whatsapp_events,
@@ -25,6 +27,7 @@ from app.constants.whatsapp_events import (
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
 from app.models.appointment import Appointment
+from app.models.assessment import Assessment
 from app.models.caregiver import Caregiver
 from app.models.notification_message_log import (
     MESSAGE_STATUS_FAILED,
@@ -43,6 +46,7 @@ from app.services.evolution_whatsapp_service import (
     EvolutionDeliveryUnknownError,
     mask_phone,
 )
+from app.services.reassessment_service import coerce_date, months_ago
 from app.services.whatsapp_appointment_outbox import create_appointment_event_log
 from app.services.whatsapp_provider import get_active_whatsapp_provider
 
@@ -596,6 +600,144 @@ class WhatsAppNotificationService:
         )
         return True
 
+    async def dispatch_reassessment_log(self, log_id: UUID, *, now: datetime) -> bool:
+        """Recheck eligibility before claiming a reassessment reminder.
+
+        A reminder queued for an older assessment stops being eligible as soon as
+        a newer completed assessment exists (or the patient leaves active status).
+        """
+        now = now.astimezone(ZoneInfo(get_settings().clinic_timezone))
+        if not 9 <= now.hour < 18:
+            return False
+        log = await self.db.get(NotificationMessageLog, log_id, populate_existing=True)
+        if not log or log.notification_type != WHATSAPP_EVENT_REASSESSMENT:
+            return False
+        if log.status in _DONE_STATUSES:
+            return False
+        if log.status == MESSAGE_STATUS_PROCESSING:
+            updated_at = log.updated_at
+            if updated_at and updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=UTC)
+            if updated_at and updated_at < now - timedelta(minutes=5):
+                await self._mark_log_failed(
+                    log,
+                    error_code="delivery_unknown",
+                    last_error="Processamento interrompido; entrega não repetida para evitar duplicidade.",
+                    dispatch_decision={},
+                )
+            return False
+        patient = (
+            await self.db.get(Patient, log.patient_id, populate_existing=True)
+            if log.patient_id
+            else None
+        )
+        if (
+            not patient
+            or patient.professional_id != log.professional_id
+            or patient.is_demo
+            or patient.status != "ativo"
+        ):
+            await self._mark_log_skipped(
+                log, reason="reassessment_no_longer_eligible", superseded=True
+            )
+            return False
+        settings = await self._get_settings(patient.professional_id)
+        if (
+            not settings
+            or not settings.whatsapp_enabled
+            or not normalize_whatsapp_events(settings.whatsapp_events)[
+                WHATSAPP_EVENT_REASSESSMENT
+            ]
+        ):
+            await self._mark_log_skipped(log, reason="event_disabled")
+            return False
+        latest = await self.db.scalar(
+            select(func.max(Assessment.date)).where(
+                Assessment.patient_id == patient.id,
+                Assessment.status == "completed",
+            )
+        )
+        latest_date = coerce_date(latest)
+        payload_date = str((log.payload or {}).get("last_assessment_date") or "")
+        if latest_date is None or (payload_date and latest_date.isoformat() > payload_date):
+            await self._mark_log_skipped(
+                log, reason="reassessment_completed", superseded=True
+            )
+            return False
+        months = settings.reassessment_reminder_months or REASSESSMENT_DEFAULT_MONTHS
+        if latest_date > months_ago(now.date(), months):
+            await self._mark_log_skipped(
+                log, reason="reassessment_not_due", superseded=True
+            )
+            return False
+        provider = get_active_whatsapp_provider(self.db)
+        if not await provider.can_send(patient.professional_id):
+            # Preserve the durable row until the connection returns today.
+            return False
+        phone, opt_in, caregiver_name = await _primary_caregiver_contact(
+            self.db, patient.id
+        )
+        if not opt_in:
+            await self._mark_log_skipped(log, reason="whatsapp_opt_in_missing")
+            return False
+        professional = await self.db.get(Professional, patient.professional_id)
+        if professional is None:
+            await self._mark_log_skipped(
+                log, reason="professional_not_found", superseded=True
+            )
+            return False
+        professional_id = professional.id
+        text = format_event_message(
+            WHATSAPP_EVENT_REASSESSMENT,
+            {
+                "patient_name": patient.name,
+                "caregiver_name": caregiver_name,
+                "professional_name": professional.name,
+                "clinic_name": professional.name,
+                "last_assessment_date": latest_date.strftime("%d/%m/%Y"),
+            },
+            stored_templates=normalize_whatsapp_message_templates(
+                settings.whatsapp_message_templates
+            ),
+        )
+        decision = {"whatsapp_enabled": True, "reassessment_reminder": True}
+        log = await self._claim_event_log(log_id)
+        if not log:
+            return False
+        if not phone:
+            await self._mark_log_failed(
+                log,
+                error_code="no_phone",
+                last_error="Responsável sem telefone cadastrado.",
+                dispatch_decision=decision,
+            )
+            return False
+        log.to_phone = mask_phone(phone)
+        await self.db.commit()
+        try:
+            result = await provider.send_text_message(professional_id, phone, text)
+        except Exception as exc:  # noqa: BLE001 - persist a safe delivery outcome
+            unknown = not isinstance(exc, HTTPException)
+            await self._mark_log_failed(
+                log,
+                error_code="delivery_unknown" if unknown else "provider_error",
+                last_error=(
+                    "Entrega incerta; envio não repetido automaticamente."
+                    if unknown
+                    else "Não foi possível enviar o lembrete de reavaliação."
+                ),
+                dispatch_decision=decision,
+            )
+            return False
+        await self._mark_log_sent(
+            log,
+            provider=result.provider,
+            provider_message_id=result.provider_message_id,
+            payload=None,
+            dispatch_decision=decision,
+        )
+        return True
+
     async def dispatch_event_log(self, log_id: UUID) -> bool:
         """Claim and send one durable appointment outbox event."""
         log = await self._claim_event_log(log_id)
@@ -702,17 +844,21 @@ class WhatsAppNotificationService:
             settings.whatsapp_message_templates
         )
         custom_template = stored_templates.get(log.notification_type)
+        appointment_reminder = log.notification_type == WHATSAPP_EVENT_REMINDER_24H
         include_response_link = (
-            log.notification_type == WHATSAPP_EVENT_REMINDER_24H
-            and settings.appointment_confirmation_link_enabled
+            appointment_reminder and settings.appointment_confirmation_link_enabled
+        )
+        no_show_policy = (
+            (settings.no_show_policy or "").strip() if appointment_reminder else ""
         )
 
         try:
             provider = get_active_whatsapp_provider(self.db)
             if (
-                log.notification_type == WHATSAPP_EVENT_REMINDER_24H
+                appointment_reminder
                 and not custom_template
                 and not include_response_link
+                and not no_show_policy
             ):
                 variables = [
                     context["patient_name"],
@@ -738,6 +884,8 @@ class WhatsAppNotificationService:
                         f"{text}\n\nConfirme ou cancele sua presença:\n"
                         f"{response_url}"
                     )
+                if no_show_policy:
+                    text = f"{text}\n\n{no_show_policy}"
                 send_result = await provider.send_text_message(
                     appointment.professional_id, phone, text
                 )
