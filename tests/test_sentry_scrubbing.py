@@ -77,3 +77,49 @@ def test_scrub_redacts_sensitive_extra_keys():
 def test_scrub_returns_event_when_request_missing():
     event = {"message": "boom"}
     assert scrub_sentry_event(event, {}) == {"message": "boom"}
+
+
+def test_sentry_bootstrap_delivers_ai_errors_to_transport(monkeypatch):
+    import logging
+    import sentry_sdk
+    from sentry_sdk.transport import Transport
+    from app.core.config import Settings
+    from app.services.sentry_init import init_sentry
+
+    envelopes = []
+
+    class MemoryTransport(Transport):
+        def capture_envelope(self, envelope):
+            envelopes.append(envelope)
+
+    original_init = sentry_sdk.init
+    previous_client = sentry_sdk.get_global_scope().client
+    monkeypatch.setattr(
+        sentry_sdk, "init",
+        lambda **kwargs: original_init(**kwargs, transport=MemoryTransport()),
+    )
+    try:
+        assert init_sentry(Settings(
+            sentry_dsn="https://public@example.invalid/1",
+            sentry_environment="test",
+            sentry_traces_sample_rate=0,
+        ))
+        logging.getLogger("app.services.ai_service").error(
+            "AI provider temporarily unavailable: error=%s status=%s",
+            "AuthenticationError", 401,
+        )
+        sentry_sdk.flush()
+        events = [
+            item.payload.json
+            for envelope in envelopes
+            for item in envelope.items
+            if item.headers.get("type") == "event"
+        ]
+        assert len(events) == 1
+        assert events[0]["level"] == "error"
+        assert events[0]["logger"] == "app.services.ai_service"
+        assert events[0]["environment"] == "test"
+        assert "AuthenticationError" in events[0]["logentry"]["formatted"]
+    finally:
+        sentry_sdk.get_client().close()
+        sentry_sdk.get_global_scope().set_client(previous_client)

@@ -15,6 +15,32 @@ from app.services.assistant.rate_limit import enforce_assistant_rate_limit
 from app.schemas.ai import AIToolRequest
 
 
+@pytest.mark.asyncio
+async def test_failed_ai_job_is_reported_and_persisted(monkeypatch, caplog):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+    from uuid import uuid4
+    import worker
+
+    job = SimpleNamespace(status="pending", input_data='{"prompt":"clinical data"}')
+    session = AsyncMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = job
+    session.execute.return_value = result
+    context = AsyncMock()
+    context.__aenter__.return_value = session
+    monkeypatch.setattr(worker, "AsyncSessionLocal", lambda: context)
+    monkeypatch.setattr(worker, "run_llm", AsyncMock(side_effect=ValueError("clinical data")))
+
+    await worker.process_ai_job({}, str(uuid4()))
+
+    assert job.status == "failed"
+    assert job.completed_at is not None
+    assert session.commit.await_count == 2
+    assert "AI job failed: error=ValueError" in caplog.text
+    assert "clinical data" not in caplog.text
+
+
 def test_tool_specs_cover_expected_keys():
     expected = {
         "report:clinico",
@@ -184,7 +210,7 @@ async def test_run_llm_rejects_unconfigured_provider_instead_of_simulating():
         ),
     ],
 )
-async def test_run_llm_translates_provider_capacity_errors_to_safe_json_error(provider_error):
+async def test_run_llm_translates_provider_capacity_errors_to_safe_json_error(provider_error, caplog):
     from app.services.ai_service import run_llm
 
     with patch("app.services.ai_service.get_settings") as mock_settings:
@@ -207,6 +233,12 @@ async def test_run_llm_translates_provider_capacity_errors_to_safe_json_error(pr
         "Serviço de IA temporariamente indisponível. Tente novamente em alguns minutos."
     )
     assert exc_info.value.headers == {"Retry-After": "60"}
+    error_logs = [record for record in caplog.records if record.levelname == "ERROR"]
+    assert len(error_logs) == 1
+    assert error_logs[0].name == "app.services.ai_service"
+    assert type(provider_error).__name__ in error_logs[0].getMessage()
+    assert "dados clínicos reais" not in caplog.text
+    assert "insufficient credits" not in caplog.text
 
 
 def _force_memory_rate_limit_fallback(*_args, **_kwargs):

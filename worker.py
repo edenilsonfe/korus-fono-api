@@ -1,8 +1,10 @@
 import json
+import logging
 from uuid import UUID
 
 from arq import cron
 from arq.connections import RedisSettings
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.core.config import get_settings, validate_settings
@@ -19,6 +21,7 @@ from app.services.whatsapp_scheduler_service import WhatsAppSchedulerService
 
 # Init before ARQ picks up WorkerSettings (same process as worker entry).
 init_sentry(get_settings())
+logger = logging.getLogger(__name__)
 
 
 async def process_ai_job(ctx, job_id: str) -> None:
@@ -38,6 +41,9 @@ async def process_ai_job(ctx, job_id: str) -> None:
             job.result = result_text
             job.completed_at = utcnow()
         except Exception as exc:
+            # Provider HTTP failures are already reported by run_llm.
+            if not isinstance(exc, HTTPException):
+                logger.error("AI job failed: error=%s", type(exc).__name__)
             job.status = "failed"
             job.error = str(exc)
             job.completed_at = utcnow()

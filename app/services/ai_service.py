@@ -94,6 +94,7 @@ async def build_patient_context(db: AsyncSession, patient_id: UUID) -> str:
 async def run_llm(prompt: str, system: str = "", output: str = "plain") -> str:
     settings = get_settings()
     if not settings.opencode_api_key:
+        logger.error("AI provider is not configured")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Ferramentas de IA não configuradas.",
@@ -120,7 +121,7 @@ async def run_llm(prompt: str, system: str = "", output: str = "plain") -> str:
                 messages=messages,
             )
     except (APIStatusError, APIConnectionError, APITimeoutError, TimeoutError) as exc:
-        logger.warning(
+        logger.error(
             "AI provider temporarily unavailable: error=%s status=%s",
             type(exc).__name__,
             getattr(exc, "status_code", None),
