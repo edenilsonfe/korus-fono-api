@@ -49,6 +49,17 @@ from app.models.care_team import (
     PatientSharingConsentEvent,
 )
 from app.models.evolution import Evolution
+from app.models.family_portal import (
+    FamilyPortal,
+    FamilyPortalEvent,
+    FamilyPortalGrant,
+    FamilyPortalRecipient,
+)
+from app.models.family_portal_content import (
+    FamilyPortalItem,
+    FamilyPortalItemAudience,
+    FamilyPortalItemRevision,
+)
 from app.models.goal import ClinicalDomainSnapshot, Goal
 from app.models.home_program import (
     HomeProgram,
@@ -123,6 +134,13 @@ __all__ = [
     "BatterySessionEvent",
     "Goal",
     "ClinicalDomainSnapshot",
+    "FamilyPortal",
+    "FamilyPortalRecipient",
+    "FamilyPortalEvent",
+    "FamilyPortalGrant",
+    "FamilyPortalItem",
+    "FamilyPortalItemRevision",
+    "FamilyPortalItemAudience",
     "HomeProgram",
     "HomeProgramTask",
     "HomeProgramTaskResource",

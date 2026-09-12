@@ -27,6 +27,8 @@ _SENSITIVE_HEADERS = frozenset(
         "asaas-access-token",
         # F16 — raw family link token of the home program.
         "x-home-program-token",
+        # F14 — raw access token of the family portal link (header).
+        "x-family-portal-token",
     }
 )
 
@@ -82,6 +84,9 @@ _SENSITIVE_EXTRA_KEYS = frozenset(
         "homeprogramtoken",
         "family_authorization",
         "familyauthorization",
+        # F14 — family portal access token (header of the public surface).
+        "family_portal_token",
+        "familyportal_token",
     }
 )
 

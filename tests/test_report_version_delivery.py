@@ -14,6 +14,7 @@ Behaviour under test:
 import hashlib
 import io
 import json
+import uuid
 from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock
 from uuid import UUID
@@ -26,6 +27,14 @@ from app.models.ai import AIReport
 from app.models.assessment import Assessment
 from app.models.report_composition import AIReportComposition
 from app.models.report_delivery import ReportDelivery
+from app.services import report_delivery_service
+from app.services.report_delivery_service import (
+    DELIVERY_ISSUE_EXPIRED,
+    DELIVERY_ISSUE_REVOKED,
+    SNAPSHOT_ISSUE_INCOMPLETE,
+    SNAPSHOT_ISSUE_MISSING,
+    FixedSnapshotUnavailableError,
+)
 
 LLM_DRAFT = (
     "## Síntese\nO paciente demonstra avanço nas habilidades consolidadas "
@@ -646,3 +655,183 @@ async def test_consolidated_delivery_snapshot_freezes_sections(
     for heading in CONSOLIDATED_SECTIONS:
         assert heading in body["content"]
     assert body["reportTypeLabel"] == "Laudo Consolidado"
+
+
+# --------------------------------------------------------------------------- #
+# F14 — helper ESTRITO de snapshot por ID (sem token, sem fallback legado)
+# --------------------------------------------------------------------------- #
+
+
+async def _make_delivery_row(
+    db_session, professional, patient, report, *, snapshot, **overrides
+) -> ReportDelivery:
+    values = dict(
+        report_id=report.id,
+        professional_id=professional.id,
+        patient_id=patient.id,
+        channel="link",
+        recipient_label="Link avulso",
+        token_hash=uuid.uuid4().hex + uuid.uuid4().hex,
+        expires_at=datetime.now(UTC) + timedelta(days=30),
+        document_snapshot=snapshot,
+    )
+    values.update(overrides)
+    row = ReportDelivery(**values)
+    db_session.add(row)
+    await db_session.commit()
+    await db_session.refresh(row)
+    return row
+
+
+async def test_strict_fixed_delivery_resolution_by_id_never_falls_back(
+    api_client, auth_headers, db_session, professional, patient
+):
+    original = "## Sessão\nTexto congelado da entrega."
+    report = await _make_report(db_session, professional, patient, content=original)
+    created = await _create_delivery(api_client, auth_headers, report)
+    assert created.status_code == 201, created.text
+    delivery_id = UUID(created.json()["id"])
+
+    context = await report_delivery_service.load_fixed_delivery_context(
+        db_session, delivery_id
+    )
+    document = report_delivery_service.resolve_fixed_document(context)
+    assert document.snapshot_mode == "fixed"
+    assert document.content == original
+    assert document.report_version == 1
+    assert document.content_hash == _sha256(original)
+
+    # Editar o relatório atual NÃO muda o que o helper estrito devolve.
+    edited = await _patch(
+        api_client,
+        auth_headers,
+        report.id,
+        {"content": "## Sessão\nTexto novo do relatório."},
+    )
+    assert edited.status_code == 200, edited.text
+    refreshed = await report_delivery_service.load_fixed_delivery_context(
+        db_session, delivery_id
+    )
+    assert (
+        report_delivery_service.resolve_fixed_document(refreshed).content
+        == original
+    )
+
+    # Entrega desconhecida → erro estrito (não é o 410 de token).
+    with pytest.raises(FixedSnapshotUnavailableError):
+        await report_delivery_service.load_fixed_delivery_context(
+            db_session, uuid.uuid4()
+        )
+
+
+async def test_strict_fixed_snapshot_validator_flags_every_variant(
+    api_client, auth_headers, db_session, professional, patient
+):
+    original = "## Sessão\nTexto com snapshot."
+    report = await _make_report(db_session, professional, patient, content=original)
+    created = await _create_delivery(api_client, auth_headers, report)
+    assert created.status_code == 201, created.text
+    delivery = await db_session.get(
+        ReportDelivery, UUID(created.json()["id"])
+    )
+    assert delivery is not None
+    valid_snapshot = dict(delivery.document_snapshot)
+
+    # Snapshot íntegro: validador e vigência liberam.
+    assert report_delivery_service.fixed_snapshot_issue(delivery) is None
+    assert report_delivery_service.family_delivery_issue(delivery) is None
+
+    # Legacy (sem snapshot): inelegível e recusado ANTES de qualquer fallback.
+    legacy = await _make_delivery_row(
+        db_session, professional, patient, report, snapshot=None
+    )
+    assert (
+        report_delivery_service.fixed_snapshot_issue(legacy)
+        == SNAPSHOT_ISSUE_MISSING
+    )
+    assert (
+        report_delivery_service.family_delivery_issue(legacy)
+        == SNAPSHOT_ISSUE_MISSING
+    )
+    with pytest.raises(FixedSnapshotUnavailableError):
+        await report_delivery_service.load_fixed_delivery_context(
+            db_session, legacy.id
+        )
+
+    # Snapshot incompleto: hash divergente, campo textual ausente e versão
+    # inválida são todos recusados.
+    for broken in (
+        {**valid_snapshot, "contentHash": "b" * 64},
+        {**valid_snapshot, "content": ""},
+        {**valid_snapshot, "content": 42},
+        {**valid_snapshot, "reportVersion": 0},
+        {**valid_snapshot, "reportDate": "nao-e-data"},
+        {**valid_snapshot, "formatVersion": 2},
+        {**valid_snapshot, "patientName": ""},
+        "nao-e-dict",
+    ):
+        broken_row = await _make_delivery_row(
+            db_session, professional, patient, report, snapshot=broken
+        )
+        assert (
+            report_delivery_service.fixed_snapshot_issue(broken_row)
+            == SNAPSHOT_ISSUE_INCOMPLETE
+        ), broken
+        with pytest.raises(FixedSnapshotUnavailableError):
+            await report_delivery_service.load_fixed_delivery_context(
+                db_session, broken_row.id
+            )
+
+    # Revogada e expirada bloqueiam mesmo com snapshot íntegro.
+    revoked = await _make_delivery_row(
+        db_session,
+        professional,
+        patient,
+        report,
+        snapshot=valid_snapshot,
+        revoked_at=datetime.now(UTC),
+    )
+    assert (
+        report_delivery_service.family_delivery_issue(revoked)
+        == DELIVERY_ISSUE_REVOKED
+    )
+    with pytest.raises(FixedSnapshotUnavailableError):
+        await report_delivery_service.load_fixed_delivery_context(
+            db_session, revoked.id
+        )
+
+    expired = await _make_delivery_row(
+        db_session,
+        professional,
+        patient,
+        report,
+        snapshot=valid_snapshot,
+        expires_at=datetime.now(UTC) - timedelta(minutes=1),
+    )
+    assert (
+        report_delivery_service.family_delivery_issue(expired)
+        == DELIVERY_ISSUE_EXPIRED
+    )
+    with pytest.raises(FixedSnapshotUnavailableError):
+        await report_delivery_service.load_fixed_delivery_context(
+            db_session, expired.id
+        )
+
+    # Os links legados continuam lendo o relatório vivo (política preservada).
+    token = "legacy-strict-token-456"
+    legacy_public = ReportDelivery(
+        report_id=report.id,
+        professional_id=professional.id,
+        patient_id=patient.id,
+        channel="link",
+        recipient_label="Link avulso",
+        token_hash=_sha256(token),
+        expires_at=datetime.now(UTC) + timedelta(days=30),
+        document_snapshot=None,
+    )
+    db_session.add(legacy_public)
+    await db_session.commit()
+    public = await api_client.get(f"/api/v1/report-deliveries/{token}")
+    assert public.status_code == 200, public.text
+    assert public.json()["snapshotMode"] == "legacy_live"
+    assert public.json()["content"] == original

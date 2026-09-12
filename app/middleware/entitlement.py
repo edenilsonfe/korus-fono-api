@@ -113,6 +113,64 @@ class EntitlementMiddleware(BaseHTTPMiddleware):
             path,
         ):
             return await call_next(request)
+        # F14 — ações protetivas do portal da família permanecem disponíveis em
+        # read-only: desativar o portal, retirar destinatário, desligar agenda e
+        # revogar link encerram compartilhamento e distribuição. Exceções
+        # exatas de método/path (UUID canônico); ACL, autoria e demais gates de
+        # negócio continuam valendo.
+        if request.method == "POST" and re.fullmatch(
+            r"/api/v1/patients/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/family-portal/disable/?",
+            path,
+        ):
+            return await call_next(request)
+        if request.method == "POST" and re.fullmatch(
+            r"/api/v1/patients/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/family-portal/recipients/"
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/withdraw/?",
+            path,
+        ):
+            return await call_next(request)
+        if request.method == "DELETE" and re.fullmatch(
+            r"/api/v1/patients/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/family-portal/recipients/"
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/appointments/?",
+            path,
+        ):
+            return await call_next(request)
+        if request.method == "DELETE" and re.fullmatch(
+            r"/api/v1/patients/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/family-portal/recipients/"
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/grants/"
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/?",
+            path,
+        ):
+            return await call_next(request)
+        # F14 (onda 2) — ações protetivas do conteúdo editorial em read-only:
+        # retirar um item publicado do portal e remover um destinatário do
+        # público do item encerram compartilhamento. Exceções exatas.
+        if request.method == "POST" and re.fullmatch(
+            r"/api/v1/patients/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/family-portal/items/"
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/withdraw/?",
+            path,
+        ):
+            return await call_next(request)
+        if request.method == "DELETE" and re.fullmatch(
+            r"/api/v1/patients/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/family-portal/items/"
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/recipients/"
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/?",
+            path,
+        ):
+            return await call_next(request)
         if path in EXEMPT_PATHS:
             return await call_next(request)
         if any(path.startswith(prefix) for prefix in EXEMPT_PATH_PREFIXES):

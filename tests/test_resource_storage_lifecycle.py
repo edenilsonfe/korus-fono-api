@@ -27,6 +27,7 @@ from app.db.session import get_db
 from app.main import app
 from app.models.admin_audit_log import AdminAuditLog
 from app.models.attachment import Attachment
+from app.models.family_portal_content import FamilyPortalItem
 from app.models.home_program import (
     HomeProgramPhoto,
     HomeProgramTaskResource,
@@ -81,6 +82,7 @@ async def _engine():
                     StorageCleanupTask.__table__,
                     HomeProgramTaskResource.__table__,
                     HomeProgramPhoto.__table__,
+                    FamilyPortalItem.__table__,
                 ],
             )
         )
@@ -581,6 +583,8 @@ async def test_delete_referenced_resource_conflicts_and_unreferenced_queues_clea
         session, owner=owner, title="Publicada", publication_status="published"
     )
     domain_linked = await _resource(session, owner=owner, title="Com domínio")
+    # F14: item do portal (mesmo em rascunho) congela o hash na revisão.
+    portal_linked = await _resource(session, owner=owner, title="No portal da família")
     session.add_all(
         [
             GoalResourceLink(
@@ -603,11 +607,29 @@ async def test_delete_referenced_resource_conflicts_and_unreferenced_queues_clea
                 content_sha256=DIGEST,
             ),
             ResourceDomainLink(resource_id=domain_linked.id, domain_key="linguagem"),
+            FamilyPortalItem(
+                portal_id=uuid.uuid4(),
+                kind="material",
+                status="draft",
+                version=1,
+                published_version=None,
+                draft_content={"title": "No portal", "instructions": ""},
+                draft_recipient_ids=[],
+                resource_id=portal_linked.id,
+                created_by_professional_id=owner.id,
+            ),
         ]
     )
     await session.commit()
 
-    for resource in (goal_linked, program_linked, licensed, published, domain_linked):
+    for resource in (
+        goal_linked,
+        program_linked,
+        licensed,
+        published,
+        domain_linked,
+        portal_linked,
+    ):
         blocked = await client.delete(
             f"/api/v1/resources/{resource.id}", headers=_headers(owner)
         )

@@ -15,6 +15,10 @@ class Professional(Base, TimestampMixin):
             "admin_role IS NULL OR admin_role IN ('support', 'billing', 'product', 'superadmin')",
             name="ck_professionals_admin_role",
         ),
+        CheckConstraint(
+            "family_portal_access_version >= 0",
+            name="ck_professionals_family_portal_access_version",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
@@ -42,6 +46,11 @@ class Professional(Base, TimestampMixin):
     admin_role: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     is_disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # F14 — epoch próprio do portal da família: incrementado ao desativar a conta;
+    # grants capturam o valor na emissão. Reativar não reduz (tokens antigos morrem).
+    family_portal_access_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     analytics_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     analytics_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     analytics_consent_version: Mapped[str | None] = mapped_column(String(16), nullable=True)

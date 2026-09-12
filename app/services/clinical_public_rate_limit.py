@@ -188,3 +188,87 @@ def enforce_home_program_response_upload_rate_limit(*, grant_hash: str) -> None:
         endpoint="home-program-response",
         retry_after_seconds=HOME_PROGRAM_RESPONSE_UPLOAD_WINDOW_SECONDS,
     )
+
+
+# F14 — public family portal (header X-Family-Portal-Token). Reads são
+# fail-closed como o resto da superfície pública; o teto por IP é consumido
+# ANTES de resolver o token (malformado/ausente não pula o limite).
+FAMILY_PORTAL_NAMESPACE = "clinical:family-portal"
+FAMILY_PORTAL_READ_LIMIT = 60  # por grant resolvido (hash do ID do grant)
+FAMILY_PORTAL_FILE_LIMIT = 10  # por grant resolvido (arquivo consome além)
+FAMILY_PORTAL_IP_LIMIT = 120  # por IP confiável (todas as leituras)
+FAMILY_PORTAL_WINDOW_SECONDS = 60
+FAMILY_PORTAL_ISSUE_RECIPIENT_LIMIT = 10  # emissão de link: por destinatário
+FAMILY_PORTAL_ISSUE_OWNER_LIMIT = 30  # emissão de link: por dono
+FAMILY_PORTAL_READ_DETAIL = (
+    "Muitas consultas ao portal da família. Tente novamente em instantes."
+)
+FAMILY_PORTAL_FILE_DETAIL = (
+    "Muitos downloads no portal da família. Tente novamente em instantes."
+)
+FAMILY_PORTAL_IP_DETAIL = (
+    "Muitas solicitações ao portal da família. Tente novamente em instantes."
+)
+FAMILY_PORTAL_ISSUE_DETAIL = "Muitas emissões de link. Tente novamente em instantes."
+
+
+def enforce_family_portal_ip_rate_limit(request: Request) -> None:
+    """F14: 120 requests/min por IP confiável, antes de resolver o token."""
+    enforce_public_rate_limit(
+        namespace=f"{FAMILY_PORTAL_NAMESPACE}:ip",
+        identifier_hash=hash_identifier(get_client_ip(request)),
+        max_requests=FAMILY_PORTAL_IP_LIMIT,
+        window_seconds=FAMILY_PORTAL_WINDOW_SECONDS,
+        detail=FAMILY_PORTAL_IP_DETAIL,
+        endpoint="family-portal",
+    )
+
+
+def enforce_family_portal_read_rate_limit(*, grant_hash: str) -> None:
+    """F14: 60 leituras/min por grant (hash do ID do grant, nunca o token)."""
+    enforce_public_rate_limit(
+        namespace=f"{FAMILY_PORTAL_NAMESPACE}:read",
+        identifier_hash=grant_hash,
+        max_requests=FAMILY_PORTAL_READ_LIMIT,
+        window_seconds=FAMILY_PORTAL_WINDOW_SECONDS,
+        detail=FAMILY_PORTAL_READ_DETAIL,
+        endpoint="family-portal",
+    )
+
+
+def enforce_family_portal_file_rate_limit(*, grant_hash: str) -> None:
+    """F14: 10 arquivos/min por grant (além do teto de leitura)."""
+    enforce_public_rate_limit(
+        namespace=f"{FAMILY_PORTAL_NAMESPACE}:file",
+        identifier_hash=grant_hash,
+        max_requests=FAMILY_PORTAL_FILE_LIMIT,
+        window_seconds=FAMILY_PORTAL_WINDOW_SECONDS,
+        detail=FAMILY_PORTAL_FILE_DETAIL,
+        endpoint="family-portal",
+    )
+
+
+def enforce_family_portal_grant_issue_rate_limit(
+    *, recipient_hash: str, owner_hash: str
+) -> None:
+    """F14 privado: 10 emissões/min por destinatário e 30/min por dono.
+
+    Fail-closed como o restante do limiter público: emissão é criação de
+    credencial sensível. Revogação nunca passa por este limite.
+    """
+    enforce_public_rate_limit(
+        namespace=f"{FAMILY_PORTAL_NAMESPACE}:issue-recipient",
+        identifier_hash=recipient_hash,
+        max_requests=FAMILY_PORTAL_ISSUE_RECIPIENT_LIMIT,
+        window_seconds=FAMILY_PORTAL_WINDOW_SECONDS,
+        detail=FAMILY_PORTAL_ISSUE_DETAIL,
+        endpoint="family-portal-grant-issue",
+    )
+    enforce_public_rate_limit(
+        namespace=f"{FAMILY_PORTAL_NAMESPACE}:issue-owner",
+        identifier_hash=owner_hash,
+        max_requests=FAMILY_PORTAL_ISSUE_OWNER_LIMIT,
+        window_seconds=FAMILY_PORTAL_WINDOW_SECONDS,
+        detail=FAMILY_PORTAL_ISSUE_DETAIL,
+        endpoint="family-portal-grant-issue",
+    )

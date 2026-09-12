@@ -169,6 +169,152 @@ def apply_snapshot_identity(
     )
 
 
+# --------------------------------------------------------------------------- #
+# F14 — resolução ESTRITA por ID (sem token, sem fallback para o relatório atual)
+# --------------------------------------------------------------------------- #
+
+SNAPSHOT_ISSUE_MISSING = "snapshot_missing"
+SNAPSHOT_ISSUE_INCOMPLETE = "snapshot_incomplete"
+DELIVERY_ISSUE_REVOKED = "revoked"
+DELIVERY_ISSUE_EXPIRED = "expired"
+
+DELIVERY_NOT_FOUND_MESSAGE = "Entrega não encontrada"
+DELIVERY_UNAVAILABLE_MESSAGE = "Entrega indisponível."
+SNAPSHOT_MISSING_MESSAGE = (
+    "Esta entrega não tem documento congelado; gere uma nova entrega para o portal."
+)
+SNAPSHOT_INCOMPLETE_MESSAGE = (
+    "O documento congelado desta entrega está incompleto e não pode ser usado."
+)
+DELIVERY_REVOKED_MESSAGE = "Esta entrega está revogada."
+DELIVERY_EXPIRED_MESSAGE = "Esta entrega está expirada."
+
+_ISSUE_MESSAGES: dict[str, str] = {
+    DELIVERY_ISSUE_REVOKED: DELIVERY_REVOKED_MESSAGE,
+    DELIVERY_ISSUE_EXPIRED: DELIVERY_EXPIRED_MESSAGE,
+    SNAPSHOT_ISSUE_MISSING: SNAPSHOT_MISSING_MESSAGE,
+    SNAPSHOT_ISSUE_INCOMPLETE: SNAPSHOT_INCOMPLETE_MESSAGE,
+}
+
+
+class FixedSnapshotUnavailableError(Exception):
+    """Entrega F1 inutilizável no F14: snapshot ausente/incompleto, revogada,
+    expirada ou registros dependentes ausentes.
+
+    Nunca cai no relatório atual — diferente do resolver legado dos links
+    públicos, que mantém o fallback para conteúdo vivo.
+    """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
+def fixed_snapshot_issue(delivery: ReportDelivery) -> str | None:
+    """Valida o snapshot congelado SEM fallback; ``None`` = completo e íntegro.
+
+    Formato/versão, campos textuais, data, ``reportVersion >= 1`` e
+    ``contentHash`` correspondente ao texto — qualquer inconsistência vira
+    ``snapshot_missing``/``snapshot_incomplete`` e o chamador F14 recusa ANTES
+    de qualquer resolução legada.
+    """
+    snapshot = delivery.document_snapshot
+    if not snapshot:
+        return SNAPSHOT_ISSUE_MISSING
+    if not isinstance(snapshot, dict):
+        return SNAPSHOT_ISSUE_INCOMPLETE
+    if snapshot.get("formatVersion") != SNAPSHOT_FORMAT_VERSION:
+        return SNAPSHOT_ISSUE_INCOMPLETE
+    report_type = snapshot.get("reportType")
+    if not isinstance(report_type, str) or not report_type.strip():
+        return SNAPSHOT_ISSUE_INCOMPLETE
+    if _snapshot_date(snapshot.get("reportDate")) is None:
+        return SNAPSHOT_ISSUE_INCOMPLETE
+    for name in ("patientName", "professionalName"):
+        value = snapshot.get(name)
+        if not isinstance(value, str) or not value.strip():
+            return SNAPSHOT_ISSUE_INCOMPLETE
+    if not isinstance(snapshot.get("professionalCouncil"), str):
+        return SNAPSHOT_ISSUE_INCOMPLETE
+    report_version = snapshot.get("reportVersion")
+    if (
+        not isinstance(report_version, int)
+        or isinstance(report_version, bool)
+        or report_version < 1
+    ):
+        return SNAPSHOT_ISSUE_INCOMPLETE
+    content = snapshot.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return SNAPSHOT_ISSUE_INCOMPLETE
+    content_hash = snapshot.get("contentHash")
+    if not isinstance(content_hash, str) or content_hash != _content_hash(content):
+        return SNAPSHOT_ISSUE_INCOMPLETE
+    captured_at = snapshot.get("capturedAt")
+    if not isinstance(captured_at, str) or not captured_at:
+        return SNAPSHOT_ISSUE_INCOMPLETE
+    return None
+
+
+def family_delivery_issue(
+    delivery: ReportDelivery, *, now: datetime | None = None
+) -> str | None:
+    """Motivo pelo qual a entrega não serve ao portal F14; ``None`` = utilizável.
+
+    Revogação e expiração vêm antes da validação do snapshot (estado da entrega
+    é o gate mais forte); o resto é a checagem estrita do documento congelado.
+    """
+    if delivery.revoked_at is not None:
+        return DELIVERY_ISSUE_REVOKED
+    expires_at = _as_utc(delivery.expires_at)
+    if expires_at is not None and expires_at <= (now or datetime.now(UTC)):
+        return DELIVERY_ISSUE_EXPIRED
+    return fixed_snapshot_issue(delivery)
+
+
+def family_delivery_issue_message(issue: str) -> str:
+    return _ISSUE_MESSAGES[issue]
+
+
+async def load_fixed_delivery_context(
+    db: AsyncSession, delivery_id: UUID
+) -> PublicDeliveryContext:
+    """Resolve uma entrega F1 por ID para uso interno (F14).
+
+    Não emite/recupera token e não altera a política dos links legados: exige
+    snapshot fixo completo + entrega vigente. Qualquer inconsistência levanta
+    ``FixedSnapshotUnavailableError`` — quem chama decide o HTTP (409/422).
+    """
+    delivery = await db.scalar(
+        select(ReportDelivery).where(ReportDelivery.id == delivery_id)
+    )
+    if delivery is None:
+        raise FixedSnapshotUnavailableError(DELIVERY_NOT_FOUND_MESSAGE)
+    issue = family_delivery_issue(delivery)
+    if issue is not None:
+        raise FixedSnapshotUnavailableError(_ISSUE_MESSAGES[issue])
+    report = await db.get(AIReport, delivery.report_id)
+    professional = await db.get(Professional, delivery.professional_id)
+    patient = await db.get(Patient, delivery.patient_id)
+    if (
+        report is None
+        or professional is None
+        or professional.is_disabled
+        or patient is None
+    ):
+        raise FixedSnapshotUnavailableError(DELIVERY_UNAVAILABLE_MESSAGE)
+    return PublicDeliveryContext(
+        delivery=delivery, report=report, professional=professional, patient=patient
+    )
+
+
+def resolve_fixed_document(context: PublicDeliveryContext) -> PublicDocument:
+    """Documento do snapshot congelado; NUNCA o relatório atual (F14)."""
+    document = resolve_public_document(context)
+    if document.snapshot_mode != SNAPSHOT_MODE_FIXED:
+        raise FixedSnapshotUnavailableError(SNAPSHOT_MISSING_MESSAGE)
+    return document
+
+
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 

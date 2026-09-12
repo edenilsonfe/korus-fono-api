@@ -14,9 +14,18 @@ SQLite em memória; o provedor de IA é mockado (padrão de
 """
 
 import hashlib
+import uuid
+from datetime import UTC, date, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import select
+
+from app.models.ai import AIReport
+from app.models.caregiver import Caregiver
+from app.models.resource import Resource
+from app.models.resource_license import ResourceLicense
 
 LLM_DRAFT = (
     "## Síntese\nO paciente demonstra avanço consolidado entre as reavaliações.\n\n"
@@ -201,3 +210,337 @@ async def test_consolidated_delivery_snapshot_survives_later_edit(
     text = exported.content.decode("utf-8")
     assert "Revisão posterior aprovada." not in text
     assert LLM_DRAFT.splitlines()[1] in text
+
+
+# --------------------------------------------------------------------------- #
+# F14 × F1 × F17 × F16 — chains do portal da família (onda F14)
+# --------------------------------------------------------------------------- #
+
+
+async def _family_caregiver(db_session, patient) -> Caregiver:
+    caregiver = Caregiver(
+        patient_id=patient.id, name="Mãe Sintética", relation="Mãe", is_primary=True
+    )
+    db_session.add(caregiver)
+    await db_session.commit()
+    await db_session.refresh(caregiver)
+    return caregiver
+
+
+async def _enable_family_portal(api_client, headers, patient) -> None:
+    response = await api_client.put(
+        f"/api/v1/patients/{patient.id}/family-portal",
+        headers=headers,
+        json={"enabled": True, "expectedVersion": 1},
+    )
+    assert response.status_code == 200, response.text
+
+
+async def _authorize_family_recipient(api_client, headers, patient, caregiver_id) -> dict:
+    response = await api_client.put(
+        f"/api/v1/patients/{patient.id}/family-portal/recipients/{caregiver_id}",
+        headers=headers,
+        json={
+            "appointmentsEnabled": False,
+            "familyAuthorization": {
+                "authorizedAt": (datetime.now(UTC) - timedelta(days=1)).isoformat(),
+                "reference": "Termo sintético do ciclo",
+                "reviewed": True,
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+async def _issue_family_grant(api_client, headers, patient, recipient_id) -> str:
+    response = await api_client.post(
+        f"/api/v1/patients/{patient.id}/family-portal/recipients/{recipient_id}/grants",
+        headers=headers,
+        json={
+            "expiresInDays": 30,
+            "expectedRecipientVersion": 1,
+            "rotateFromGrantId": None,
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["url"].split("#token=", 1)[1]
+
+
+def _family_headers(token: str) -> dict[str, str]:
+    return {"X-Family-Portal-Token": token}
+
+
+async def _portal_fixture(api_client, auth_headers, db_session, patient) -> tuple[dict, str]:
+    caregiver = await _family_caregiver(db_session, patient)
+    await _enable_family_portal(api_client, auth_headers, patient)
+    recipient = await _authorize_family_recipient(
+        api_client, auth_headers, patient, caregiver.id
+    )
+    token = await _issue_family_grant(api_client, auth_headers, patient, recipient["id"])
+    return recipient, token
+
+
+async def test_f14_report_item_serves_frozen_snapshot_and_revocation_blocks_it(
+    api_client, auth_headers, db_session, patient, professional
+):
+    # F1: relatório "pais" finalizado (seed local, mesmo padrão de
+    # tests/test_report_deliveries.py) + entrega por link com snapshot fixo.
+    report = AIReport(
+        professional_id=professional.id,
+        patient_id=patient.id,
+        type="pais",
+        date=date(2026, 9, 1),
+        preview="Resumo do relatório",
+        content="## Como está o(a) paciente\nJoão evoluiu bem.",
+        status="finalized",
+    )
+    db_session.add(report)
+    await db_session.commit()
+    await db_session.refresh(report)
+
+    delivery = await api_client.post(
+        f"/api/v1/ai/reports/{report.id}/deliveries",
+        headers=auth_headers,
+        json={"channel": "link"},
+    )
+    assert delivery.status_code == 201, delivery.text
+    delivery_id = delivery.json()["id"]
+    assert delivery.json()["snapshotMode"] == "fixed"
+    frozen_text = report.content
+
+    recipient, token = await _portal_fixture(
+        api_client, auth_headers, db_session, patient
+    )
+
+    # Candidato real (entrega standard de relatório pais) + criação/publicação.
+    sources = await api_client.get(
+        f"/api/v1/patients/{patient.id}/family-portal/sources",
+        headers=auth_headers,
+        params={"kind": "reportDelivery"},
+    )
+    assert sources.status_code == 200, sources.text
+    candidate = next(
+        item for item in sources.json()["items"] if item["id"] == delivery_id
+    )
+    assert candidate["eligible"] is True
+
+    created_item = await api_client.post(
+        f"/api/v1/patients/{patient.id}/family-portal/items",
+        headers=auth_headers,
+        json={
+            "kind": "report",
+            "source": {"deliveryId": delivery_id},
+            "content": {"title": "Relatório para os pais"},
+            "recipientIds": [recipient["id"]],
+        },
+    )
+    assert created_item.status_code == 201, created_item.text
+    item_id = created_item.json()["id"]
+    published = await api_client.post(
+        f"/api/v1/patients/{patient.id}/family-portal/items/{item_id}/publish",
+        headers=auth_headers,
+        json={
+            "expectedVersion": created_item.json()["version"],
+            "expectedSourceFingerprint": candidate["sourceFingerprint"],
+            "reviewed": True,
+        },
+    )
+    assert published.status_code == 200, published.text
+
+    # A família lê o TEXTO DO SNAPSHOT congelado (não o relatório vivo).
+    detail = await api_client.get(
+        f"/api/v1/family-portal/items/{item_id}", headers=_family_headers(token)
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["available"] is True
+    assert detail.json()["content"] == frozen_text
+
+    # Editar o relatório DEPOIS da entrega não muda o item F14.
+    report.content = frozen_text + "\n\nAdendo posterior."
+    db_session.add(report)
+    await db_session.commit()
+    still = await api_client.get(
+        f"/api/v1/family-portal/items/{item_id}", headers=_family_headers(token)
+    )
+    assert still.json()["content"] == frozen_text
+    assert "Adendo posterior." not in still.json()["content"]
+
+    # Revogar a entrega F1 bloqueia o item (motivo genérico) e o arquivo.
+    revoked = await api_client.delete(
+        f"/api/v1/ai/reports/{report.id}/deliveries/{delivery_id}",
+        headers=auth_headers,
+    )
+    assert revoked.status_code == 200, revoked.text
+    assert revoked.json()["revokedAt"] is not None
+    blocked = await api_client.get(
+        f"/api/v1/family-portal/items/{item_id}", headers=_family_headers(token)
+    )
+    assert blocked.status_code == 200, blocked.text
+    assert blocked.json()["available"] is False
+    assert (
+        blocked.json()["unavailableReason"]
+        == "Este conteúdo não está disponível no momento."
+    )
+    file_blocked = await api_client.get(
+        f"/api/v1/family-portal/items/{item_id}/file", headers=_family_headers(token)
+    )
+    assert file_blocked.status_code == 409
+
+
+@pytest.fixture
+def material_storage(monkeypatch):
+    payload = b"%PDF-1.4 material sintetico do ciclo F14"
+    sha = hashlib.sha256(payload).hexdigest()
+
+    async def fake_download_limited(key, max_bytes=None, timeout_seconds=None):
+        return payload, "application/pdf"
+
+    monkeypatch.setattr(
+        "app.services.family_portal_files.storage_service.download_limited",
+        fake_download_limited,
+    )
+    return SimpleNamespace(payload=payload, sha=sha)
+
+
+async def _seed_licensed_material(
+    db_session, professional, *, sha: str
+) -> tuple[Resource, ResourceLicense]:
+    resource = Resource(
+        owner_professional_id=professional.id,
+        title="Cartões de animais",
+        description="",
+        categories=["Linguagem"],
+        format="PDF",
+        file_size_bytes=100,
+        author=professional.name,
+        storage_key=f"resources/test/{uuid.uuid4().hex}.pdf",
+        content_type="application/pdf",
+        content_sha256=sha,
+    )
+    db_session.add(resource)
+    await db_session.flush()
+    license_row = ResourceLicense(
+        resource_id=resource.id,
+        version=1,
+        status="declared",
+        origin="original",
+        rights_holder=professional.name,
+        attribution="Uso autorizado pela autora",
+        allow_professional_distribution=True,
+        allow_family_delivery=True,
+        content_sha256=sha,
+    )
+    db_session.add(license_row)
+    await db_session.commit()
+    await db_session.refresh(resource)
+    await db_session.refresh(license_row)
+    return resource, license_row
+
+
+async def test_f14_material_item_freezes_license_and_reference_guard_blocks_delete(
+    api_client, auth_headers, db_session, patient, professional, material_storage
+):
+    resource, license_row = await _seed_licensed_material(
+        db_session, professional, sha=material_storage.sha
+    )
+    recipient, token = await _portal_fixture(
+        api_client, auth_headers, db_session, patient
+    )
+
+    sources = await api_client.get(
+        f"/api/v1/patients/{patient.id}/family-portal/sources",
+        headers=auth_headers,
+        params={"kind": "resource"},
+    )
+    assert sources.status_code == 200, sources.text
+    candidate = next(
+        item for item in sources.json()["items"] if item["id"] == str(resource.id)
+    )
+    assert candidate["eligible"] is True
+
+    created_item = await api_client.post(
+        f"/api/v1/patients/{patient.id}/family-portal/items",
+        headers=auth_headers,
+        json={
+            "kind": "material",
+            "source": {"resourceId": str(resource.id)},
+            "content": {"title": "Cartões de animais", "instructions": "Recorte e use na mesa."},
+            "recipientIds": [recipient["id"]],
+        },
+    )
+    assert created_item.status_code == 201, created_item.text
+    item_id = created_item.json()["id"]
+    published = await api_client.post(
+        f"/api/v1/patients/{patient.id}/family-portal/items/{item_id}/publish",
+        headers=auth_headers,
+        json={
+            "expectedVersion": created_item.json()["version"],
+            "expectedSourceFingerprint": candidate["sourceFingerprint"],
+            "reviewed": True,
+        },
+    )
+    assert published.status_code == 200, published.text
+
+    # Detalhe público traz metadados congelados (nunca bytes no JSON).
+    detail = await api_client.get(
+        f"/api/v1/family-portal/items/{item_id}", headers=_family_headers(token)
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["available"] is True
+    assert detail.json()["instructions"] == "Recorte e use na mesa."
+    assert detail.json()["attribution"] == "Uso autorizado pela autora"
+
+    # Arquivo autorizado serve os bytes reais com nome próprio.
+    served = await api_client.get(
+        f"/api/v1/family-portal/items/{item_id}/file", headers=_family_headers(token)
+    )
+    assert served.status_code == 200, served.text
+    assert served.content == material_storage.payload
+    assert f"material-{item_id}" in served.headers.get("content-disposition", "")
+
+    # F17 × F14: o item F14 congela a referência — excluir o recurso é 409.
+    blocked_delete = await api_client.delete(
+        f"/api/v1/resources/{resource.id}", headers=auth_headers
+    )
+    assert blocked_delete.status_code == 409, blocked_delete.text
+
+    # Licença revogada depois → família perde o conteúdo e o arquivo.
+    license_row.status = "revoked"
+    db_session.add(license_row)
+    await db_session.commit()
+    flipped = await api_client.get(
+        f"/api/v1/family-portal/items/{item_id}", headers=_family_headers(token)
+    )
+    assert flipped.status_code == 200, flipped.text
+    assert flipped.json()["available"] is False
+    file_after = await api_client.get(
+        f"/api/v1/family-portal/items/{item_id}/file", headers=_family_headers(token)
+    )
+    assert file_after.status_code == 409
+
+
+async def test_f14_and_f16_public_surfaces_do_not_share_tokens(
+    api_client, auth_headers, db_session, patient
+):
+    """Independência F14×F16: cada superfície pública valida SÓ o seu próprio
+    header. O token do portal não abre o programa de casa (410 no padrão do
+    F16) e um header alheio é ignorado pela superfície do F14."""
+    _recipient, token = await _portal_fixture(
+        api_client, auth_headers, db_session, patient
+    )
+
+    cross = await api_client.get(
+        "/api/v1/home-program-responses", headers={"X-Home-Program-Token": token}
+    )
+    assert cross.status_code == 410
+
+    wrong_header = await api_client.get(
+        "/api/v1/family-portal", headers={"X-Home-Program-Token": "qualquer"}
+    )
+    assert wrong_header.status_code == 410
+
+    ok = await api_client.get(
+        "/api/v1/family-portal", headers=_family_headers(token)
+    )
+    assert ok.status_code == 200, ok.text

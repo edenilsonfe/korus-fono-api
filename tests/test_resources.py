@@ -1,5 +1,6 @@
 """Resources library — ownership, mime validation, admin gate."""
 
+import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
@@ -14,6 +15,7 @@ from app.db.base import Base
 from app.db.session import engine as _real_engine
 from app.db.session import get_db
 from app.main import app
+from app.models.family_portal_content import FamilyPortalItem
 from app.models.home_program import HomeProgramTaskResource
 from app.models.professional import Professional
 from app.models.resource import Resource
@@ -64,6 +66,7 @@ async def _engine():
                     ProgramResourceLink.__table__,
                     HomeProgramTaskResource.__table__,
                     StorageCleanupTask.__table__,
+                    FamilyPortalItem.__table__,
                     Base.metadata.tables["admin_audit_logs"],
                 ],
             )
@@ -484,6 +487,57 @@ async def test_delete_personal_forbidden_on_global(resources_env):
         headers=_headers(owner),
     )
     assert res.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_family_portal_item_blocks_delete_and_replace(resources_env):
+    """F14: item do portal (mesmo retirado) congela o hash e bloqueia o arquivo."""
+    from app.services.resource_service import resource_has_references
+
+    client = resources_env["client"]
+    session = resources_env["session"]
+    owner = resources_env["owner"]
+    personal_item = resources_env["personal_item"]
+
+    portal_item = FamilyPortalItem(
+        portal_id=uuid.uuid4(),
+        kind="material",
+        status="draft",
+        version=1,
+        published_version=None,
+        draft_content={"title": "Material do portal", "instructions": ""},
+        draft_recipient_ids=[],
+        draft_source_fingerprint=None,
+        resource_id=personal_item.id,
+        created_by_professional_id=owner.id,
+    )
+    session.add(portal_item)
+    await session.commit()
+
+    assert await resource_has_references(session, personal_item) is True
+
+    blocked_delete = await client.delete(
+        f"/api/v1/resources/{personal_item.id}", headers=_headers(owner)
+    )
+    assert blocked_delete.status_code == 409, blocked_delete.text
+    blocked_replace = await client.patch(
+        f"/api/v1/resources/{personal_item.id}",
+        headers=_headers(owner),
+        data={"title": "Tentativa"},
+        files={"file": ("novo.pdf", b"%PDF-1.4 novo", "application/pdf")},
+    )
+    assert blocked_replace.status_code == 409, blocked_replace.text
+
+    # Retirado do portal continua bloqueando: a revisão congelou o hash.
+    portal_item.status = "withdrawn"
+    await session.commit()
+    await session.refresh(portal_item)
+    assert portal_item.status == "withdrawn"
+    assert await resource_has_references(session, personal_item) is True
+    still_blocked = await client.delete(
+        f"/api/v1/resources/{personal_item.id}", headers=_headers(owner)
+    )
+    assert still_blocked.status_code == 409
 
 
 @pytest.mark.asyncio

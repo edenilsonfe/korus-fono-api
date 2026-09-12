@@ -463,8 +463,14 @@ class AdminProfessionalService:
         if pro.id == actor.id:
             raise AdminConflictError("Você não pode desativar a própria conta")
         canceled_subscriptions = await self._cancel_asaas_subscriptions(pro)
+        # F14: época própria do portal da família incrementada na MESMA
+        # transação da desativação. Sem refresh da conta: o fluxo Asaas acima
+        # pode deixar mudanças pendentes na própria instância (status da
+        # assinatura) e recarregá-la as descartaria. Desativar invalida todos
+        # os links; reativar nunca reduz o contador.
         pro.is_disabled = True
         pro.token_version += 1
+        pro.family_portal_access_version += 1
         await self.audit.log(
             actor_id=actor.id,
             target_professional_id=pro.id,
@@ -472,6 +478,7 @@ class AdminProfessionalService:
             payload={
                 "reason": reason,
                 "token_version": pro.token_version,
+                "family_portal_access_version": pro.family_portal_access_version,
                 "canceled_asaas_subscriptions": canceled_subscriptions,
             },
         )

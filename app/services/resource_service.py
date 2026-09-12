@@ -12,6 +12,7 @@ from app.core.resource_catalog import (
     RESOURCE_MAX_BYTES,
 )
 from app.core.utils import utcnow
+from app.models.family_portal_content import FamilyPortalItem
 from app.models.home_program import HomeProgramTaskResource
 from app.models.professional import Professional
 from app.models.resource import Resource
@@ -246,13 +247,15 @@ async def resource_has_references(
 ) -> bool:
     """Referências vivas que impedem substituir/apagar o arquivo no lugar.
 
-    Publicação/arquivamento, vínculos de meta/programa (prescrição — 4.2) e
-    materiais prescritos em tarefa de programa de casa (F16 — 5.3) sempre
-    bloqueiam: o arquivo entregue à família não pode mudar por baixo do vínculo.
-    Licenças e vínculos de domínio entram apenas na exclusão (preservam
-    histórico editorial); na substituição a licença anterior fica presa ao hash
-    antigo e deixa de valer (aprovação retirada por incompatibilidade de
-    conteúdo). Novo conteúdo = novo ``Resource`` (ver §3.4, F17).
+    Publicação/arquivamento, vínculos de meta/programa (prescrição — 4.2),
+    materiais prescritos em tarefa de programa de casa (F16 — 5.3) e itens do
+    portal da família (F14 — inclusive retirados, cujo histórico congelou o
+    hash) sempre bloqueiam: o arquivo entregue à família não pode mudar por
+    baixo do vínculo. Licenças e vínculos de domínio entram apenas na exclusão
+    (preservam histórico editorial); na substituição a licença anterior fica
+    presa ao hash antigo e deixa de valer (aprovação retirada por
+    incompatibilidade de conteúdo). Novo conteúdo = novo ``Resource`` (ver
+    §3.4, F17).
     """
     if resource.publication_status in ("published", "archived"):
         return True
@@ -261,6 +264,8 @@ async def resource_has_references(
     if await _resource_has_link(db, ProgramResourceLink, resource.id):
         return True
     if await _resource_has_link(db, HomeProgramTaskResource, resource.id):
+        return True
+    if await _resource_has_link(db, FamilyPortalItem, resource.id):
         return True
     if include_domain_links and await _resource_has_link(db, ResourceDomainLink, resource.id):
         return True

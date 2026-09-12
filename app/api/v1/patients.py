@@ -21,6 +21,7 @@ from app.models.attachment import Attachment
 from app.models.care_team import PatientSharingConsentEvent
 from app.models.caregiver import Caregiver
 from app.models.evolution import Evolution
+from app.models.family_portal import FamilyPortal
 from app.models.goal import Goal
 from app.models.home_program import HomeProgram
 from app.models.intervention_program import InterventionProgram
@@ -42,6 +43,10 @@ from app.schemas.patient import (
     TherapyPlanUpdate,
 )
 from app.services.care_team_service import record_access_event
+from app.services.family_portal_access import (
+    invalidate_portal_for_patient,
+    withdraw_recipient_for_caregiver,
+)
 from app.services.feature_flag_service import FeatureFlagService
 from app.services.google_calendar_service import (
     dispatch_sync_records,
@@ -340,6 +345,9 @@ async def update_caregiver(
 ):
     caregiver = await _get_caregiver_for_patient(patient_id, caregiver_id, professional, db)
     data = body.model_dump(exclude_unset=True)
+    # F14: mudança efetiva de identidade/contato é tratada conservadoramente —
+    # a autorização do portal é retirada e uma nova conferência será exigida.
+    previous_identity = (caregiver.name, caregiver.relation, caregiver.phone, caregiver.email)
 
     if "name" in data and data["name"] is not None:
         caregiver.name = data["name"].strip()
@@ -366,6 +374,15 @@ async def update_caregiver(
         if remaining and not any(c.is_primary for c in remaining):
             remaining[0].is_primary = True
 
+    if previous_identity != (caregiver.name, caregiver.relation, caregiver.phone, caregiver.email):
+        await withdraw_recipient_for_caregiver(
+            db,
+            patient_id=patient_id,
+            caregiver_id=caregiver.id,
+            actor=professional,
+            reason="caregiver_changed",
+            clear_caregiver_link=False,
+        )
     await db.flush()
     return _caregiver_response(caregiver)
 
@@ -391,6 +408,16 @@ async def delete_caregiver(
         patient_id=patient_id,
         caregiver_id=caregiver_id,
         actor=professional,
+    )
+    # F14: destinatário retirado e vínculo solto ANTES do DELETE (histórico
+    # mínimo preservado; reativar não recupera públicos removidos).
+    await withdraw_recipient_for_caregiver(
+        db,
+        patient_id=patient_id,
+        caregiver_id=caregiver_id,
+        actor=professional,
+        reason="caregiver_removed",
+        clear_caregiver_link=True,
     )
     await db.delete(caregiver)
     await db.flush()
@@ -471,6 +498,12 @@ async def update_patient(
     for field, value in data.items():
         setattr(patient, field, value)
     if previous_status != "inativo" and patient.status == "inativo":
+        # F14: o portal da família morre ANTES do cancelamento da agenda (que
+        # faz commit interno): desativa, incrementa a época e revoga links na
+        # MESMA transação da mudança de status.
+        await invalidate_portal_for_patient(
+            db, patient_id=patient.id, actor=professional, reason="patient_inactive"
+        )
         _appointments, _event_logs, google_records = await cancel_future_patient_appointments(
             db,
             professional_id=professional.id,
@@ -589,6 +622,22 @@ async def delete_patient(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
                 "Paciente com histórico de programa de casa "
+                "não pode ser excluído; "
+                "altere o status para inativo"
+            ),
+        )
+    # F14: portal da família (com itens publicados) é histórico de
+    # compartilhamento — 409 explícito em vez de erro de FK no DELETE.
+    portal_history = await db.scalar(
+        select(FamilyPortal.id)
+        .where(FamilyPortal.patient_id == patient.id)
+        .limit(1)
+    )
+    if portal_history is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Paciente com portal da família "
                 "não pode ser excluído; "
                 "altere o status para inativo"
             ),

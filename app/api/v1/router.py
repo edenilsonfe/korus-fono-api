@@ -23,6 +23,9 @@ from app.api.v1 import (
     care_team,
     clinical,
     dashboard,
+    family_portal_content,
+    family_portal_public,
+    family_portals,
     finance,
     google_calendar,
     home_program_responses,
@@ -63,6 +66,9 @@ api_router.include_router(appointment_responses.router)
 api_router.include_router(report_deliveries.router)
 api_router.include_router(finance.router)
 api_router.include_router(finance.patient_router)
+api_router.include_router(family_portals.router)
+api_router.include_router(family_portal_content.router)
+api_router.include_router(family_portal_public.router)
 api_router.include_router(google_calendar.router)
 api_router.include_router(sessions.router)
 api_router.include_router(sessions.patient_router)
