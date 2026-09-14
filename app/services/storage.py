@@ -86,6 +86,14 @@ def safe_content_disposition_filename(key: str, filename: str | None = None) -> 
     base = re.sub(r"[\x00-\x1f\x7f]", "", base)
     base = base.replace('"', "")
     base = _SAFE_FILENAME_RE.sub("_", base).strip("._") or "download"
+    # O título pode não conter extensão (ou terminar em uma versão como "2.0").
+    # Preserve a extensão do objeto também ao limitar o tamanho do nome.
+    extension = re.search(r"\.[a-zA-Z0-9]{1,10}$", key)
+    if extension:
+        suffix = extension.group()
+        if base.lower().endswith(suffix.lower()):
+            suffix, base = base[-len(suffix):], base[:-len(suffix)]
+        return base[:180 - len(suffix)] + suffix
     return base[:180]
 
 

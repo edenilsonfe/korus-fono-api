@@ -21,6 +21,23 @@ def test_safe_content_disposition_filename():
     assert safe_content_disposition_filename("k", filename="../../etc/passwd") == "passwd"
 
 
+@pytest.mark.parametrize(
+    ("key", "title", "expected"),
+    [
+        ("resources/original.pdf", "Cards Intraverbais", "Cards Intraverbais.pdf"),
+        ("resources/original.pdf", "CAIXINHA TDAH 2.0", "CAIXINHA TDAH 2.0.pdf"),
+        ("resources/original.pdf", "Material.PDF", "Material.PDF"),
+        ("resources/original.png", "Imagem", "Imagem.png"),
+        ("resources/original.jpeg", "Imagem", "Imagem.jpeg"),
+        ("resources/original.webp", "Imagem", "Imagem.webp"),
+        ("resources/original.pdf", "A" * 200, "A" * 176 + ".pdf"),
+        ("resources/original.pdf", '../../evil"\r\nname', "evilname.pdf"),
+    ],
+)
+def test_download_filename_preserves_stored_extension(key, title, expected):
+    assert safe_content_disposition_filename(key, title) == expected
+
+
 @pytest.mark.asyncio
 async def test_presigned_url_params_include_attachment_disposition(monkeypatch):
     service = StorageService()
@@ -36,7 +53,7 @@ async def test_presigned_url_params_include_attachment_disposition(monkeypatch):
 
     monkeypatch.setattr(service, "_client", lambda: _Ctx())
 
-    url = await service.presigned_url("patients/p/u/relatorio.pdf")
+    url = await service.presigned_url("patients/p/u/relatorio.pdf", filename="relatorio")
     assert url == "https://example.com/signed"
 
     kwargs = mock_client.generate_presigned_url.await_args.kwargs

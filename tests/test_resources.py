@@ -671,7 +671,7 @@ async def test_resource_file_streams_inline(resources_env):
         )
     assert res.status_code == 200
     assert res.headers["content-type"] == "application/pdf"
-    assert res.headers["content-disposition"].startswith('inline; filename="Pessoal"')
+    assert res.headers["content-disposition"] == 'inline; filename="Pessoal.pdf"'
     assert res.content == b"%PDF-1.7 test"
 
 

@@ -88,6 +88,10 @@ O frontend já exibe `detail` e só limpa o QR/confirma sucesso após a resposta
 - API: `GET /api/v1/...`
 - Docs: `GET /docs` (Swagger — debug local; contrato = `app/schemas/` + `app/api/v1/`)
 
+Downloads e prévias preservam a extensão do arquivo armazenado ao usar o título
+do material como nome (por exemplo, `CAIXINHA TDAH 2.0.pdf`). A extensão também
+é preservada em nomes longos. Não há mudança de contrato JSON nem migration.
+
 ### Checkout da assinatura
 
 O cadastro pago usa `POST /api/v1/auth/register-checkout`. Essas contas mantêm
