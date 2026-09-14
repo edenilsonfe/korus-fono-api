@@ -244,7 +244,7 @@ PROTOCOLS = [
         "id": "portage",
         "name": "Portage",
         "full_name": "Inventário Portage Operacionalizado (IPO) — HCFMRP",
-        "description": "Avaliação Portage completa 0-6 anos + Estimulação Infantil. Base HC-FMRP Ribeirão Preto.",
+        "description": "Registro dos 580 itens do Portage (0-6 anos), incluindo Estimulação Infantil (0-4 meses). Aplicação acompanhada do manual do IPO.",
         "age_range": "0 a 6 anos",
         "field_templates": [
             {"key": "socializacao", "label": "Socialização"},
