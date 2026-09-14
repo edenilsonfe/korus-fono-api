@@ -17,9 +17,12 @@ from app.schemas.appointment import (
     AppointmentCreateResponse,
     AppointmentResponse,
     AppointmentUpdate,
+    AppointmentSeriesUpdate,
+    AppointmentSeriesUpdateResponse,
     WeekdaySlot,
 )
 from app.services.appointment_completion_service import complete_appointment
+from app.services.appointment_series_service import update_appointment_series
 from app.services.appointment_finance_service import (
     get_active_service_for_appointment,
     service_snapshot,
@@ -302,6 +305,23 @@ async def create_appointment(
 
     response = _to_response(anchor, patient.name, professional.name)
     return AppointmentCreateResponse(**response.model_dump(by_alias=False), children_created=children_created)
+
+
+@router.patch("/{appointment_id}/series", response_model=AppointmentSeriesUpdateResponse)
+async def update_series(
+    appointment_id: UUID,
+    body: AppointmentSeriesUpdate,
+    background_tasks: BackgroundTasks,
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    result, event_logs, google_records = await update_appointment_series(db, professional, appointment_id, body)
+    await db.commit()
+    for log in event_logs:
+        background_tasks.add_task(enqueue_whatsapp_appointment_event_log, log.id)
+    if google_records:
+        background_tasks.add_task(dispatch_sync_records, [record.id for record in google_records])
+    return result
 
 
 @router.patch("/{appointment_id}", response_model=AppointmentResponse)

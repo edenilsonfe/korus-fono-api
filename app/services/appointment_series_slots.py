@@ -101,15 +101,16 @@ def iter_recurring_child_slots(
     *,
     duration: int | None = None,
     weekday_rules: list[WeekdaySlotRule] | None = None,
+    include_first: bool = False,
 ) -> Iterable[AppointmentSlot]:
-    """Yield expected child slots (excludes the anchor's first day)."""
+    """Yield slots; series editing includes the first matching occurrence."""
     if not end_date:
         return
 
     default_duration = duration if duration is not None else 50
     by_weekday = rules_by_weekday(weekday_rules)
     dates = _frequency_dates(frequency or "semanal", start_date, end_date, weekdays)
-    for appointment_date in dates[1:]:
+    for appointment_date in dates if include_first else dates[1:]:
         rule = by_weekday.get(appointment_date.weekday())
         slot_time = rule.start_time if rule else start_time
         slot_duration = rule.duration if rule else default_duration

@@ -43,6 +43,8 @@ async def ensure_appointment_slot_available(
     appointment_time: time,
     duration: int,
     exclude_appointment_id: UUID | None = None,
+    *,
+    exclude_appointment_ids: set[UUID] | None = None,
 ) -> None:
     # Serialize all agenda writers, including two reservations of an empty slot.
     await db.execute(select(Professional.id).where(Professional.id == professional_id).with_for_update())
@@ -58,6 +60,8 @@ async def ensure_appointment_slot_available(
     )
     for existing in appointments_result.scalars().all():
         if exclude_appointment_id and existing.id == exclude_appointment_id:
+            continue
+        if exclude_appointment_ids and existing.id in exclude_appointment_ids:
             continue
         if _time_ranges_overlap(
             appointment_start,
