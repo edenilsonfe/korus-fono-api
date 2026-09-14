@@ -250,28 +250,40 @@ async def test_list_resources_scope(resources_env):
 
 
 @pytest.mark.asyncio
-async def test_restore_legacy_catalog_keeps_new_materials_and_family_gated(resources_env):
+@pytest.mark.parametrize("shared", [False, True], ids=["global", "professional_shared"])
+async def test_restore_legacy_catalog_keeps_new_materials_and_family_gated(resources_env, shared):
     client, session = resources_env["client"], resources_env["session"]
-    legacy = resources_env["global_item"]
+    legacy = resources_env["other_item" if shared else "global_item"]
+    legacy.shared_with_platform = shared
     legacy_id = str(legacy.id)
+    uploader = resources_env["other"] if shared else None
+    owner_headers = _headers(resources_env["other"])
     headers = _headers(resources_env["owner"])
-    new = await _resource(session, owner=None, title="Novo rascunho")
+    new = await _resource(session, owner=uploader, title="Novo rascunho")
+    new.shared_with_platform = shared
     new.content_sha256 = "b" * 64
-    archived = await _resource(session, owner=None, title="Arquivado")
+    archived = await _resource(session, owner=uploader, title="Arquivado")
+    archived.shared_with_platform = shared
     archived.publication_status = "archived"
-    reviewed = await _resource(session, owner=None, title="Licença revogada")
+    reviewed = await _resource(session, owner=uploader, title="Licença revogada")
+    reviewed.shared_with_platform = shared
     revoked = await _publish_with_approved_license(session, reviewed)
     reviewed.publication_status = "draft"
     reviewed.content_sha256 = None
     revoked.status = "revoked"
+    await _resource(session, owner=resources_env["other"], title="Privado")
     await session.commit()
 
     before = await client.get("/api/v1/resources?scope=global", headers=headers)
     assert before.json() == []  # O catálogo antigo desapareceu depois de F17.
 
+    migration_file = (
+        "6b85bd604c9a_restore_legacy_shared_resources.py" if shared
+        else "eaa1bbe3701c_restore_legacy_global_catalog.py"
+    )
     migration = runpy.run_path(str(
         Path(__file__).resolve().parents[1]
-        / "alembic/versions/eaa1bbe3701c_restore_legacy_global_catalog.py"
+        / "alembic/versions" / migration_file
     ))
 
     def upgrade(sync_session):
@@ -288,6 +300,8 @@ async def test_restore_legacy_catalog_keeps_new_materials_and_family_gated(resou
     assert [item["id"] for item in restored.json()] == [legacy_id]
     item = restored.json()[0]
     assert item["publicationStatus"] == "published"
+    assert item["isMine"] is False
+    assert item["sharedWithPlatform"] is shared
     assert item["license"] is None
     assert item["canDeliverToFamily"] is False
     assert item["unavailableReason"] == "Material sem declaração de licença; distribuição não autorizada."
@@ -302,8 +316,29 @@ async def test_restore_legacy_catalog_keeps_new_materials_and_family_gated(resou
     download = await client.get(f"/api/v1/resources/{legacy_id}/download-url", headers=headers)
     assert download.status_code == 200
 
+    session.expire_all()  # Simula a nova sessão HTTP após o UPDATE do download.
+    all_items = await client.get("/api/v1/resources", headers=headers)
+    assert {row["title"] for row in all_items.json()} == {"Pessoal", item["title"]}
+    if shared:
+        # O dono continua dono; retirar o compartilhamento bloqueia terceiros.
+        own = await client.get("/api/v1/resources?scope=mine", headers=owner_headers)
+        assert next(row for row in own.json() if row["id"] == legacy_id)["isMine"] is True
+        unshare = await client.patch(
+            f"/api/v1/resources/{legacy_id}", headers=owner_headers,
+            data={"sharedWithPlatform": "false"},
+        )
+        assert unshare.status_code == 200
+        assert (await client.get("/api/v1/resources?scope=global", headers=headers)).json() == []
+        assert (await client.get(
+            f"/api/v1/resources/{legacy_id}/file", headers=headers
+        )).status_code == 403
+        assert (await client.get(
+            f"/api/v1/resources/{legacy_id}/download-url", headers=owner_headers
+        )).status_code == 200
+
     # Novo conteúdo, arquivamento ou licença revogada encerram a compatibilidade.
     await session.refresh(legacy)
+    legacy.shared_with_platform = shared
     for state, digest in (("published", "c" * 64), ("archived", None)):
         legacy.publication_status, legacy.content_sha256 = state, digest
         await session.commit()

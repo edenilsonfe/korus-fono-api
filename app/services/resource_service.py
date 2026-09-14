@@ -289,10 +289,11 @@ def _apply_metadata(resource: Resource, payload: dict[str, Any]) -> None:
 def _catalog_available(resource: Resource, license: ResourceLicense | None) -> bool:
     if resource.publication_status != "published":
         return False
-    # A migração eaa1bbe3701c restaura os globais anteriores ao F17. Uploads
-    # novos já têm hash; qualquer declaração encerra esta compatibilidade.
+    # As migrações de recuperação restauram globais e compartilhamentos pré-F17.
+    # Uploads novos já têm hash; declaração ou retirada do compartilhamento
+    # encerra esta compatibilidade, preservando o acesso do dono.
     if (
-        resource.owner_professional_id is None
+        (resource.owner_professional_id is None or resource.shared_with_platform)
         and resource.content_sha256 is None
         and license is None
     ):
@@ -355,7 +356,7 @@ class ResourceService:
         offset: int = 0,
         limit: int = 50,
     ) -> list[tuple[Resource, ResourceLicense | None, list[str]]]:
-        """Visibilidade: próprio OU catálogo publicado (inclui globais pré-F17).
+        """Visibilidade: próprio OU catálogo publicado (inclui compartilhados pré-F17).
 
         Vínculo (meta/programa) não amplia visibilidade. ``domainKey`` filtra
         pelos vínculos persistidos (``ResourceDomainLink``). Ordenação estável

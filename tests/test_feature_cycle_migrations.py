@@ -102,17 +102,18 @@ def test_migration_chain_is_linear_with_single_head_and_cycle_in_order():
     assert not missing, f"down_revision sem arquivo correspondente: {missing}"
 
     heads = set(revisions) - referenced
-    assert heads == {"1f2db0ef179a"}, f"head único esperado; encontrados: {heads}"
+    assert len(heads) == 1, f"head único esperado; encontrados: {heads}"
 
     walk: list[str] = []
-    current: str | None = "1f2db0ef179a"
+    current: str | None = next(iter(heads))
     while current and current in revisions and current not in walk:
         walk.append(current)
         current = revisions[current]
     assert len(walk) == len(revisions), "histórico deixou de ser linear / há órfãos"
-    assert walk[: len(CYCLE_CHAIN)] == CYCLE_CHAIN, (
+    cycle_start = walk.index(CYCLE_CHAIN[0])
+    assert walk[cycle_start : cycle_start + len(CYCLE_CHAIN)] == CYCLE_CHAIN, (
         "as revisões do ciclo não são consecutivas na ordem esperada: "
-        f"{walk[: len(CYCLE_CHAIN) + 1]}"
+        f"{walk[cycle_start : cycle_start + len(CYCLE_CHAIN) + 1]}"
     )
 
 

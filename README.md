@@ -169,6 +169,11 @@ listagem, preview e download desse conteúdo sem inventar licença ou liberar
 entrega familiar/vínculos clínicos. Novos uploads e materiais revisados continuam
 exigindo licença aprovada. A recuperação preserva arquivos, datas e contadores.
 
+A migration complementar `6b85bd604c9a` recupera também os materiais pessoais
+anteriores ao F17 que continuam com `shared_with_platform=true`, sob os mesmos
+critérios. Mantém o dono e a autoria; retirar o compartilhamento bloqueia novamente
+o acesso dos demais profissionais. Materiais privados não são publicados.
+
 ```bash
 # Aplicar migrations (também roda automaticamente no docker compose --profile app up)
 docker compose run --rm migrate
