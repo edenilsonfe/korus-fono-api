@@ -162,6 +162,13 @@ de `/api/v1/billing/*`, que continua exclusivo para trial e assinatura do SaaS.
 
 ## Migrations (Alembic)
 
+A migration `eaa1bbe3701c` recupera a publicação do catálogo global anterior
+ao F17, convertido em rascunho pela migration `73b5bac60d26`. Somente globais
+sem hash, arquivamento ou qualquer licença são recuperados. A API mantém
+listagem, preview e download desse conteúdo sem inventar licença ou liberar
+entrega familiar/vínculos clínicos. Novos uploads e materiais revisados continuam
+exigindo licença aprovada. A recuperação preserva arquivos, datas e contadores.
+
 ```bash
 # Aplicar migrations (também roda automaticamente no docker compose --profile app up)
 docker compose run --rm migrate

@@ -1,10 +1,14 @@
 """Resources library — ownership, mime validation, admin gate."""
 
+import runpy
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -243,6 +247,75 @@ async def test_list_resources_scope(resources_env):
         "/api/v1/resources?scope=mine", headers=_headers(owner)
     )
     assert {item["title"] for item in own_global.json()} == {"Pessoal"}
+
+
+@pytest.mark.asyncio
+async def test_restore_legacy_catalog_keeps_new_materials_and_family_gated(resources_env):
+    client, session = resources_env["client"], resources_env["session"]
+    legacy = resources_env["global_item"]
+    legacy_id = str(legacy.id)
+    headers = _headers(resources_env["owner"])
+    new = await _resource(session, owner=None, title="Novo rascunho")
+    new.content_sha256 = "b" * 64
+    archived = await _resource(session, owner=None, title="Arquivado")
+    archived.publication_status = "archived"
+    reviewed = await _resource(session, owner=None, title="Licença revogada")
+    revoked = await _publish_with_approved_license(session, reviewed)
+    reviewed.publication_status = "draft"
+    reviewed.content_sha256 = None
+    revoked.status = "revoked"
+    await session.commit()
+
+    before = await client.get("/api/v1/resources?scope=global", headers=headers)
+    assert before.json() == []  # O catálogo antigo desapareceu depois de F17.
+
+    migration = runpy.run_path(str(
+        Path(__file__).resolve().parents[1]
+        / "alembic/versions/eaa1bbe3701c_restore_legacy_global_catalog.py"
+    ))
+
+    def upgrade(sync_session):
+        with Operations.context(MigrationContext.configure(sync_session.connection())):
+            migration["upgrade"]()
+            migration["upgrade"]()  # A recuperação não altera o escopo ao repetir.
+
+    await session.run_sync(upgrade)
+    await session.commit()
+    session.expire_all()
+
+    restored = await client.get("/api/v1/resources?scope=global", headers=headers)
+    assert restored.status_code == 200
+    assert [item["id"] for item in restored.json()] == [legacy_id]
+    item = restored.json()[0]
+    assert item["publicationStatus"] == "published"
+    assert item["license"] is None
+    assert item["canDeliverToFamily"] is False
+    assert item["unavailableReason"] == "Material sem declaração de licença; distribuição não autorizada."
+
+    with patch(
+        "app.services.resource_service.storage_service.download",
+        AsyncMock(return_value=(b"%PDF-1.4 antigo", "application/pdf")),
+    ):
+        preview = await client.get(f"/api/v1/resources/{legacy_id}/file", headers=headers)
+    assert preview.status_code == 200
+    assert preview.content == b"%PDF-1.4 antigo"
+    download = await client.get(f"/api/v1/resources/{legacy_id}/download-url", headers=headers)
+    assert download.status_code == 200
+
+    # Novo conteúdo, arquivamento ou licença revogada encerram a compatibilidade.
+    await session.refresh(legacy)
+    for state, digest in (("published", "c" * 64), ("archived", None)):
+        legacy.publication_status, legacy.content_sha256 = state, digest
+        await session.commit()
+        assert (await client.get("/api/v1/resources?scope=global", headers=headers)).json() == []
+        assert (await client.get(
+            f"/api/v1/resources/{legacy_id}/download-url", headers=headers
+        )).status_code == 403
+    license = await _publish_with_approved_license(session, legacy)
+    license.status = "revoked"
+    legacy.content_sha256 = None
+    await session.commit()
+    assert (await client.get("/api/v1/resources?scope=global", headers=headers)).json() == []
 
 
 @pytest.mark.asyncio

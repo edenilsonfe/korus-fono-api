@@ -286,6 +286,20 @@ def _apply_metadata(resource: Resource, payload: dict[str, Any]) -> None:
         setattr(resource, field, value)
 
 
+def _catalog_available(resource: Resource, license: ResourceLicense | None) -> bool:
+    if resource.publication_status != "published":
+        return False
+    # A migração eaa1bbe3701c restaura os globais anteriores ao F17. Uploads
+    # novos já têm hash; qualquer declaração encerra esta compatibilidade.
+    if (
+        resource.owner_professional_id is None
+        and resource.content_sha256 is None
+        and license is None
+    ):
+        return True
+    return license_is_valid_for_professionals(license, resource)
+
+
 def to_resource_response(
     resource: Resource,
     professional_id: uuid.UUID | None = None,
@@ -341,7 +355,7 @@ class ResourceService:
         offset: int = 0,
         limit: int = 50,
     ) -> list[tuple[Resource, ResourceLicense | None, list[str]]]:
-        """Visibilidade: próprio OU publicado com licença válida para profissionais.
+        """Visibilidade: próprio OU catálogo publicado (inclui globais pré-F17).
 
         Vínculo (meta/programa) não amplia visibilidade. ``domainKey`` filtra
         pelos vínculos persistidos (``ResourceDomainLink``). Ordenação estável
@@ -366,10 +380,7 @@ class ResourceService:
                 if not is_own:
                     continue
             else:
-                if not is_own and (
-                    resource.publication_status != "published"
-                    or not license_is_valid_for_professionals(license, resource)
-                ):
+                if not is_own and not _catalog_available(resource, license):
                     continue
                 if scope == "global" and is_own:
                     continue
@@ -451,9 +462,7 @@ class ResourceService:
         if resource.owner_professional_id == professional.id:
             return resource
         license = await get_current_license(self.db, resource_id)
-        if resource.publication_status == "published" and license_is_valid_for_professionals(
-            license, resource
-        ):
+        if _catalog_available(resource, license):
             return resource
         raise ResourceForbiddenError()
 
