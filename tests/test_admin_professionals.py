@@ -132,7 +132,9 @@ async def test_non_staff_forbidden(db):
     _clear_override()
 
 
-async def test_staff_list_and_detail(db):
+@pytest.mark.parametrize("billing_interval", ["monthly", "yearly"])
+@pytest.mark.parametrize("period_end", [datetime(2026, 10, 15, tzinfo=timezone.utc), None])
+async def test_staff_list_and_detail(db, billing_interval, period_end):
     staff = await _make_professional(db, email="staff@x.com", is_staff=True)
     staff.email_verified_at = datetime.now(timezone.utc)
     target = await _make_professional(db, email="target@x.com")
@@ -140,7 +142,7 @@ async def test_staff_list_and_detail(db):
         slug="korusfono_pro_monthly",
         name="KorusFono Pro",
         price_cents=9790,
-        billing_interval="monthly",
+        billing_interval=billing_interval,
     )
     db.add(plan)
     await db.flush()
@@ -148,9 +150,19 @@ async def test_staff_list_and_detail(db):
         Subscription(
             professional_id=target.id,
             plan_id=plan.id,
+            status="canceled",
+            current_period_end=datetime(2025, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        )
+    )
+    db.add(
+        Subscription(
+            professional_id=target.id,
+            plan_id=plan.id,
             status="active",
             provider="asaas",
             payment_method="credit_card",
+            current_period_end=period_end,
         )
     )
     await db.commit()
@@ -166,9 +178,11 @@ async def test_staff_list_and_detail(db):
             "slug": "korusfono_pro_monthly",
             "name": "KorusFono Pro",
             "status": "active",
-            "billingInterval": "monthly",
+            "billingInterval": billing_interval,
+            "currentPeriodEnd": "2026-10-15T00:00:00" if period_end else None,
         }
         assert target_item["paymentMethod"] == "credit_card"
+        assert next(i for i in body["items"] if i["id"] == str(staff.id))["plan"] is None
 
         resp = await client.get(
             f"/api/v1/admin/professionals/{target.id}", headers=_auth_headers(staff)
@@ -179,6 +193,7 @@ async def test_staff_list_and_detail(db):
         assert detail["cpfMasked"] == "***.***.***-01"
         assert "passwordHash" not in detail
         assert detail["counts"]["patients"] == 0
+        assert detail["plan"] == target_item["plan"]
     _clear_override()
 
 

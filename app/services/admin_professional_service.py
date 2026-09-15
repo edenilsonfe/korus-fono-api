@@ -64,6 +64,7 @@ def _admin_plan_summary(subscription: Subscription | None) -> AdminPlanSummary |
         name=subscription.plan.name,
         status=subscription.status,
         billing_interval=subscription.plan.billing_interval,
+        current_period_end=subscription.current_period_end,
     )
 
 

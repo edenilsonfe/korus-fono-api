@@ -15,6 +15,7 @@ class AdminPlanSummary(CamelModel):
     name: str | None = None
     status: str | None = None
     billing_interval: str | None = None
+    current_period_end: datetime | None = None
 
 
 class AdminProfessionalListItem(CamelModel):
