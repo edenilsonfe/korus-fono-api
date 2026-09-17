@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from app.core.security import hash_password
 from app.models.ai import AIReport
+from app.models.care_team import PatientAccessEvent
 from app.models.caregiver import Caregiver
 from app.models.goal import Goal
 from app.models.home_program import HomeProgram, HomeProgramGrant, HomeProgramTask
@@ -82,6 +83,31 @@ async def test_delete_patient_other_professional_returns_404(api_client, db_sess
 
     response = await api_client.delete(f"/api/v1/patients/{foreign.id}")
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_patient_with_access_history_returns_409(
+    api_client, auth_headers, db_session, patient, professional
+):
+    db_session.add(
+        PatientAccessEvent(
+            patient_id=patient.id,
+            actor_professional_id=professional.id,
+            actor_role="coordinator",
+            action="patient_record_opened",
+            resource_type="patient",
+            resource_id=patient.id,
+        )
+    )
+    await db_session.commit()
+
+    response = await api_client.delete(
+        f"/api/v1/patients/{patient.id}", headers=auth_headers
+    )
+
+    assert response.status_code == 409
+    assert "inativo" in response.json()["detail"]
+    assert await db_session.get(Patient, patient.id) is not None
 
 
 @pytest.mark.asyncio

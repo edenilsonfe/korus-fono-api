@@ -18,7 +18,7 @@ from app.models.anamnese import AnamneseEntry
 from app.models.appointment import Appointment
 from app.models.assessment import Assessment
 from app.models.attachment import Attachment
-from app.models.care_team import PatientSharingConsentEvent
+from app.models.care_team import PatientAccessEvent, PatientSharingConsentEvent
 from app.models.caregiver import Caregiver
 from app.models.evolution import Evolution
 from app.models.family_portal import FamilyPortal
@@ -579,6 +579,11 @@ async def delete_patient(
         .where(PatientSharingConsentEvent.patient_id == patient.id)
         .limit(1)
     )
+    access_history = await db.scalar(
+        select(PatientAccessEvent.id)
+        .where(PatientAccessEvent.patient_id == patient.id)
+        .limit(1)
+    )
     program_history = await db.scalar(
         select(InterventionProgram.id)
         .where(InterventionProgram.patient_id == patient.id)
@@ -589,7 +594,7 @@ async def delete_patient(
         if await db.scalar(select(model.id).where(model.patient_id == patient.id).limit(1)):
             clinical_history = True
             break
-    if sharing_history is not None or clinical_history:
+    if sharing_history is not None or access_history is not None or clinical_history:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
