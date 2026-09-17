@@ -198,6 +198,7 @@ async def test_weekly_job_sends_one_aggregate_snapshot_without_patient_names(
     assert "Paciente Demonstração" not in sent[0]["html"]
     assert "Taxa de comparecimento: 50%" in sent[0]["text"]
     assert "Ver agenda:" in sent[0]["text"]
+    assert "1 conta</strong>" in sent[0]["html"]
     assert "endereço" not in sent[0]["html"].lower()
     assert sent[0]["idempotency_key"].startswith("weekly-summary/")
     assert "List-Unsubscribe" in sent[0]["headers"]

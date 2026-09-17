@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from html import escape
+from urllib.parse import urljoin
 
 PRODUCT_NAME = "Korus Fono"
 
@@ -77,36 +78,174 @@ def weekly_summary_email(
     safe_finance_url = escape(finance_url, quote=True)
     safe_support_url = escape(support_url, quote=True)
     safe_unsubscribe_url = escape(unsubscribe_url, quote=True)
+    safe_logo_url = escape(
+        urljoin(agenda_url, "/korusfono-mark-v2.png"), quote=True
+    )
     rate = appointments["attendanceRate"]
     rate_label = "Sem base" if rate is None else f"{rate:g}%"
+    overdue_count = finance["overdueCount"]
+    overdue_label = (
+        f"{overdue_count} conta" if overdue_count == 1 else f"{overdue_count} contas"
+    )
     html = f"""\
+<!doctype html>
 <html lang="pt-BR" dir="ltr">
-  <head><title>{escape(subject)}</title></head>
-  <body style="font-family: Arial, Helvetica, sans-serif; color: #1f2937; background-color: #f6f7fb; margin: 0; padding: 24px;">
-    <div lang="pt-BR" dir="ltr" style="max-width: 560px; margin: 0 auto; background: #ffffff; border-radius: 16px; padding: 32px;">
-      <p style="color: #0f766e; font-weight: 700; margin-top: 0;">{PRODUCT_NAME}</p>
-      <h1 style="font-size: 22px; margin-bottom: 4px;">Seu resumo semanal</h1>
-      <p style="color: #6b7280; margin-top: 0;">{period}</p>
-      <h2 style="font-size: 18px;">Agenda</h2>
-      <p>Total de horários: <strong>{appointments['total']}</strong><br>
-      Concluídos: <strong>{appointments['completed']}</strong><br>
-      Faltas: <strong>{appointments['noShow']}</strong><br>
-      Cancelados: <strong>{appointments['cancelled']}</strong><br>
-      Não finalizados: <strong>{appointments['unfinished']}</strong><br>
-      Taxa de comparecimento: <strong>{rate_label}</strong></p>
-      <p><a href="{safe_agenda_url}" style="color: #0f766e; font-weight: 700;">Ver agenda</a></p>
-      <h2 style="font-size: 18px;">Financeiro</h2>
-      <p>Recebimentos confirmados: <strong>{_money(finance['receivedCents'])}</strong><br>
-      Despesas pagas: <strong>{_money(finance['paidExpensesCents'])}</strong><br>
-      Saldo da semana: <strong>{_money(finance['balanceCents'])}</strong><br>
-      Contas vencidas em aberto: <strong>{finance['overdueCount']}</strong><br>
-      Saldo vencido: <strong>{_money(finance['overdueBalanceCents'])}</strong></p>
-      <p><a href="{safe_finance_url}" style="color: #0f766e; font-weight: 700;">Ver financeiro</a></p>
-      <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
-      <p style="font-size: 12px; color: #6b7280;">Mensagem informativa do {PRODUCT_NAME}, sem dados identificáveis de pacientes.<br>
-      <a href="{safe_support_url}" style="color: #4b5563;">Falar com o suporte</a> ·
-      <a href="{safe_unsubscribe_url}" style="color: #4b5563;">Desativar resumo semanal</a></p>
-    </div>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="supported-color-schemes" content="light">
+    <title>{escape(subject)}</title>
+    <style>
+      @media only screen and (max-width: 620px) {{
+        .email-shell {{ padding: 12px !important; }}
+        .hero-cell {{ padding: 28px 22px !important; }}
+        .content-cell {{ padding: 28px 20px !important; }}
+        .metric-cell {{ padding: 14px !important; }}
+        .footer-cell {{ padding: 24px 20px !important; }}
+      }}
+    </style>
+  </head>
+  <body style="font-family: 'Plus Jakarta Sans', Arial, Helvetica, sans-serif; color: #102a43; background-color: #f1f5f5; margin: 0; padding: 0;">
+    <table lang="pt-BR" dir="ltr" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width: 100%; background-color: #f1f5f5;">
+      <tr>
+        <td class="email-shell" align="center" style="padding: 28px 12px;">
+          <div style="display: none; max-height: 0; overflow: hidden; opacity: 0; color: transparent;">
+            Agenda, comparecimento e caixa real da semana de {period}.
+          </div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width: 100%; max-width: 600px; background-color: #ffffff; border: 1px solid #dfe9e8; border-radius: 20px; box-shadow: 0 16px 40px rgba(6, 24, 39, 0.08); overflow: hidden;">
+            <tr>
+              <td style="height: 6px; line-height: 6px; background-color: #14a39c; font-size: 0;">&nbsp;</td>
+            </tr>
+            <tr>
+              <td class="hero-cell" style="background-color: #061827; padding: 32px 36px 34px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td style="padding-right: 12px; vertical-align: middle;">
+                      <img src="{safe_logo_url}" width="44" height="44" alt="" role="presentation" style="display: block; width: 44px; height: 44px; border: 0; border-radius: 11px;">
+                    </td>
+                    <td style="vertical-align: middle; color: #ffffff; font-size: 20px; font-weight: 800; letter-spacing: -0.5px;">
+                      korus<span style="color: #62d5ca;">Fono</span>
+                    </td>
+                  </tr>
+                </table>
+                <p style="color: #62d5ca; font-size: 11px; font-weight: 800; letter-spacing: 1.6px; margin: 28px 0 10px; text-transform: uppercase;">Resumo semanal</p>
+                <h1 style="color: #ffffff; font-size: 30px; line-height: 1.2; letter-spacing: -0.8px; margin: 0 0 10px;">Sua semana, em perspectiva.</h1>
+                <p style="color: #bdd0d5; font-size: 15px; line-height: 1.6; margin: 0 0 20px;">Uma leitura rápida da sua operação, sem expor dados de pacientes.</p>
+                <span style="display: inline-block; color: #e7fffc; background-color: #123b46; border: 1px solid #25616a; border-radius: 999px; font-size: 13px; font-weight: 700; padding: 8px 13px;">{period}</span>
+              </td>
+            </tr>
+            <tr>
+              <td class="content-cell" style="padding: 34px 36px 8px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td style="padding-bottom: 14px;">
+                      <p style="color: #0f766e; font-size: 11px; font-weight: 800; letter-spacing: 1.4px; margin: 0 0 5px; text-transform: uppercase;">Agenda</p>
+                      <h2 style="color: #102a43; font-size: 21px; line-height: 1.3; letter-spacing: -0.4px; margin: 0;">Como foi sua rotina clínica</h2>
+                    </td>
+                  </tr>
+                </table>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border: 1px solid #c9e8e4; border-radius: 14px; background-color: #effaf8;">
+                  <tr>
+                    <td style="padding: 20px 22px;">
+                      <p style="color: #476a6b; font-size: 12px; font-weight: 700; margin: 0 0 5px; text-transform: uppercase; letter-spacing: 0.8px;">Taxa de comparecimento</p>
+                      <p style="color: #0f766e; font-size: 32px; font-weight: 800; letter-spacing: -1px; margin: 0;">{rate_label}</p>
+                      <p style="color: #527477; font-size: 12px; line-height: 1.5; margin: 5px 0 0;">Calculada sobre atendimentos concluídos e faltas.</p>
+                    </td>
+                    <td align="right" style="padding: 20px 22px; vertical-align: middle;">
+                      <p style="color: #476a6b; font-size: 12px; font-weight: 700; margin: 0 0 5px;">TOTAL DE HORÁRIOS</p>
+                      <p style="color: #102a43; font-size: 28px; font-weight: 800; margin: 0;">{appointments['total']}</p>
+                    </td>
+                  </tr>
+                </table>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 12px; table-layout: fixed;">
+                  <tr>
+                    <td class="metric-cell" width="50%" style="padding: 16px; border: 1px solid #e3eceb; border-radius: 12px 0 0 0;">
+                      <p style="color: #0f766e; font-size: 23px; font-weight: 800; margin: 0 0 4px;">{appointments['completed']}</p>
+                      <p style="color: #5d6f79; font-size: 13px; margin: 0;">Concluídos</p>
+                    </td>
+                    <td class="metric-cell" width="50%" style="padding: 16px; border: 1px solid #e3eceb; border-left: 0; border-radius: 0 12px 0 0;">
+                      <p style="color: #bd5b4f; font-size: 23px; font-weight: 800; margin: 0 0 4px;">{appointments['noShow']}</p>
+                      <p style="color: #5d6f79; font-size: 13px; margin: 0;">Faltas</p>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="metric-cell" width="50%" style="padding: 16px; border: 1px solid #e3eceb; border-top: 0; border-radius: 0 0 0 12px;">
+                      <p style="color: #697a84; font-size: 23px; font-weight: 800; margin: 0 0 4px;">{appointments['cancelled']}</p>
+                      <p style="color: #5d6f79; font-size: 13px; margin: 0;">Cancelados</p>
+                    </td>
+                    <td class="metric-cell" width="50%" style="padding: 16px; border: 1px solid #e3eceb; border-top: 0; border-left: 0; border-radius: 0 0 12px 0;">
+                      <p style="color: #735a94; font-size: 23px; font-weight: 800; margin: 0 0 4px;">{appointments['unfinished']}</p>
+                      <p style="color: #5d6f79; font-size: 13px; margin: 0;">Não finalizados</p>
+                    </td>
+                  </tr>
+                </table>
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 20px 0 34px;">
+                  <tr>
+                    <td style="background-color: #0f766e; border-radius: 10px;">
+                      <a href="{safe_agenda_url}" style="display: inline-block; color: #ffffff; font-size: 14px; font-weight: 800; padding: 12px 18px; text-decoration: none;">Abrir minha agenda &nbsp;→</a>
+                    </td>
+                  </tr>
+                </table>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top: 1px solid #e3eceb;">
+                  <tr>
+                    <td style="padding: 30px 0 14px;">
+                      <p style="color: #0f766e; font-size: 11px; font-weight: 800; letter-spacing: 1.4px; margin: 0 0 5px; text-transform: uppercase;">Financeiro</p>
+                      <h2 style="color: #102a43; font-size: 21px; line-height: 1.3; letter-spacing: -0.4px; margin: 0;">Seu caixa real da semana</h2>
+                    </td>
+                  </tr>
+                </table>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #061827; border-radius: 14px;">
+                  <tr>
+                    <td style="padding: 21px 22px;">
+                      <p style="color: #9bb7bd; font-size: 12px; font-weight: 700; letter-spacing: 0.7px; margin: 0 0 5px; text-transform: uppercase;">Saldo da semana</p>
+                      <p style="color: #ffffff; font-size: 29px; font-weight: 800; letter-spacing: -0.7px; margin: 0;">{_money(finance['balanceCents'])}</p>
+                    </td>
+                  </tr>
+                </table>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 12px; table-layout: fixed;">
+                  <tr>
+                    <td class="metric-cell" width="50%" style="padding: 16px; background-color: #f6faf9; border: 1px solid #e3eceb; border-radius: 12px 0 0 12px;">
+                      <p style="color: #5d6f79; font-size: 12px; margin: 0 0 5px;">Recebimentos confirmados</p>
+                      <p style="color: #0f766e; font-size: 18px; font-weight: 800; margin: 0;">{_money(finance['receivedCents'])}</p>
+                    </td>
+                    <td class="metric-cell" width="50%" style="padding: 16px; background-color: #f6faf9; border: 1px solid #e3eceb; border-left: 0; border-radius: 0 12px 12px 0;">
+                      <p style="color: #5d6f79; font-size: 12px; margin: 0 0 5px;">Despesas pagas</p>
+                      <p style="color: #102a43; font-size: 18px; font-weight: 800; margin: 0;">{_money(finance['paidExpensesCents'])}</p>
+                    </td>
+                  </tr>
+                </table>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 12px; background-color: #fff5f1; border: 1px solid #f4d7cc; border-radius: 12px;">
+                  <tr>
+                    <td style="padding: 16px 18px;">
+                      <p style="color: #8e483d; font-size: 12px; font-weight: 700; margin: 0 0 5px;">CONTAS VENCIDAS EM ABERTO</p>
+                      <p style="color: #572f2a; font-size: 16px; line-height: 1.4; margin: 0;"><strong>{overdue_label}</strong> · {_money(finance['overdueBalanceCents'])}</p>
+                    </td>
+                  </tr>
+                </table>
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 20px 0 30px;">
+                  <tr>
+                    <td style="border: 1px solid #0f766e; border-radius: 10px;">
+                      <a href="{safe_finance_url}" style="display: inline-block; color: #0f766e; font-size: 14px; font-weight: 800; padding: 11px 17px; text-decoration: none;">Ver detalhes financeiros &nbsp;→</a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td class="footer-cell" style="background-color: #f6faf9; border-top: 1px solid #e3eceb; padding: 25px 36px 28px;">
+                <p style="color: #536a73; font-size: 12px; line-height: 1.6; margin: 0 0 10px;">Mensagem informativa do {PRODUCT_NAME}, sem dados identificáveis de pacientes.</p>
+                <p style="font-size: 12px; line-height: 1.6; margin: 0;">
+                  <a href="{safe_support_url}" style="color: #0f766e; font-weight: 700; text-decoration: underline;">Falar com o suporte</a>
+                  <span style="color: #9aabae;">&nbsp;·&nbsp;</span>
+                  <a href="{safe_unsubscribe_url}" style="color: #536a73; text-decoration: underline;">Desativar resumo semanal</a>
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
   </body>
 </html>"""
     text = (

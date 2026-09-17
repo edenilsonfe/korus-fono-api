@@ -1,9 +1,12 @@
 """Tests for transactional email HTML escaping."""
 
+from datetime import date
+
 from app.services.email.templates import (
     password_reset_email,
     school_report_delivery_email,
     trial_expiration_email,
+    weekly_summary_email,
 )
 from app.core.config import get_settings
 from app.services.email.resend_client import send_email
@@ -92,6 +95,40 @@ def test_school_report_delivery_email_is_minimized_and_escapes_user_data():
     assert "diagn" not in rendered.text.lower()
     assert "João" not in rendered.html
     assert "João" not in rendered.subject
+
+
+def test_weekly_summary_email_uses_branded_accessible_layout():
+    rendered = weekly_summary_email(
+        week_start=date(2026, 9, 14),
+        week_end=date(2026, 9, 19),
+        appointments={
+            "total": 24,
+            "completed": 18,
+            "noShow": 2,
+            "cancelled": 1,
+            "unfinished": 3,
+            "attendanceRate": 90.0,
+        },
+        finance={
+            "receivedCents": 385_000,
+            "paidExpensesCents": 92_000,
+            "balanceCents": 293_000,
+            "overdueCount": 2,
+            "overdueBalanceCents": 78_000,
+        },
+        agenda_url="https://app.korusfono.com.br/agenda",
+        finance_url="https://app.korusfono.com.br/financeiro",
+        support_url="https://app.korusfono.com.br/suporte",
+        unsubscribe_url="https://api.korusfono.com.br/unsubscribe?token=abc",
+    )
+
+    assert '<html lang="pt-BR" dir="ltr">' in rendered.html
+    assert '<table lang="pt-BR" dir="ltr" role="presentation"' in rendered.html
+    assert 'src="https://app.korusfono.com.br/korusfono-mark-v2.png"' in rendered.html
+    assert "Sua semana, em perspectiva." in rendered.html
+    assert "R$ 2.930,00" in rendered.html
+    assert "2 contas" in rendered.html
+    assert "Agenda, comparecimento e caixa real" in rendered.html
 
 
 def test_resend_client_forwards_provider_idempotency_and_unsubscribe_headers(monkeypatch):
