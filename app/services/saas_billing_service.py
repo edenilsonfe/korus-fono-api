@@ -127,6 +127,24 @@ class SaasBillingService:
         professional_id: str | None = None,
         status: str = "received",
     ) -> BillingEvent | None:
+        professional_uuid = None
+        if professional_id:
+            try:
+                professional_uuid = UUID(professional_id)
+            except ValueError:
+                logger.info(
+                    "Ignoring billing event %s for invalid professional=%s",
+                    external_event_id,
+                    professional_id,
+                )
+                return None
+            if await self.db.get(Professional, professional_uuid) is None:
+                logger.info(
+                    "Ignoring billing event %s for foreign professional=%s",
+                    external_event_id,
+                    professional_id,
+                )
+                return None
         existing = await self.db.execute(
             select(BillingEvent).where(
                 BillingEvent.provider == provider,
@@ -143,7 +161,7 @@ class SaasBillingService:
             event_type=event_type,
             payload=payload,
             status=status,
-            professional_id=UUID(professional_id) if professional_id else None,
+            professional_id=professional_uuid,
             created_at=datetime.now(UTC),
         )
         try:

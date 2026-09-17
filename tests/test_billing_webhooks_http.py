@@ -1,15 +1,17 @@
 """HTTP-level auth matrix for POST /billing/webhooks/{provider}."""
 
+import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.compiler import compiles
 
 from app.core.config import get_settings
 from app.core.security import create_access_token
-from app.models.billing import Plan, Subscription
+from app.models.billing import BillingEvent, Plan, Subscription
 from app.models.professional import Professional
 from app.services.plan_catalog_seed import COMMERCIAL_PLAN_SEEDS
 
@@ -69,6 +71,38 @@ async def test_asaas_webhook_accepts_correct_header(api_client, monkeypatch):
         headers={"asaas-access-token": "correct-token"},
     )
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_asaas_webhook_ignores_foreign_professional(
+    api_client, db_session, monkeypatch
+):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "asaas_webhook_token", "correct-token")
+
+    response = await api_client.post(
+        "/api/v1/billing/webhooks/asaas",
+        json={
+            "id": "evt-foreign-professional",
+            "event": "PAYMENT_RECEIVED",
+            "payment": {
+                "id": "pay-foreign-professional",
+                "status": "RECEIVED",
+                "externalReference": f"{uuid.uuid4()}:profissional",
+            },
+        },
+        headers={"asaas-access-token": "correct-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"received": True, "events": 1}
+    event = await db_session.scalar(
+        select(BillingEvent).where(
+            BillingEvent.external_event_id
+            == "asaas-PAYMENT_RECEIVED-pay-foreign-professional"
+        )
+    )
+    assert event is None
 
 
 @pytest.mark.asyncio
