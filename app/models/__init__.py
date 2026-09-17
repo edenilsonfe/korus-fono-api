@@ -88,6 +88,7 @@ from app.models.timeline import TimelineEvent
 from app.models.whatsapp_connection import WhatsAppConnection
 from app.models.platform_whatsapp_connection import PlatformWhatsAppConnection
 from app.models.trial_email_campaign import TrialEmailCampaign, TrialEmailDelivery
+from app.models.weekly_summary_email import WeeklySummaryEmailDelivery
 
 __all__ = [
     "Plan",
@@ -186,4 +187,5 @@ __all__ = [
     "CouponRedemption",
     "TrialEmailCampaign",
     "TrialEmailDelivery",
+    "WeeklySummaryEmailDelivery",
 ]

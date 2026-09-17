@@ -112,6 +112,13 @@ async def run_storage_cleanup_job(ctx) -> None:
         await run_storage_cleanup(session, limit=STORAGE_CLEANUP_BATCH_LIMIT)
 
 
+async def run_weekly_summary_email_job(ctx) -> None:
+    from app.services.weekly_summary_email_service import run_weekly_summary_emails
+
+    async with AsyncSessionLocal() as session:
+        await run_weekly_summary_emails(session)
+
+
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     functions = [
@@ -123,6 +130,7 @@ class WorkerSettings:
         retry_google_calendar_syncs,
         run_affiliate_maintenance,
         run_storage_cleanup_job,
+        run_weekly_summary_email_job,
     ]
     cron_jobs = [
         cron(
@@ -134,6 +142,7 @@ class WorkerSettings:
         cron(run_affiliate_maintenance, minute=10, run_at_startup=False),
         # F17 — limpeza de blobs a cada 15 min (deslocada dos demais crons).
         cron(run_storage_cleanup_job, minute={2, 17, 32, 47}, run_at_startup=False),
+        cron(run_weekly_summary_email_job, minute={0, 15, 30, 45}, run_at_startup=False),
     ]
 
     @staticmethod

@@ -57,13 +57,15 @@ uv run uvicorn app.main:app --reload --port 8000
 
 ## Env de e-mail (Resend)
 
-Para o fluxo de recuperação de senha (`/auth/forgot-password` → `/auth/reset-password`), configure no `.env`:
+Para os e-mails transacionais e o resumo semanal, configure no `.env`:
 
 - `RESEND_API_KEY`: chave da conta Resend.
+- `RESEND_WEBHOOK_SECRET`: segredo do webhook Resend registrado em `POST /api/v1/webhooks/resend/email` para `email.bounced` e `email.complained`.
 - `EMAIL_FROM`: remetente aprovado no Resend.
 - `EMAIL_SENDING_ENABLED=true`: habilita envio real (em dev pode ficar `false`).
 - `TRIAL_EMAIL_RESEND_COOLDOWN_HOURS`: intervalo mínimo entre campanhas da mesma régua para o mesmo usuário (padrão: 24h).
 - `FRONTEND_URL`: base usada no link `.../reset-password?token=...`.
+- `APP_PUBLIC_URL`: base pública da API usada no link de descadastro do resumo semanal.
 - `PASSWORD_TOKEN_EXPIRE_MINUTES`: validade do token de reset.
 - `PASSWORD_RESET_COOLDOWN_SECONDS`: cooldown entre solicitações por usuário.
 
@@ -255,6 +257,10 @@ pelos fluxos que efetivamente usam ARQ.
 ```bash
 uv run arq worker.WorkerSettings
 ```
+
+O mesmo worker verifica a janela do resumo semanal a cada 15 minutos. O envio
+normal ocorre no sábado às 19h em `CLINIC_TIMEZONE`; retries terminam no domingo
+às 19h, e a restrição única por profissional/semana impede reenvio aceito.
 
 Configure `OPENCODE_API_KEY` no `.env` (chave em [opencode.ai/auth](https://opencode.ai/auth)). Modelos disponíveis: [OpenCode Zen](https://opencode.ai/docs/zen/).
 

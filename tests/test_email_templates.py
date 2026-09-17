@@ -5,6 +5,8 @@ from app.services.email.templates import (
     school_report_delivery_email,
     trial_expiration_email,
 )
+from app.core.config import get_settings
+from app.services.email.resend_client import send_email
 
 
 def test_password_reset_email_plain_name_ok():
@@ -90,3 +92,39 @@ def test_school_report_delivery_email_is_minimized_and_escapes_user_data():
     assert "diagn" not in rendered.text.lower()
     assert "João" not in rendered.html
     assert "João" not in rendered.subject
+
+
+def test_resend_client_forwards_provider_idempotency_and_unsubscribe_headers(monkeypatch):
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"id": "email-1"}
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "email_sending_enabled", True)
+    monkeypatch.setattr(settings, "resend_api_key", "re_test")
+
+    def fake_post(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        return Response()
+
+    monkeypatch.setattr("app.services.email.resend_client.httpx.post", fake_post)
+    result = send_email(
+        "owner@example.com",
+        "Resumo",
+        "<p>Resumo</p>",
+        "Resumo",
+        headers={"List-Unsubscribe": "<https://example.com/unsubscribe>"},
+        idempotency_key="weekly-summary/account/week",
+    )
+
+    assert result == "email-1"
+    assert captured["headers"]["Idempotency-Key"] == "weekly-summary/account/week"
+    assert captured["json"]["headers"] == {
+        "List-Unsubscribe": "<https://example.com/unsubscribe>"
+    }

@@ -3,6 +3,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import require_verified_professional
@@ -15,11 +16,17 @@ from app.schemas.app_notification import (
     NotificationPage,
     UnreadCount,
 )
+from app.schemas.common import MessageResponse
 from app.services.notification_service import (
     NotificationNotVisibleError,
     NotificationService,
 )
 from app.services.notification_settings_service import NotificationSettingsService
+from app.services.weekly_summary_email_service import (
+    InvalidWeeklySummaryUnsubscribeToken,
+    unsubscribe_weekly_summary_email,
+    validate_weekly_summary_unsubscribe_token,
+)
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -30,7 +37,10 @@ async def get_notification_settings(
     db: AsyncSession = Depends(get_db),
 ):
     settings = await NotificationSettingsService(db).get_or_create(professional.id)
-    return InAppNotificationSettings(birthday_in_app_enabled=settings.birthday_in_app_enabled)
+    return InAppNotificationSettings(
+        birthday_in_app_enabled=settings.birthday_in_app_enabled,
+        weekly_summary_email_enabled=settings.weekly_summary_email_enabled,
+    )
 
 
 @router.patch("/settings", response_model=InAppNotificationSettings)
@@ -42,7 +52,47 @@ async def update_notification_settings(
     settings = await NotificationSettingsService(db).update(
         professional.id, **payload.model_dump(exclude_unset=True)
     )
-    return InAppNotificationSettings(birthday_in_app_enabled=settings.birthday_in_app_enabled)
+    return InAppNotificationSettings(
+        birthday_in_app_enabled=settings.birthday_in_app_enabled,
+        weekly_summary_email_enabled=settings.weekly_summary_email_enabled,
+    )
+
+
+@router.post("/weekly-summary/unsubscribe", response_model=MessageResponse)
+async def unsubscribe_weekly_summary(
+    token: str = Query(min_length=20, max_length=200),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await unsubscribe_weekly_summary_email(db, token)
+    except InvalidWeeklySummaryUnsubscribeToken as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Link de descadastro inválido.",
+        ) from exc
+    return MessageResponse(message="Resumo semanal desativado.")
+
+
+@router.get("/weekly-summary/unsubscribe", response_class=HTMLResponse)
+async def unsubscribe_weekly_summary_landing(
+    token: str = Query(min_length=20, max_length=200),
+):
+    try:
+        validate_weekly_summary_unsubscribe_token(token)
+    except InvalidWeeklySummaryUnsubscribeToken as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Link de descadastro inválido.",
+        ) from exc
+    return HTMLResponse(
+        "<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>Desativar resumo semanal</title></head>"
+        "<body><main><h1>Desativar resumo semanal</h1>"
+        "<p>Confirme para não receber novos resumos semanais do KorusFono.</p>"
+        "<form method='post'><button type='submit'>Confirmar descadastro</button></form>"
+        "</main></body></html>"
+    )
 
 
 @router.get("", response_model=NotificationPage)

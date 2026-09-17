@@ -30,6 +30,108 @@ def _layout(title: str, inner_html: str) -> str:
 </html>"""
 
 
+_MONTHS_PT_BR = (
+    "janeiro",
+    "fevereiro",
+    "março",
+    "abril",
+    "maio",
+    "junho",
+    "julho",
+    "agosto",
+    "setembro",
+    "outubro",
+    "novembro",
+    "dezembro",
+)
+
+
+def _period_label(week_start, week_end) -> str:
+    if week_start.month == week_end.month:
+        return f"{week_start.day} a {week_end.day} de {_MONTHS_PT_BR[week_end.month - 1]}"
+    return (
+        f"{week_start.day} de {_MONTHS_PT_BR[week_start.month - 1]} a "
+        f"{week_end.day} de {_MONTHS_PT_BR[week_end.month - 1]}"
+    )
+
+
+def _money(cents: int) -> str:
+    value = f"{cents / 100:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+    return f"R$ {value}"
+
+
+def weekly_summary_email(
+    *,
+    week_start,
+    week_end,
+    appointments: dict,
+    finance: dict,
+    agenda_url: str,
+    finance_url: str,
+    support_url: str,
+    unsubscribe_url: str,
+) -> RenderedEmail:
+    period = _period_label(week_start, week_end)
+    subject = f"Seu resumo semanal | {period}"
+    safe_agenda_url = escape(agenda_url, quote=True)
+    safe_finance_url = escape(finance_url, quote=True)
+    safe_support_url = escape(support_url, quote=True)
+    safe_unsubscribe_url = escape(unsubscribe_url, quote=True)
+    rate = appointments["attendanceRate"]
+    rate_label = "Sem base" if rate is None else f"{rate:g}%"
+    html = f"""\
+<html lang="pt-BR" dir="ltr">
+  <head><title>{escape(subject)}</title></head>
+  <body style="font-family: Arial, Helvetica, sans-serif; color: #1f2937; background-color: #f6f7fb; margin: 0; padding: 24px;">
+    <div lang="pt-BR" dir="ltr" style="max-width: 560px; margin: 0 auto; background: #ffffff; border-radius: 16px; padding: 32px;">
+      <p style="color: #0f766e; font-weight: 700; margin-top: 0;">{PRODUCT_NAME}</p>
+      <h1 style="font-size: 22px; margin-bottom: 4px;">Seu resumo semanal</h1>
+      <p style="color: #6b7280; margin-top: 0;">{period}</p>
+      <h2 style="font-size: 18px;">Agenda</h2>
+      <p>Total de horários: <strong>{appointments['total']}</strong><br>
+      Concluídos: <strong>{appointments['completed']}</strong><br>
+      Faltas: <strong>{appointments['noShow']}</strong><br>
+      Cancelados: <strong>{appointments['cancelled']}</strong><br>
+      Não finalizados: <strong>{appointments['unfinished']}</strong><br>
+      Taxa de comparecimento: <strong>{rate_label}</strong></p>
+      <p><a href="{safe_agenda_url}" style="color: #0f766e; font-weight: 700;">Ver agenda</a></p>
+      <h2 style="font-size: 18px;">Financeiro</h2>
+      <p>Recebimentos confirmados: <strong>{_money(finance['receivedCents'])}</strong><br>
+      Despesas pagas: <strong>{_money(finance['paidExpensesCents'])}</strong><br>
+      Saldo da semana: <strong>{_money(finance['balanceCents'])}</strong><br>
+      Contas vencidas em aberto: <strong>{finance['overdueCount']}</strong><br>
+      Saldo vencido: <strong>{_money(finance['overdueBalanceCents'])}</strong></p>
+      <p><a href="{safe_finance_url}" style="color: #0f766e; font-weight: 700;">Ver financeiro</a></p>
+      <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
+      <p style="font-size: 12px; color: #6b7280;">Mensagem informativa do {PRODUCT_NAME}, sem dados identificáveis de pacientes.<br>
+      <a href="{safe_support_url}" style="color: #4b5563;">Falar com o suporte</a> ·
+      <a href="{safe_unsubscribe_url}" style="color: #4b5563;">Desativar resumo semanal</a></p>
+    </div>
+  </body>
+</html>"""
+    text = (
+        f"{PRODUCT_NAME}\nSeu resumo semanal | {period}\n\n"
+        "AGENDA\n"
+        f"Total de horários: {appointments['total']}\n"
+        f"Concluídos: {appointments['completed']}\n"
+        f"Faltas: {appointments['noShow']}\n"
+        f"Cancelados: {appointments['cancelled']}\n"
+        f"Não finalizados: {appointments['unfinished']}\n"
+        f"Taxa de comparecimento: {rate_label}\n"
+        f"Ver agenda: {agenda_url}\n\n"
+        "FINANCEIRO\n"
+        f"Recebimentos confirmados: {_money(finance['receivedCents'])}\n"
+        f"Despesas pagas: {_money(finance['paidExpensesCents'])}\n"
+        f"Saldo da semana: {_money(finance['balanceCents'])}\n"
+        f"Contas vencidas em aberto: {finance['overdueCount']}\n"
+        f"Saldo vencido: {_money(finance['overdueBalanceCents'])}\n"
+        f"Ver financeiro: {finance_url}\n\n"
+        f"Suporte: {support_url}\n"
+        f"Desativar resumo semanal: {unsubscribe_url}\n"
+    )
+    return RenderedEmail(subject=subject, html=html, text=text)
+
+
 def password_reset_email(
     user_name: str, reset_url: str, expires_minutes: int
 ) -> RenderedEmail:

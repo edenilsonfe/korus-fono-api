@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,6 +19,24 @@ class NotificationSettings(Base, TimestampMixin):
     appointment_confirmation_deadline_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
     birthday_in_app_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
+    )
+    weekly_summary_email_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    weekly_summary_email_opted_in_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    weekly_summary_email_opted_out_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    weekly_summary_email_preference_source: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    weekly_summary_email_suppressed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    weekly_summary_email_suppression_reason: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
     )
     appointment_confirmation_link_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False

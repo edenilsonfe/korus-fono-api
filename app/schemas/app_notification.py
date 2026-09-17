@@ -20,6 +20,7 @@ NotificationFilter = Literal["all", "broadcast"]
 
 class InAppNotificationSettings(CamelModel):
     birthday_in_app_enabled: bool = False
+    weekly_summary_email_enabled: bool = False
 
 
 class NotificationItem(CamelModel):

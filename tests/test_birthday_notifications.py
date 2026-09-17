@@ -91,14 +91,20 @@ async def test_preferences_are_opt_in_persisted_and_independent(
         "/api/v1/notifications/settings", headers=auth_headers
     )
     assert response.status_code == 200
-    assert response.json() == {"birthdayInAppEnabled": False}
+    assert response.json() == {
+        "birthdayInAppEnabled": False,
+        "weeklySummaryEmailEnabled": False,
+    }
     response = await api_client.patch(
         "/api/v1/notifications/settings",
         headers=auth_headers,
         json={"birthdayInAppEnabled": True},
     )
     assert response.status_code == 200
-    assert response.json() == {"birthdayInAppEnabled": True}
+    assert response.json() == {
+        "birthdayInAppEnabled": True,
+        "weeklySummaryEmailEnabled": False,
+    }
     whatsapp = await api_client.get("/api/v1/whatsapp/settings", headers=auth_headers)
     assert whatsapp.json()["whatsappEvents"]["patientBirthday"] is False
     response = await api_client.put(
@@ -125,7 +131,57 @@ async def test_preferences_are_opt_in_persisted_and_independent(
     assert settings.whatsapp_enabled is False
     assert (
         await api_client.get("/api/v1/notifications/settings", headers=auth_headers)
-    ).json() == {"birthdayInAppEnabled": True}
+    ).json() == {
+        "birthdayInAppEnabled": True,
+        "weeklySummaryEmailEnabled": False,
+    }
+
+
+async def test_weekly_summary_email_preference_is_explicit_and_persisted(
+    api_client, auth_headers, db_session, professional, monkeypatch
+):
+    @asynccontextmanager
+    async def session_factory():
+        yield db_session
+
+    monkeypatch.setattr("app.middleware.entitlement.AsyncSessionLocal", session_factory)
+
+    response = await api_client.get(
+        "/api/v1/notifications/settings", headers=auth_headers
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "birthdayInAppEnabled": False,
+        "weeklySummaryEmailEnabled": False,
+    }
+
+    response = await api_client.patch(
+        "/api/v1/notifications/settings",
+        headers=auth_headers,
+        json={"weeklySummaryEmailEnabled": True},
+    )
+    assert response.status_code == 200
+    assert response.json()["weeklySummaryEmailEnabled"] is True
+
+    settings = await db_session.scalar(
+        select(NotificationSettings).where(
+            NotificationSettings.professional_id == professional.id
+        )
+    )
+    assert settings.weekly_summary_email_enabled is True
+    assert settings.weekly_summary_email_opted_in_at is not None
+    opted_in_at = settings.weekly_summary_email_opted_in_at
+    assert settings.weekly_summary_email_opted_out_at is None
+    assert settings.weekly_summary_email_preference_source == "settings"
+
+    response = await api_client.patch(
+        "/api/v1/notifications/settings",
+        headers=auth_headers,
+        json={"weeklySummaryEmailEnabled": True},
+    )
+    assert response.status_code == 200
+    await db_session.refresh(settings)
+    assert settings.weekly_summary_email_opted_in_at == opted_in_at
 
 
 async def test_inbox_once_per_day_seen_read_and_broadcast_filter(

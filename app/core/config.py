@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6380"
 
     resend_api_key: str = ""
+    resend_webhook_secret: str = ""
     email_from: str = "Korus Fono <noreply@korusfono.com.br>"
     email_sending_enabled: bool = False
     password_token_expire_minutes: int = 60

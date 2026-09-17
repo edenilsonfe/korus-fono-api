@@ -51,7 +51,14 @@ def test_worker_registers_storage_cleanup_cron_every_15_minutes():
         "retry_google_calendar_syncs",
         "run_affiliate_maintenance",
         "run_storage_cleanup_job",
+        "run_weekly_summary_email_job",
     ]
+
+
+def test_worker_checks_weekly_summary_window_every_15_minutes():
+    job = _cron_job("run_weekly_summary_email_job")
+    assert job.minute == {0, 15, 30, 45}
+    assert job.run_at_startup is False
 
 
 @pytest.mark.asyncio

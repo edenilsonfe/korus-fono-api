@@ -11,6 +11,7 @@ from app.constants.whatsapp_events import (
     normalize_whatsapp_events,
     normalize_whatsapp_message_templates,
 )
+from app.core.utils import utcnow
 from app.models.notification_settings import NotificationSettings
 
 
@@ -43,6 +44,7 @@ class NotificationSettingsService:
         *,
         whatsapp_enabled: bool | None = None,
         birthday_in_app_enabled: bool | None = None,
+        weekly_summary_email_enabled: bool | None = None,
         appointment_confirmation_link_enabled: bool | None = None,
         appointment_confirmation_deadline_time: str | None = None,
         update_confirmation_deadline: bool = False,
@@ -66,6 +68,19 @@ class NotificationSettingsService:
 
         if birthday_in_app_enabled is not None:
             settings.birthday_in_app_enabled = birthday_in_app_enabled
+
+        if weekly_summary_email_enabled is not None:
+            was_enabled = settings.weekly_summary_email_enabled
+            settings.weekly_summary_email_enabled = weekly_summary_email_enabled
+            settings.weekly_summary_email_preference_source = "settings"
+            if weekly_summary_email_enabled:
+                if not was_enabled or settings.weekly_summary_email_opted_in_at is None:
+                    settings.weekly_summary_email_opted_in_at = utcnow()
+                settings.weekly_summary_email_opted_out_at = None
+                settings.weekly_summary_email_suppressed_at = None
+                settings.weekly_summary_email_suppression_reason = None
+            elif was_enabled or settings.weekly_summary_email_opted_out_at is None:
+                settings.weekly_summary_email_opted_out_at = utcnow()
 
         if whatsapp_enabled is not None:
             settings.whatsapp_enabled = whatsapp_enabled
