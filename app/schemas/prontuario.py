@@ -1,6 +1,7 @@
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, StringConstraints
 
 from app.schemas.common import CamelModel
 
@@ -9,6 +10,11 @@ class EvolutionCreate(CamelModel):
     title: str | None = None
     content: str
     session_id: UUID | None = None
+
+
+class EvolutionUpdate(CamelModel):
+    title: str | None = Field(default=None, max_length=255)
+    content: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3)]
 
 
 class EvolutionResponse(CamelModel):

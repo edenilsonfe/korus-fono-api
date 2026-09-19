@@ -9,7 +9,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.mappers import format_size_bytes
@@ -21,6 +21,7 @@ from app.models.attachment import Attachment
 from app.models.evolution import Evolution
 from app.models.professional import Professional
 from app.models.session import Session
+from app.models.timeline import TimelineEvent
 from app.schemas.prontuario import (
     AnamneseBulkUpsert,
     AnamneseComplete,
@@ -30,6 +31,7 @@ from app.schemas.prontuario import (
     AnamneseResponse,
     EvolutionCreate,
     EvolutionResponse,
+    EvolutionUpdate,
 )
 from app.services import anamnese_service
 from app.services.attachment_upload import (
@@ -104,6 +106,51 @@ async def create_evolution(
         id=str(evolution.id),
         patient_id=str(patient_id),
         session_id=str(body.session_id) if body.session_id else None,
+        date=evolution.date.isoformat(),
+        title=evolution.title,
+        content=evolution.content,
+        professional=professional.name,
+    )
+
+
+@router.patch("/evolutions/{evolution_id}", response_model=EvolutionResponse)
+async def update_evolution(
+    patient_id: UUID,
+    evolution_id: UUID,
+    body: EvolutionUpdate,
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    await require_clinical_access(db, patient_id, professional, "clinical:write")
+    evolution = await db.scalar(
+        select(Evolution).where(
+            Evolution.id == evolution_id,
+            Evolution.patient_id == patient_id,
+            Evolution.professional_id == professional.id,
+        )
+    )
+    if evolution is None:
+        raise HTTPException(status_code=404, detail="Evolução não encontrada")
+
+    evolution.title = (body.title.strip() or None) if body.title else None
+    evolution.content = body.content
+    await db.execute(
+        update(TimelineEvent)
+        .where(
+            TimelineEvent.patient_id == patient_id,
+            TimelineEvent.type == "evolucao",
+            TimelineEvent.source_id == evolution.id,
+        )
+        .values(
+            title=evolution.title or "Evolução registrada",
+            description=evolution.content[:200],
+        )
+    )
+    await db.flush()
+    return EvolutionResponse(
+        id=str(evolution.id),
+        patient_id=str(evolution.patient_id),
+        session_id=str(evolution.session_id) if evolution.session_id else None,
         date=evolution.date.isoformat(),
         title=evolution.title,
         content=evolution.content,
