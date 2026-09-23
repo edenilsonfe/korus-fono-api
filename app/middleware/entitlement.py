@@ -49,6 +49,8 @@ EXEMPT_PATHS = frozenset(
         "/docs",
         "/redoc",
         "/openapi.json",
+        # A prévia autenticada do cupom é necessária antes do primeiro pagamento.
+        "/api/v1/billing/coupon/preview",
         # Revogação de credencial externa deve permanecer disponível mesmo em read-only.
         "/api/v1/google-calendar/connection",
     }
