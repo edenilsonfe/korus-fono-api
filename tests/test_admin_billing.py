@@ -1,6 +1,9 @@
 """Tests for admin billing metrics, coupons and plans."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -18,7 +21,8 @@ from app.models.admin_audit_log import AdminAuditLog
 from app.models.billing import Plan, Subscription
 from app.models.coupon import Coupon, CouponRedemption
 from app.models.professional import Professional
-from app.services.coupon_service import CouponService
+from app.schemas.admin_billing import CouponCreate, CouponUpdate
+from app.services.coupon_service import CouponError, CouponService
 
 pytestmark = pytest.mark.asyncio
 
@@ -188,6 +192,159 @@ async def test_coupon_discount_and_admin_apply(db):
     svc = CouponService(db)
     coupon = await svc.get_by_code("SAVE10")
     assert svc.discounted_price_cents(coupon, 9700) == 8730
+    _clear()
+
+
+async def test_coupon_reservation_payment_refund_and_first_purchase(db, monkeypatch):
+    async def no_referral(_self, _professional_id):
+        return 0, None
+
+    monkeypatch.setattr("app.services.coupon_service.AffiliateService.referral_discount", no_referral)
+    async def no_credit(_self, _professional_id):
+        return 0
+    monkeypatch.setattr("app.services.coupon_service.AffiliateCreditService.credit_balance", no_credit)
+    staff = await _pro(db, "coupon-staff@x.com", is_staff=True)
+    first = await _pro(db, "coupon-first@x.com")
+    second = await _pro(db, "coupon-second@x.com")
+    plan = db.info["plan"]
+    service = CouponService(db)
+    today = date.today()
+    await service.create(
+        actor=staff,
+        body=CouponCreate(
+            code="FIRST10",
+            coupon_type="percent",
+            value=10,
+            valid_from=today,
+            valid_until=today,
+            max_redemptions=1,
+        ),
+    )
+    coupon = await service.get_by_code("FIRST10")
+    await service.update(actor=staff, coupon_id=coupon.id, body=CouponUpdate(code="FIRST10B"))
+    await service.update(actor=staff, coupon_id=coupon.id, body=CouponUpdate(code="FIRST10"))
+    quote = await service.preview(code="FIRST10", plan=plan, professional=first)
+    assert quote["first_charge_cents"] == 8730
+    assert quote["renewal_cents"] == 9700
+
+    sub = Subscription(
+        professional_id=first.id,
+        plan_id=plan.id,
+        status="incomplete",
+        checkout_session_id=uuid4(),
+    )
+    db.add(sub)
+    await db.flush()
+    reservation = await service.reserve(
+        coupon=coupon,
+        professional_id=first.id,
+        subscription_id=sub.id,
+        checkout_session_id=sub.checkout_session_id,
+        plan_slug=plan.slug,
+        discounted_price_cents=8730,
+    )
+    await service.bind_payment(reservation.id, "pay-first")
+    with pytest.raises(CouponError, match="não podem mudar"):
+        await service.update(actor=staff, coupon_id=coupon.id, body=CouponUpdate(code="TOO-LATE"))
+    await service.update(actor=staff, coupon_id=coupon.id, body=CouponUpdate(is_active=False))
+    assert (await service.reserve(
+        coupon=coupon, professional_id=first.id, subscription_id=sub.id,
+        checkout_session_id=sub.checkout_session_id, plan_slug=plan.slug,
+        discounted_price_cents=8730,
+    )).id == reservation.id
+    await service.update(actor=staff, coupon_id=coupon.id, body=CouponUpdate(is_active=True))
+    assert (await service.list_coupons())[0].reserved_count == 1
+    with pytest.raises(CouponError, match="esgotado"):
+        await service.preview(code="FIRST10", plan=plan, professional=second)
+
+    replacement = await service.reserve(
+        coupon=coupon,
+        professional_id=first.id,
+        subscription_id=sub.id,
+        checkout_session_id=uuid4(),
+        plan_slug=plan.slug,
+        discounted_price_cents=8730,
+        allow_replacement=True,
+    )
+    await service.release(reservation.id)
+    await service.bind_payment(replacement.id, "pay-new")
+    assert (await service.list_coupons())[0].reserved_count == 1
+
+    await service.apply_payment_event(
+        subscription=sub,
+        payment_ids={"pay-new"},
+        provider_event="PAYMENT_CONFIRMED",
+    )
+    assert (await service.list_coupons())[0].redemption_count == 1
+    await service.apply_payment_event(
+        subscription=sub,
+        payment_ids={"pay-new"},
+        provider_event="PAYMENT_CHARGEBACK_REQUESTED",
+    )
+    assert (await service.list_coupons())[0].redemption_count == 1
+    await service.apply_payment_event(
+        subscription=sub,
+        payment_ids={"pay-new"},
+        provider_event="PAYMENT_REFUNDED",
+    )
+    assert (await service.list_coupons())[0].redemption_count == 0
+    with pytest.raises(CouponError, match="já utilizou"):
+        await service.preview(code="FIRST10", plan=plan, professional=first)
+    assert (await service.preview(code="FIRST10", plan=plan, professional=second))["first_charge_cents"] == 8730
+    annual = Subscription(
+        professional_id=second.id, plan_id=plan.id, status="incomplete",
+        checkout_session_id=uuid4(),
+    )
+    db.add(annual)
+    await db.flush()
+    annual_reservation = await service.reserve(
+        coupon=coupon, professional_id=second.id, subscription_id=annual.id,
+        checkout_session_id=annual.checkout_session_id, plan_slug=plan.slug,
+        discounted_price_cents=8730,
+    )
+    await service.bind_payment(annual_reservation.id, "chk-annual")
+    await service.apply_payment_event(
+        subscription=annual, payment_ids={"chk-annual"}, provider_event="CHECKOUT_PAID",
+    )
+    assert (await service.list_coupons())[0].redemption_count == 1
+    _clear()
+
+
+async def test_expired_coupon_reservation_cancels_provider_before_release(db, monkeypatch):
+    staff = await _pro(db, "expiry-staff@x.com", is_staff=True)
+    customer = await _pro(db, "expiry-customer@x.com")
+    plan = db.info["plan"]
+    service = CouponService(db)
+    await service.create(actor=staff, body=CouponCreate(
+        code="EXPIRE10", coupon_type="percent", value=10, max_redemptions=1,
+    ))
+    coupon = await service.get_by_code("EXPIRE10")
+    sub = Subscription(
+        professional_id=customer.id, plan_id=plan.id, status="incomplete",
+        provider="asaas", external_subscription_id="sub_pending",
+        external_checkout_id="pay_pending", checkout_session_id=uuid4(),
+    )
+    db.add(sub)
+    await db.flush()
+    reservation = await service.reserve(
+        coupon=coupon, professional_id=customer.id, subscription_id=sub.id,
+        checkout_session_id=sub.checkout_session_id, plan_slug=plan.slug,
+        discounted_price_cents=8730,
+    )
+    await service.bind_payment(reservation.id, "pay_pending")
+    reservation.reserved_until = utcnow() - timedelta(minutes=1)
+    await db.commit()
+    gateway = SimpleNamespace(
+        get_payment=AsyncMock(return_value={"status": "PENDING"}),
+        cancel_subscription=AsyncMock(),
+    )
+    monkeypatch.setattr("app.services.coupon_service.AsaasPaymentGateway", lambda: gateway)
+
+    assert await service.expire_due() == 1
+    gateway.cancel_subscription.assert_awaited_once_with(external_subscription_id="sub_pending")
+    assert reservation.state == "released"
+    assert sub.status == "canceled"
+    assert (await service.list_coupons())[0].reserved_count == 0
     _clear()
 
 

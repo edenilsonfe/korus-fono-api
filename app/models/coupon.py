@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
@@ -29,6 +29,12 @@ class Coupon(Base, TimestampMixin):
 
 class CouponRedemption(Base, TimestampMixin):
     __tablename__ = "coupon_redemptions"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('reserved', 'confirmed', 'released', 'refunded')",
+            name="ck_coupon_redemptions_state",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
     coupon_id: Mapped[uuid.UUID] = mapped_column(
@@ -41,6 +47,19 @@ class CouponRedemption(Base, TimestampMixin):
         index=True,
     )
     context: Mapped[str] = mapped_column(String(32), nullable=False, default="checkout")
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="confirmed")
+    subscription_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("subscriptions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    checkout_session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
+    plan_slug: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    discounted_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    external_payment_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    reserved_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     redeemed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )

@@ -29,12 +29,15 @@ from app.core.deps import get_current_professional
 from app.db.session import get_db
 from app.models.affiliate import AffiliateCode, AffiliateReferral
 from app.models.billing import Plan, Subscription
+from app.models.coupon import Coupon
 from app.models.professional import Professional
 from app.schemas.billing import (
     BillingMeResponse,
     CardInvoiceResponse,
     CheckoutRequest,
     CheckoutResponse,
+    CouponPreviewRequest,
+    CouponPreviewResponse,
     CreditCardPaymentRequest,
     CreditCardPaymentResponse,
     NextPaymentResponse,
@@ -270,6 +273,48 @@ async def list_billing_plans(
     return [_plan_public(plan) for plan in result.scalars().all()]
 
 
+@router.post("/coupon/preview", response_model=CouponPreviewResponse)
+async def preview_coupon(
+    body: CouponPreviewRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    professional: Professional = Depends(get_current_professional),
+):
+    plan = await db.scalar(
+        select(Plan).where(
+            Plan.slug == body.plan_slug.strip(),
+            Plan.is_active.is_(True),
+            Plan.slug.in_(CANONICAL_PLAN_SLUGS),
+        )
+    )
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plano não encontrado ou inativo")
+    try:
+        coupon_service = CouponService(db)
+        coupon = await coupon_service.get_by_code(body.code)
+        await coupon_service.validate_for_professional(coupon, professional.id, plan.slug)
+        if body.referral_code:
+            await AffiliateService(db).register_checkout_referral(
+                code=body.referral_code,
+                referred_professional=professional,
+                request_ip=get_client_ip(request),
+                user_agent=request.headers.get("user-agent", ""),
+            )
+        result = await coupon_service.preview(
+            code=body.code, plan=plan, professional=professional
+        )
+        await db.commit()
+        return result
+    except CouponError as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
+    except AffiliateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.detail) from exc
+    except AffiliateForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=exc.detail) from exc
+    except AffiliateConflictError as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
+
+
 @router.get("/me", response_model=BillingMeResponse)
 async def get_billing_me(
     db: AsyncSession = Depends(get_db),
@@ -461,6 +506,19 @@ async def create_billing_checkout(
         except AffiliateConflictError as exc:
             raise HTTPException(status_code=409, detail=exc.detail) from exc
     existing_sub = await _latest_subscription(db, professional.id)
+    coupon_svc = CouponService(db)
+    previous_coupon_reservation = (
+        await coupon_svc.current_reservation(existing_sub.id) if existing_sub else None
+    )
+    previous_coupon = (
+        await db.get(Coupon, previous_coupon_reservation.coupon_id)
+        if previous_coupon_reservation else None
+    )
+    coupon_code_requested = (payload.coupon_code or "").strip().upper()
+    coupon_changed = bool(
+        previous_coupon_reservation
+        and (not previous_coupon or previous_coupon.code != coupon_code_requested)
+    )
     if existing_sub:
         # The subscription is already a durable checkout marker. Release the
         # professional lock before paths that may lock the subscription.
@@ -489,6 +547,7 @@ async def create_billing_checkout(
         and (reusable_sub.external_subscription_id or reusable_sub.external_checkout_id)
         and (
             plan_changed
+            or coupon_changed
             or (
                 previous_checkout_document
                 and previous_checkout_document != document
@@ -510,6 +569,8 @@ async def create_billing_checkout(
         and existing_sub.plan
         and existing_sub.plan.slug != plan_slug
     ):
+        if coupon_code_requested:
+            raise HTTPException(status_code=409, detail="Cupom válido somente para a primeira assinatura paga")
         change_svc = PlanChangeService(db, gateway)
         change_result = await change_svc.initiate_change(
             professional=professional,
@@ -541,6 +602,10 @@ async def create_billing_checkout(
         )
         existing_sub = await _latest_subscription(db, professional.id)
 
+    if existing_sub and not existing_sub.checkout_session_id:
+        existing_sub.checkout_session_id = uuid4()
+        await db.flush()
+
     charge_cents = plan.price_cents
     coupon_code_applied = None
     affiliate_referral = None
@@ -552,32 +617,53 @@ async def create_billing_checkout(
         plan.price_cents - (plan.price_cents * affiliate_discount_bps // 10000),
     )
     coupon = None
+    coupon_reservation = None
     coupon_charge_cents = plan.price_cents
-    if payload.coupon_code:
-        coupon_svc = CouponService(db)
+    if coupon_code_requested:
         try:
-            coupon = await coupon_svc.get_by_code(payload.coupon_code)
-            await coupon_svc.validate_for_professional(coupon, professional.id, plan.slug)
-            coupon_charge_cents = coupon_svc.discounted_price_cents(coupon, plan.price_cents)
+            if (
+                previous_coupon_reservation
+                and not replace_existing_checkout
+                and previous_coupon
+                and previous_coupon.code == coupon_code_requested
+                and previous_coupon_reservation.plan_slug == plan.slug
+                and coupon_svc.reservation_is_current(previous_coupon_reservation)
+            ):
+                coupon = previous_coupon
+                coupon_charge_cents = previous_coupon_reservation.discounted_price_cents or plan.price_cents
+            else:
+                coupon = await coupon_svc.get_by_code(coupon_code_requested)
+                await coupon_svc.validate_for_professional(coupon, professional.id, plan.slug)
+                coupon_charge_cents = coupon_svc.discounted_price_cents(coupon, plan.price_cents)
+            if coupon_charge_cents <= 0:
+                raise CouponError("O desconto precisa deixar um valor a pagar")
         except CouponError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.detail) from exc
 
-    if affiliate_referral is not None and affiliate_charge_cents < coupon_charge_cents:
+    if affiliate_referral is not None and affiliate_charge_cents <= coupon_charge_cents:
         charge_cents = affiliate_charge_cents
+        if previous_coupon_reservation and not replace_existing_checkout:
+            if not (existing_sub.external_subscription_id or existing_sub.external_checkout_id):
+                raise HTTPException(status_code=409, detail="Checkout com cupom aguarda conciliação")
+            replace_existing_checkout = True
     elif coupon is not None and coupon_charge_cents < plan.price_cents:
         charge_cents = coupon_charge_cents
-        await coupon_svc.redeem(
-            coupon=coupon, professional_id=professional.id, context="checkout"
-        )
-        if coupon.trial_bonus_days > 0:
-            base = professional.trial_ends_at or datetime.now(UTC)
-            if base.tzinfo is None:
-                base = base.replace(tzinfo=UTC)
-            if base < datetime.now(UTC):
-                base = datetime.now(UTC)
-            professional.trial_ends_at = base + timedelta(days=coupon.trial_bonus_days)
+        try:
+            coupon_reservation = await coupon_svc.reserve(
+                coupon=coupon,
+                professional_id=professional.id,
+                subscription_id=existing_sub.id,
+                checkout_session_id=existing_sub.checkout_session_id,
+                plan_slug=plan.slug,
+                discounted_price_cents=coupon_charge_cents,
+                allow_replacement=replace_existing_checkout,
+            )
+        except CouponError as exc:
+            raise HTTPException(status_code=409, detail=exc.detail) from exc
         coupon_code_applied = coupon.code
         await db.commit()
+    elif previous_coupon_reservation and not replace_existing_checkout:
+        raise HTTPException(status_code=409, detail="Concilie o checkout com cupom anterior antes de continuar")
 
     metadata: dict = {
         "professional_id": professional_id,
@@ -624,6 +710,9 @@ async def create_billing_checkout(
                 metadata["customer_document_synced"] = bool(document)
                 metadata["customer_profile_synced"] = bool(customer_profile)
             except PaymentGatewayError as exc:
+                if coupon_reservation:
+                    await coupon_svc.release(coupon_reservation.id)
+                    await db.commit()
                 logger.warning(
                     "Billing checkout gateway failure provider=%s stage=%s professional_id=%s: %s",
                     provider,
@@ -644,9 +733,6 @@ async def create_billing_checkout(
             if replace_existing_checkout:
                 metadata["replace_existing_checkout"] = True
 
-    if existing_sub and not existing_sub.checkout_session_id:
-        existing_sub.checkout_session_id = uuid4()
-        await db.flush()
     credit_reservation_id = str(
         existing_sub.checkout_session_id if existing_sub else uuid4()
     )
@@ -662,6 +748,11 @@ async def create_billing_checkout(
         if credit_reservation.reused and not credit_reservation.payment_id and credit_reservation.external_charge_cents:
             raise AffiliateCreditForbiddenError("A cobrança com crédito aguarda conciliação. Verifique o status antes de tentar novamente")
     except AffiliateCreditForbiddenError as exc:
+        if coupon_reservation and (
+            not previous_coupon_reservation or coupon_reservation.id != previous_coupon_reservation.id
+        ):
+            await coupon_svc.release(coupon_reservation.id)
+            await db.commit()
         raise HTTPException(status_code=409, detail=exc.detail) from exc
     charge_cents = credit_reservation.external_charge_cents
     metadata["charge_cents"] = charge_cents
@@ -672,11 +763,12 @@ async def create_billing_checkout(
         # Persist before the provider can create a charge or deliver a webhook.
         await db.commit()
 
-    if existing_sub and (credit_reservation.applied_cents or (affiliate_discount_bps and charge_cents == affiliate_charge_cents)):
-        # Coupon behavior remains authoritative when the coupon won the price comparison.
-        existing_sub.checkout_recurring_price_cents = (
-            coupon_charge_cents if coupon_code_applied else plan.price_cents
-        )
+    if existing_sub and (
+        coupon_code_applied
+        or credit_reservation.applied_cents
+        or (affiliate_discount_bps and charge_cents == affiliate_charge_cents)
+    ):
+        existing_sub.checkout_recurring_price_cents = plan.price_cents
         await db.commit()
 
     if charge_cents == 0 and credit_reservation.applied_cents:
@@ -689,6 +781,8 @@ async def create_billing_checkout(
                 detail="Não foi possível vincular o crédito à assinatura",
             )
         internal_payment_id = f"credit-{credit_reservation_id}"
+        if coupon_reservation:
+            await coupon_svc.bind_payment(coupon_reservation.id, internal_payment_id)
         await AffiliateCreditService(db).bind_payment(reservation_id=credit_reservation_id,
             payment_id=internal_payment_id)
         existing_sub.provider = "internal_credit"
@@ -731,6 +825,8 @@ async def create_billing_checkout(
             status="completed",
             provider="internal_credit",
             message="Assinatura paga integralmente com crédito KorusFono.",
+            charge_cents=0,
+            credit_cents=credit_reservation.applied_cents,
             access_granted=True,
         )
 
@@ -758,6 +854,29 @@ async def create_billing_checkout(
             exc_info=True,
         )
         raise _checkout_gateway_error() from exc
+
+    if session.get("preserve_existing_plan"):
+        if coupon_reservation and (
+            not previous_coupon_reservation
+            or coupon_reservation.id != previous_coupon_reservation.id
+        ):
+            await coupon_svc.release(coupon_reservation.id)
+    else:
+        external_coupon_payment_id = str(
+            session.get("external_checkout_id") or session.get("session_id") or ""
+        )
+        if coupon_reservation and external_coupon_payment_id:
+            await coupon_svc.bind_payment(coupon_reservation.id, external_coupon_payment_id)
+        if (
+            replace_existing_checkout
+            and previous_coupon_reservation
+            and (
+                not coupon_reservation
+                or previous_coupon_reservation.id != coupon_reservation.id
+            )
+        ):
+            await coupon_svc.release(previous_coupon_reservation.id)
+    await db.commit()
 
     if credit_reservation.applied_cents and session.get("affiliate_credit_not_applied"):
         await AffiliateCreditService(db).release_checkout_reservation(
@@ -849,6 +968,8 @@ async def create_billing_checkout(
         status=session.get("status", "pending"),
         provider=provider,
         message="Continue para escolher PIX ou cartão.",
+        charge_cents=charge_cents,
+        credit_cents=credit_reservation.applied_cents,
         access_granted=access_granted,
     )
 

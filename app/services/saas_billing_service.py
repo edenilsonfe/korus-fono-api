@@ -411,6 +411,31 @@ class SaasBillingService:
                         target = sub
                         break
 
+            from app.services.coupon_service import CouponService
+
+            coupon_payment_ids = {
+                str(value)
+                for value in (
+                    payload.get("id"),
+                    payload.get("external_checkout_id"),
+                    payload.get("checkout_session_id"),
+                )
+                if value
+            }
+            coupon_event = str(payload.get("provider_event") or "")
+            if ev.event_type == InternalBillingEventType.PAYMENT_SUCCEEDED:
+                await CouponService(self.db).apply_payment_event(
+                    subscription=target,
+                    payment_ids=coupon_payment_ids,
+                    provider_event=coupon_event or "PAYMENT_CONFIRMED",
+                )
+            elif coupon_event == "PAYMENT_REFUNDED":
+                await CouponService(self.db).apply_payment_event(
+                    subscription=target,
+                    payment_ids=coupon_payment_ids,
+                    provider_event=coupon_event,
+                )
+
             if (ev.event_type == InternalBillingEventType.PAYMENT_SUCCEEDED
                     and payload.get("provider") == "asaas" and target.external_subscription_id
                     and target.checkout_recurring_price_cents):
@@ -426,10 +451,16 @@ class SaasBillingService:
                 await self.db.commit()
                 continue
             if ev.event_type == InternalBillingEventType.PAYMENT_DELETED:
-                await self._cancel_never_paid_asaas_subscription(
+                canceled_subscription = await self._cancel_never_paid_asaas_subscription(
                     target=target,
                     payload=payload,
                 )
+                if canceled_subscription or not target.external_subscription_id:
+                    await CouponService(self.db).apply_payment_event(
+                        subscription=target,
+                        payment_ids=coupon_payment_ids,
+                        provider_event="PAYMENT_DELETED",
+                    )
                 if stored_event:
                     stored_event.status = "processed"
                     stored_event.processed_at = datetime.now(UTC)

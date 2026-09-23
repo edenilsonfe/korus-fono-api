@@ -89,6 +89,7 @@ async def retry_google_calendar_syncs(ctx) -> None:
 
 async def run_affiliate_maintenance(ctx) -> None:
     from app.services.affiliate_service import AffiliateService
+    from app.services.coupon_service import CouponService
     from app.services.billing_event_recovery import (
         reconcile_pending_transfers,
         recover_billing_events,
@@ -96,6 +97,7 @@ async def run_affiliate_maintenance(ctx) -> None:
 
     async with AsyncSessionLocal() as session:
         await recover_billing_events(session)
+        await CouponService(session).expire_due()
         await reconcile_pending_transfers(session)
         await AffiliateService(session).release_due_rewards()
         await session.commit()

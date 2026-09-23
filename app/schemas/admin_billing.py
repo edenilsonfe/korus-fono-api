@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import Field
@@ -93,38 +93,41 @@ class CouponItem(CamelModel):
     coupon_type: str
     value: int
     trial_bonus_days: int = 0
-    valid_from: datetime | None = None
-    valid_until: datetime | None = None
+    valid_from: date | None = None
+    valid_until: date | None = None
     max_redemptions: int | None = None
     max_per_professional: int = 1
     plan_slugs: list[str] | None = None
     is_active: bool = True
     external_coupon_id: str | None = None
     redemption_count: int = 0
+    reserved_count: int = 0
+    has_history: bool = False
 
 
 class CouponCreate(CamelModel):
     code: str = Field(min_length=2, max_length=64)
     coupon_type: CouponType
-    value: int = Field(ge=0)
+    value: int = Field(gt=0)
     trial_bonus_days: int = Field(default=0, ge=0, le=365)
-    valid_from: datetime | None = None
-    valid_until: datetime | None = None
+    valid_from: date | None = None
+    valid_until: date | None = None
     max_redemptions: int | None = Field(default=None, ge=1)
-    max_per_professional: int = Field(default=1, ge=1)
+    max_per_professional: int = Field(default=1, ge=1, le=1)
     plan_slugs: list[str] | None = None
     is_active: bool = True
     reason: str | None = None
 
 
 class CouponUpdate(CamelModel):
+    code: str | None = Field(default=None, min_length=2, max_length=64)
     coupon_type: CouponType | None = None
-    value: int | None = Field(default=None, ge=0)
+    value: int | None = Field(default=None, gt=0)
     trial_bonus_days: int | None = Field(default=None, ge=0, le=365)
-    valid_from: datetime | None = None
-    valid_until: datetime | None = None
-    max_redemptions: int | None = None
-    max_per_professional: int | None = Field(default=None, ge=1)
+    valid_from: date | None = None
+    valid_until: date | None = None
+    max_redemptions: int | None = Field(default=None, ge=1)
+    max_per_professional: int | None = Field(default=None, ge=1, le=1)
     plan_slugs: list[str] | None = None
     is_active: bool | None = None
     reason: str | None = None

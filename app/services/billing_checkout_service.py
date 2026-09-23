@@ -424,6 +424,11 @@ class BillingCheckoutService:
                 sub.external_checkout_id = str(payment["id"])
 
             sub.payment_method = "credit_card"
+            from app.services.coupon_service import CouponService
+            coupon_service = CouponService(self.db)
+            coupon_reservation = await coupon_service.current_reservation(sub.id)
+            if coupon_reservation:
+                await coupon_service.bind_payment(coupon_reservation.id, str(sub.external_checkout_id))
             await self.db.commit()
         except PaymentGatewayError as exc:
             logger.warning(
@@ -600,6 +605,11 @@ class BillingCheckoutService:
                         payment_id = str(result["payment_id"])
 
                     sub.external_checkout_id = payment_id
+                    from app.services.coupon_service import CouponService
+                    coupon_service = CouponService(self.db)
+                    coupon_reservation = await coupon_service.current_reservation(sub.id)
+                    if coupon_reservation:
+                        await coupon_service.bind_payment(coupon_reservation.id, payment_id)
                     await self.db.commit()
                     pix = await gateway.get_pix_qr_code(payment_id)
 

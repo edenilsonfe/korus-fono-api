@@ -83,6 +83,7 @@ class CheckoutRequest(CamelModel):
     coupon_code: str | None = None
     referral_code: str | None = Field(default=None, max_length=48)
 
+
     @field_validator("referral_code")
     @classmethod
     def normalize_referral_code(cls, value: str | None) -> str | None:
@@ -124,6 +125,23 @@ class CheckoutRequest(CamelModel):
         if not (_is_valid_cpf(digits) or _is_valid_cnpj(digits)):
             raise ValueError("CPF ou CNPJ inválido")
         return digits
+
+
+class CouponPreviewRequest(CamelModel):
+    code: str = Field(min_length=2, max_length=64)
+    plan_slug: str
+    referral_code: str | None = None
+
+
+class CouponPreviewResponse(CamelModel):
+    coupon_code: str
+    plan_slug: str
+    original_cents: int
+    discount_cents: int
+    credit_cents: int = 0
+    first_charge_cents: int
+    renewal_cents: int
+    applied_benefit: Literal["coupon", "referral"]
 
 
 class CheckoutResponse(CamelModel):

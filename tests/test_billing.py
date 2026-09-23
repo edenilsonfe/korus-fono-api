@@ -14,6 +14,7 @@ from app.billing.asaas_gateway import AsaasPaymentGateway
 from app.billing.types import InternalBillingEventType
 from app.billing.webhook_normalizer import AsaasWebhookNormalizer, StubWebhookNormalizer
 from app.models.billing import Plan, Subscription
+from app.models.coupon import Coupon, CouponRedemption
 from app.models.professional import Professional
 from app.schemas.billing import CreditCardPaymentRequest
 from app.services.billing_checkout_service import BillingCheckoutService
@@ -22,6 +23,66 @@ from app.services.saas_billing_service import (
     SaasBillingService,
     purchase_deduplication_id,
 )
+
+
+@pytest.mark.asyncio
+async def test_coupon_preview_and_checkout_reserve_first_charge_only(
+    db_session, professional, auth_headers, api_client, monkeypatch,
+):
+    professional.cpf = "24971563792"
+    professional.signup_payment_required = True
+    professional.email_verified_at = None
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[1])
+    coupon = Coupon(code="WELCOME10", coupon_type="percent", value=10,
+                    trial_bonus_days=0, max_redemptions=1, is_active=True)
+    db_session.add_all([plan, coupon])
+    await db_session.commit()
+
+    async def no_referral(_self, _professional_id):
+        return 0, None
+    async def no_credit(_self, _professional_id):
+        return 0
+    monkeypatch.setattr("app.services.coupon_service.AffiliateService.referral_discount", no_referral)
+    monkeypatch.setattr("app.services.coupon_service.AffiliateCreditService.credit_balance", no_credit)
+    monkeypatch.setattr("app.api.v1.billing.AffiliateService.referral_discount", no_referral)
+
+    gateway = AsyncMock()
+    gateway.provider_key = "asaas"
+    gateway.create_checkout_session.return_value = {
+        "checkout_url": "/planos/pagamento?sessionId=chk_coupon",
+        "session_id": "chk_coupon",
+        "external_checkout_id": "chk_coupon",
+        "external_subscription_id": None,
+        "status": "pending",
+    }
+    monkeypatch.setattr("app.api.v1.billing.get_payment_gateway", lambda: gateway)
+
+    anonymous_preview = await api_client.post(
+        "/api/v1/billing/coupon/preview",
+        json={"code": "WELCOME10", "planSlug": plan.slug},
+    )
+    assert anonymous_preview.status_code == 401
+
+    preview = await api_client.post(
+        "/api/v1/billing/coupon/preview", headers=auth_headers,
+        json={"code": "WELCOME10", "planSlug": plan.slug},
+    )
+    assert preview.status_code == 200
+    assert preview.json()["firstChargeCents"] == plan.price_cents * 90 // 100
+    assert preview.json()["renewalCents"] == plan.price_cents
+
+    response = await api_client.post(
+        "/api/v1/billing/checkout", headers=auth_headers,
+        json={"planSlug": plan.slug, "couponCode": "WELCOME10"},
+    )
+    assert response.status_code == 200
+    metadata = gateway.create_checkout_session.await_args.kwargs["metadata"]
+    assert metadata["charge_cents"] == preview.json()["firstChargeCents"]
+    assert metadata["coupon_code"] == "WELCOME10"
+    redemption = await db_session.scalar(select(CouponRedemption).where(CouponRedemption.coupon_id == coupon.id))
+    assert redemption.state == "reserved"
+    assert redemption.external_payment_id == "chk_coupon"
+    assert redemption.reserved_until is not None
 
 
 @pytest.mark.asyncio
