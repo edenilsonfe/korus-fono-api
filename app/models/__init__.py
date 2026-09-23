@@ -43,6 +43,8 @@ from app.models.resource_license import ResourceLicense, ResourceLicenseDecision
 from app.models.resource_link import GoalResourceLink, ProgramResourceLink, ResourceDomainLink
 from app.models.storage_cleanup import StorageCleanupTask
 from app.models.caregiver import Caregiver
+from app.models.clinical_review import ClinicalReview
+from app.models.intake import IntakeRequest, IntakeGrant, IntakeFile, IntakeAuditEvent
 from app.models.care_team import (
     PatientAccessEvent,
     PatientCareTeamMember,
@@ -112,6 +114,11 @@ __all__ = [
     "Patient",
     "PatientRecordExport",
     "Caregiver",
+    "ClinicalReview",
+    "IntakeRequest",
+    "IntakeGrant",
+    "IntakeFile",
+    "IntakeAuditEvent",
     "PatientSharingConsentEvent",
     "PatientCareTeamMember",
     "PatientAccessEvent",

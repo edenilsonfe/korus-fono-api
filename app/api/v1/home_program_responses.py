@@ -221,7 +221,6 @@ async def put_public_check_in_photo(
 @router.delete(
     "/check-ins/{check_in_id}/photo",
     response_model=HomeProgramPhotoResponse,
-    response_model_exclude_none=True,
 )
 async def delete_public_check_in_photo(
     check_in_id: UUID,

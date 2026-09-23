@@ -89,6 +89,31 @@ def _not_found(detail: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
 
 
+async def _require_functional_feedback_if_requested(
+    db: AsyncSession,
+    context: PublicHomeProgramContext,
+    *,
+    requested: bool,
+) -> None:
+    if not requested:
+        return
+    from app.services.clinical_workflow_flags import require_workflow_enabled
+
+    await require_workflow_enabled(db, context.owner.id, "functional_feedback")
+
+
+def _validate_functional_feedback(
+    task: HomeProgramTask, *, observation: str | None, observation_context: str | None
+) -> None:
+    if observation is None and observation_context is None:
+        return
+    if task.functional_question is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Esta tarefa não tem uma pergunta funcional publicada.",
+        )
+
+
 def _as_utc(value: datetime) -> datetime:
     return (
         value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
@@ -153,6 +178,9 @@ def _check_in_response(
         task_id=str(row.task_id),
         done=row.done,
         comment=row.comment,
+        functional_question=row.functional_question,
+        functional_observation=row.functional_observation,
+        observation_context=row.observation_context,
         responded_at=_as_utc(row.responded_at),
         version=row.version,
         has_photo=has_photo,
@@ -166,6 +194,9 @@ def _embedded_check_in(
         id=str(row.id),
         done=row.done,
         comment=row.comment,
+        functional_question=row.functional_question,
+        functional_observation=row.functional_observation,
+        observation_context=row.observation_context,
         responded_at=_as_utc(row.responded_at),
         version=row.version,
         has_photo=has_photo,
@@ -280,6 +311,7 @@ async def build_public_response(
                 id=str(task.id),
                 title=task.title,
                 instructions=task.instructions,
+                functional_question=task.functional_question,
                 due_on=task.due_on,
                 materials=materials.get(task.id, []),
                 check_in=(
@@ -332,12 +364,28 @@ async def create_check_in(
     if task is None:
         raise _not_found(TASK_NOT_FOUND_MESSAGE)
 
+    _validate_functional_feedback(
+        task,
+        observation=body.functional_observation,
+        observation_context=body.observation_context,
+    )
+    await _require_functional_feedback_if_requested(
+        db,
+        context,
+        requested=bool(
+            body.model_fields_set
+            & {"functional_observation", "observation_context"}
+        ),
+    )
+
     payload_hash = _normalize_command(
         {
             "operation": CHECK_IN_CREATED_EVENT,
             "taskId": str(task.id),
             "done": body.done,
             "comment": body.comment,
+            "functionalObservation": body.functional_observation,
+            "observationContext": body.observation_context,
         }
     )
     event = await _existing_event(
@@ -368,6 +416,9 @@ async def create_check_in(
         grant_id=grant.id,
         done=body.done,
         comment=body.comment,
+        functional_question=task.functional_question,
+        functional_observation=body.functional_observation,
+        observation_context=body.observation_context,
         version=1,
         responded_at=now,
     )
@@ -417,6 +468,33 @@ async def update_check_in(
     if row is None:
         raise _not_found(CHECK_IN_NOT_FOUND_MESSAGE)
 
+    task = await db.get(HomeProgramTask, row.task_id)
+    if task is None or task.program_id != context.program.id:
+        raise _not_found(CHECK_IN_NOT_FOUND_MESSAGE)
+    functional_observation = (
+        body.functional_observation
+        if "functional_observation" in body.model_fields_set
+        else row.functional_observation
+    )
+    observation_context = (
+        body.observation_context
+        if "observation_context" in body.model_fields_set
+        else row.observation_context
+    )
+    _validate_functional_feedback(
+        task,
+        observation=functional_observation,
+        observation_context=observation_context,
+    )
+    await _require_functional_feedback_if_requested(
+        db,
+        context,
+        requested=bool(
+            body.model_fields_set
+            & {"functional_observation", "observation_context"}
+        ),
+    )
+
     payload_hash = _normalize_command(
         {
             "operation": CHECK_IN_UPDATED_EVENT,
@@ -424,6 +502,8 @@ async def update_check_in(
             "expectedVersion": body.expected_version,
             "done": body.done,
             "comment": body.comment,
+            "functionalObservation": functional_observation,
+            "observationContext": observation_context,
         }
     )
     event = await _existing_event(
@@ -449,11 +529,16 @@ async def update_check_in(
             version=row.version,
             done=row.done,
             comment=row.comment,
+            functional_question=row.functional_question,
+            functional_observation=row.functional_observation,
+            observation_context=row.observation_context,
             recorded_at=now,
         )
     )
     row.done = body.done
     row.comment = body.comment
+    row.functional_observation = functional_observation
+    row.observation_context = observation_context
     row.version += 1
     row.responded_at = now
     row.grant_id = grant.id

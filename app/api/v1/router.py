@@ -22,6 +22,8 @@ from app.api.v1 import (
     catalog,
     care_team,
     clinical,
+    clinical_reviews,
+    clinical_workflows,
     dashboard,
     family_portal_content,
     family_portal_public,
@@ -31,6 +33,7 @@ from app.api.v1 import (
     home_program_responses,
     home_programs,
     instruments,
+    intake,
     intervention_programs,
     me,
     notifications,
@@ -79,6 +82,10 @@ api_router.include_router(timeline.router)
 api_router.include_router(timeline.patient_router)
 api_router.include_router(clinical.router)
 api_router.include_router(clinical.patient_router)
+api_router.include_router(clinical_workflows.router)
+api_router.include_router(clinical_reviews.router)
+api_router.include_router(clinical_reviews.due_router)
+api_router.include_router(intake.router)
 api_router.include_router(instruments.router)
 api_router.include_router(intervention_programs.router)
 api_router.include_router(home_programs.router)

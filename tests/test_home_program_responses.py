@@ -294,6 +294,7 @@ async def test_public_get_projects_minimal_family_view(
         "dueOn",
         "materials",
         "checkIn",
+        "functionalQuestion",
     }
     assert task["checkIn"] is None
 

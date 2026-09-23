@@ -20,6 +20,8 @@ PatientExportSection = Literal[
     "evolutions",
     "goals",
     "sessions",
+    "clinical_reviews",
+    "intake",
     "attachments",
 ]
 PatientRecordExportKind = Literal["summary", "dossier"]

@@ -50,6 +50,8 @@ from app.models.assessment import (
 from app.models.attachment import Attachment
 from app.models.evolution import Evolution
 from app.models.goal import Goal
+from app.models.clinical_review import ClinicalReview
+from app.models.intake import IntakeFile, IntakeRequest, INTAKE_REVIEWED, INTAKE_SUBMITTED
 from app.models.patient import Patient
 from app.models.patient_record_export import (
     EXPORT_FORMAT_PDF,
@@ -130,6 +132,8 @@ CANONICAL_SECTION_ORDER: tuple[str, ...] = (
     "evolutions",
     "goals",
     "sessions",
+    "clinical_reviews",
+    "intake",
     "attachments",
 )
 
@@ -151,6 +155,8 @@ EMPTY_SECTION_LABELS = {
     "evolutions": "Nenhuma evolução no período.",
     "goals": "Nenhuma meta registrada.",
     "sessions": "Nenhuma sessão no período.",
+    "clinical_reviews": "Nenhuma revisão clínica concluída no período.",
+    "intake": "Nenhum pré-atendimento enviado ou revisado no período.",
     "attachments": "Nenhum anexo selecionado.",
 }
 PURPOSE_LABELS = {
@@ -421,6 +427,9 @@ class DossierRecords:
     evolutions: list[Evolution] = field(default_factory=list)
     goals: list[Goal] = field(default_factory=list)
     sessions: list[Session] = field(default_factory=list)
+    clinical_reviews: list[ClinicalReview] = field(default_factory=list)
+    intakes: list[IntakeRequest] = field(default_factory=list)
+    intake_files: dict[UUID, list[IntakeFile]] = field(default_factory=dict)
     attachments: list[Attachment] = field(default_factory=list)
     author_names: dict[UUID, str] = field(default_factory=dict)
 
@@ -433,6 +442,8 @@ class DossierRecords:
             "evolutions": self.evolutions,
             "goals": self.goals,
             "sessions": self.sessions,
+            "clinical_reviews": self.clinical_reviews,
+            "intake": self.intakes,
             "attachments": self.attachments,
         }
         return {
@@ -443,7 +454,13 @@ class DossierRecords:
 
     @property
     def dated_record_count(self) -> int:
-        return len(self.assessments) + len(self.evolutions) + len(self.sessions)
+        return (
+            len(self.assessments)
+            + len(self.evolutions)
+            + len(self.sessions)
+            + len(self.clinical_reviews)
+            + len(self.intakes)
+        )
 
     @property
     def text_char_count(self) -> int:
@@ -456,6 +473,16 @@ class DossierRecords:
             total += len(goal.title or "") + len(goal.area or "") + len(goal.status or "")
         for session in self.sessions:
             total += len(session.type or "")
+        for review in self.clinical_reviews:
+            total += len(review.summary or "")
+            total += len(review.final_summary or "")
+            total += len(review.family_guidance or "")
+            for source in review.source_snapshot or []:
+                total += len(str(source.get("excerpt") or ""))
+        for intake in self.intakes:
+            for value in (intake.responses or {}).values():
+                if isinstance(value, dict):
+                    total += len(str(value.get("value") or ""))
         return total
 
 
@@ -621,8 +648,84 @@ async def collect_patient_record_export(
             sessions = [session for session in sessions if session.id not in represented]
         records.sessions = sessions
 
+    if "clinical_reviews" in sections:
+        filters = [
+            ClinicalReview.patient_id == patient.id,
+            ClinicalReview.status == "completed",
+        ]
+        if start is not None:
+            filters.append(ClinicalReview.completed_at >= start)
+        if end is not None:
+            filters.append(ClinicalReview.completed_at < end)
+        records.clinical_reviews = list(
+            (
+                await db.execute(
+                    select(ClinicalReview)
+                    .where(*filters)
+                    .order_by(ClinicalReview.completed_at.asc(), ClinicalReview.id.asc())
+                    .limit(MAX_EXPORT_DATED_RECORDS + 1)
+                )
+            ).scalars()
+        )
+
+    if "intake" in sections:
+        # Drafts and cancelled invitations are deliberately excluded. The
+        # relevant date is submission for an open request and review for a
+        # request that was incorporated by the professional.
+        filters = [
+            IntakeRequest.patient_id == patient.id,
+            IntakeRequest.status.in_([INTAKE_SUBMITTED, INTAKE_REVIEWED]),
+        ]
+        intake_date = func.coalesce(IntakeRequest.reviewed_at, IntakeRequest.submitted_at)
+        if start is not None:
+            filters.append(intake_date >= start)
+        if end is not None:
+            filters.append(intake_date < end)
+        records.intakes = list(
+            (
+                await db.execute(
+                    select(IntakeRequest)
+                    .where(*filters)
+                    .order_by(intake_date.asc(), IntakeRequest.id.asc())
+                    .limit(MAX_EXPORT_DATED_RECORDS + 1)
+                )
+            ).scalars()
+        )
+        if records.intakes:
+            intake_ids = [item.id for item in records.intakes]
+            file_rows = list(
+                (
+                    await db.execute(
+                        select(IntakeFile)
+                        .where(
+                            IntakeFile.intake_request_id.in_(intake_ids),
+                            IntakeFile.deleted_at.is_(None),
+                        )
+                        .order_by(IntakeFile.created_at.asc(), IntakeFile.id.asc())
+                    )
+                ).scalars()
+            )
+            records.intake_files = {
+                intake_id: [item for item in file_rows if item.intake_request_id == intake_id]
+                for intake_id in intake_ids
+            }
+
     author_ids = {evolution.professional_id for evolution in records.evolutions}
     author_ids.add(patient.professional_id)
+    author_ids.update(review.author_professional_id for review in records.clinical_reviews)
+    author_ids.update(
+        review.completed_by_professional_id
+        for review in records.clinical_reviews
+        if review.completed_by_professional_id is not None
+    )
+    author_ids.update(
+        intake.owner_professional_id for intake in records.intakes
+    )
+    author_ids.update(
+        intake.reviewed_by_professional_id
+        for intake in records.intakes
+        if intake.reviewed_by_professional_id is not None
+    )
     records.author_names = await _professional_names(db, author_ids)
     records.protocol_names = await _protocol_names(
         db, [assessment.protocol_id for assessment in records.assessments]
@@ -923,6 +1026,195 @@ def _append_sessions(story, styles, records: DossierRecords) -> None:
     story.append(Spacer(1, 6))
 
 
+def _export_datetime(value: datetime | None) -> str:
+    if value is None:
+        return "Não informada"
+    return value.strftime("%d/%m/%Y %H:%M")
+
+
+def _append_clinical_reviews(story, styles, records: DossierRecords) -> None:
+    story.append(Paragraph("Revisões clínicas concluídas", styles["Heading2"]))
+    if not records.clinical_reviews:
+        story.append(Paragraph(EMPTY_SECTION_LABELS["clinical_reviews"], styles["Normal"]))
+        story.append(Spacer(1, 6))
+        return
+    for review in records.clinical_reviews:
+        author = records.author_names.get(review.author_professional_id) or str(
+            review.author_professional_id
+        )
+        completed_by = records.author_names.get(review.completed_by_professional_id)
+        headline = (
+            f"• {_export_datetime(review.completed_at)} — "
+            f"{'Alta' if review.kind == 'discharge' else 'Revisão periódica'} — "
+            f"autoria: {escape_paragraph_text(author)}"
+        )
+        if completed_by and review.completed_by_professional_id != review.author_professional_id:
+            headline += f" — concluída por: {escape_paragraph_text(completed_by)}"
+        story.append(Paragraph(headline, styles["Normal"]))
+        if review.period_start or review.period_end:
+            period = (
+                f"{review.period_start.strftime('%d/%m/%Y') if review.period_start else '—'}"
+                f" a {review.period_end.strftime('%d/%m/%Y') if review.period_end else '—'}"
+            )
+            story.append(Paragraph(f"Período clínico: {period}", styles["Normal"]))
+        for label, value in (
+            ("Resumo", review.summary),
+            ("Motivo da alta", review.discharge_reason),
+            ("Resumo final", review.final_summary),
+            ("Orientação à família", review.family_guidance),
+        ):
+            if (value or "").strip():
+                story.append(
+                    Paragraph(
+                        f"{label}: {escape_paragraph_text(value.strip())}", styles["Normal"]
+                    )
+                )
+        for label, value in (
+            ("Data efetiva da alta", review.discharge_on),
+            ("Próxima revisão", review.next_review_on),
+            ("Retorno previsto", review.return_on),
+        ):
+            if value:
+                story.append(Paragraph(f"{label}: {value.strftime('%d/%m/%Y')}", styles["Normal"]))
+        if review.return_recommended is not None:
+            story.append(Paragraph(
+                f"Retorno recomendado: {'Sim' if review.return_recommended else 'Não'}",
+                styles["Normal"],
+            ))
+        for decision in review.goal_decisions or []:
+            label = {"maintain": "Manter", "adjust": "Ajustar", "close": "Encerrar"}.get(
+                decision.get("decision"), "Decisão"
+            )
+            detail = f"Meta {decision.get('goalId')}: {label} — {decision.get('note') or ''}"
+            story.append(Paragraph(escape_paragraph_text(detail), styles["Normal"]))
+        for decision in review.appointment_decisions or []:
+            label = "Manter" if decision.get("action") == "keep" else "Cancelar"
+            detail = f"Consulta {decision.get('appointmentId')}: {label}"
+            story.append(Paragraph(escape_paragraph_text(detail), styles["Normal"]))
+        if review.home_program_ids:
+            story.append(Paragraph(
+                "Programas de continuidade: " + escape_paragraph_text(", ".join(map(str, review.home_program_ids))),
+                styles["Normal"],
+            ))
+        sources = review.source_snapshot or []
+        if sources:
+            story.append(Paragraph("Fontes registradas:", styles["Normal"]))
+            for source in sources:
+                if not isinstance(source, dict):
+                    continue
+                source_parts = [str(source.get("kind") or "fonte")]
+                # Clinical review snapshots use the public camelCase shape;
+                # the snake_case fallbacks keep older persisted snapshots
+                # readable during the migration window.
+                source_date = source.get("sourceDate") or source.get("source_date")
+                author_name = source.get("authorName") or source.get("author_name")
+                source_id = source.get("sourceId") or source.get("source_id")
+                comparison_target_id = source.get("comparisonTargetId") or source.get(
+                    "comparison_target_id"
+                )
+                if source_date:
+                    source_parts.append(str(source_date))
+                if author_name:
+                    source_parts.append(f"autoria: {author_name}")
+                if source_id:
+                    source_parts.append(f"ID: {source_id}")
+                if comparison_target_id:
+                    source_parts.append(f"alvo da comparação: {comparison_target_id}")
+                story.append(
+                    Paragraph(
+                        f"• {escape_paragraph_text(' — '.join(source_parts))}",
+                        styles["Normal"],
+                    )
+                )
+                excerpt = str(source.get("excerpt") or "").strip()
+                if excerpt:
+                    story.append(Paragraph(escape_paragraph_text(excerpt), styles["Normal"]))
+    story.append(Spacer(1, 6))
+
+
+def _append_intake(story, styles, records: DossierRecords) -> None:
+    from app.services.intake_service import INTAKE_SECTIONS
+
+    story.append(Paragraph("Pré-atendimento enviado ou revisado", styles["Heading2"]))
+    if not records.intakes:
+        story.append(Paragraph(EMPTY_SECTION_LABELS["intake"], styles["Normal"]))
+        story.append(Spacer(1, 6))
+        return
+    for intake in records.intakes:
+        requester = records.author_names.get(intake.owner_professional_id) or str(
+            intake.owner_professional_id
+        )
+        date_value = intake.reviewed_at or intake.submitted_at
+        story.append(
+            Paragraph(
+                f"• {_export_datetime(date_value)} — status: "
+                f"{escape_paragraph_text(intake.status)} — "
+                f"informante: {escape_paragraph_text(intake.caregiver_name_snapshot)} — "
+                f"solicitado por: {escape_paragraph_text(requester)}",
+                styles["Normal"],
+            )
+        )
+        if intake.submitted_at:
+            story.append(
+                Paragraph(
+                    f"Enviado em: {_export_datetime(intake.submitted_at)}",
+                    styles["Normal"],
+                )
+            )
+        if intake.reviewed_at:
+            reviewer = records.author_names.get(intake.reviewed_by_professional_id)
+            reviewed_by = f" por {reviewer}" if reviewer else ""
+            story.append(
+                Paragraph(
+                    f"Revisado em: {_export_datetime(intake.reviewed_at)}"
+                    f"{escape_paragraph_text(reviewed_by)}",
+                    styles["Normal"],
+                )
+            )
+        for key, answer in (intake.responses or {}).items():
+            if not isinstance(answer, dict):
+                continue
+            value = "Não sei informar" if answer.get("notKnown") else str(answer.get("value") or "")
+            if value:
+                story.append(
+                    Paragraph(
+                        f"• {escape_paragraph_text(INTAKE_SECTIONS.get(key, str(key)))}: "
+                        f"{escape_paragraph_text(value)}",
+                        styles["Normal"],
+                    )
+                )
+        selected_fields = [INTAKE_SECTIONS.get(item, str(item)) for item in (intake.selected_fields or [])]
+        selected_files = [str(item) for item in (intake.selected_file_ids or [])]
+        if selected_fields:
+            story.append(
+                Paragraph(
+                    f"Campos incorporados na anamnese: "
+                    f"{escape_paragraph_text(', '.join(selected_fields))}",
+                    styles["Normal"],
+                )
+            )
+        if selected_files:
+            story.append(
+                Paragraph(
+                    f"Documentos selecionados para incorporação: "
+                    f"{escape_paragraph_text(', '.join(selected_files))}",
+                    styles["Normal"],
+                )
+            )
+        for item in records.intake_files.get(intake.id, []):
+            incorporated = "incorporado" if item.incorporated_attachment_id else "não incorporado"
+            story.append(
+                Paragraph(
+                    f"Documento de origem: {escape_paragraph_text(item.name)} — "
+                    f"{escape_paragraph_text(item.content_type)} — "
+                    f"{_format_bytes(item.size_bytes)} — "
+                    f"criado em {_export_datetime(item.created_at)} — {incorporated}",
+                    styles["Normal"],
+                )
+            )
+    story.append(Spacer(1, 6))
+
+
 def _append_attachments_index(story, styles, records: DossierRecords) -> None:
     story.append(
         Paragraph("Anexos (índice — os arquivos originais não estão neste PDF)", styles["Heading2"])
@@ -998,6 +1290,10 @@ def render_patient_record_pdf(
             _append_goals(story, styles, records)
         elif section == "sessions":
             _append_sessions(story, styles, records)
+        elif section == "clinical_reviews":
+            _append_clinical_reviews(story, styles, records)
+        elif section == "intake":
+            _append_intake(story, styles, records)
         elif section == "attachments":
             _append_attachments_index(story, styles, records)
 

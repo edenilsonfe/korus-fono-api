@@ -24,6 +24,8 @@ EXEMPT_PATH_PREFIXES: tuple[str, ...] = (
     # Public family surface of home programs (X-Home-Program-Token, no JWT) —
     # the service layer revalidates EntitlementService.can_write(owner).
     "/api/v1/home-program-responses",
+    # The restricted invitation service checks the account owner's entitlement.
+    "/api/v1/intake-responses",
     "/api/v1/billing/checkout",
     "/api/v1/billing/reconcile",
     "/api/v1/billing/webhooks",
@@ -59,6 +61,15 @@ class EntitlementMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         path = request.url.path
+        # Ending an intake invitation remains available when the account is read-only.
+        intake_path = r"/api/v1/patients/[0-9a-fA-F-]{36}/intake-requests/[0-9a-fA-F-]{36}"
+        if (
+            request.method == "POST" and re.fullmatch(intake_path + r"/cancel/?", path)
+        ) or (
+            request.method == "DELETE"
+            and re.fullmatch(intake_path + r"/grants/[0-9a-fA-F-]{36}/?", path)
+        ):
+            return await call_next(request)
         # Revoking a public report link must remain possible in read-only mode.
         if request.method == "DELETE" and re.fullmatch(
             r"/api/v1/ai/reports/[^/]+/deliveries/[^/]+/?", path

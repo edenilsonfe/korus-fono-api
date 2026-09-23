@@ -31,6 +31,7 @@ from app.core.config import get_settings
 from app.core.utils import utcnow
 from app.models.attachment import Attachment
 from app.models.home_program import HomeProgramPhoto
+from app.models.intake import IntakeFile
 from app.models.professional import Professional
 from app.models.resource import Resource
 from app.models.storage_cleanup import (
@@ -159,6 +160,7 @@ async def storage_key_in_use(db: AsyncSession, storage_key: str) -> bool:
     marcada como ``deleted`` (substituída/removida) libera a limpeza.
     """
     checks = (
+        select(IntakeFile.id).where(IntakeFile.storage_key == storage_key, IntakeFile.deleted_at.is_(None)).limit(1),
         select(Resource.id).where(Resource.storage_key == storage_key).limit(1),
         select(Attachment.id).where(Attachment.storage_key == storage_key).limit(1),
         select(Professional.id)

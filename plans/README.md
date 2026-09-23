@@ -4,6 +4,12 @@ Canonical plan bodies live in the sibling repo:
 
 `C:/Users/ed/Documents/projetos/korus-one-web/plans/`
 
+## Planos de produto recentes
+
+| Plano canônico no web | Escopo API + web | Status |
+| --- | --- | --- |
+| [Jornada clínica — 22/09/2026](../../korus-one-web/plans/2026-09-22-jornada-clinica-revisao-entrada-alta.md) | Itens 1, 2, 4 e 5: revisão, pré-atendimento, alta e retorno funcional da família | DONE — validado localmente, sem deploy |
+
 ## Wave 2 (security) — status
 
 | Plan | Title | Status |

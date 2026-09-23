@@ -76,6 +76,16 @@ def _not_found(detail: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
 
 
+async def _require_functional_feedback(
+    db: AsyncSession, actor: Professional, tasks: list[HomeProgramTaskInput]
+) -> None:
+    if not any(task.functional_question is not None for task in tasks):
+        return
+    from app.services.clinical_workflow_flags import require_workflow_enabled
+
+    await require_workflow_enabled(db, actor.id, "functional_feedback")
+
+
 def _validate_period(starts_on: date, ends_on: date) -> None:
     if ends_on < starts_on:
         raise _unprocessable("O fim do programa não pode ser antes do início")
@@ -187,6 +197,11 @@ async def _replace_tasks(
             client_task_id=task.id or uuid4(),
             title=task.title.strip(),
             instructions=task.instructions.strip(),
+            functional_question=(
+                task.functional_question.strip()
+                if task.functional_question is not None
+                else None
+            ),
             due_on=task.due_on,
             goal_id=task.goal_id,
             intervention_program_id=task.intervention_program_id,
@@ -298,6 +313,7 @@ async def program_response(
                 client_task_id=str(task.client_task_id),
                 title=task.title,
                 instructions=task.instructions,
+                functional_question=task.functional_question,
                 due_on=task.due_on,
                 goal_id=str(task.goal_id) if task.goal_id else None,
                 intervention_program_id=(
@@ -326,6 +342,7 @@ async def create_program(
         [task.due_on for task in body.tasks], body.starts_on, body.ends_on
     )
     await _validate_targets(db, patient_id, actor, body.tasks)
+    await _require_functional_feedback(db, actor, body.tasks)
     resources_by_task = await _resolve_resources(db, actor, body.tasks)
 
     program = HomeProgram(
@@ -431,6 +448,7 @@ async def update_program(
             [task.due_on for task in body.tasks], starts_on, ends_on
         )
         await _validate_targets(db, patient_id, actor, body.tasks)
+        await _require_functional_feedback(db, actor, body.tasks)
         resources_by_task = await _resolve_resources(db, actor, body.tasks)
     else:
         existing = await _program_tasks(db, program.id)
@@ -548,6 +566,10 @@ async def publish_program(
     _validate_task_dates(
         [task.due_on for task in tasks], program.starts_on, program.ends_on
     )
+    if any(task.functional_question is not None for task in tasks):
+        from app.services.clinical_workflow_flags import require_workflow_enabled
+
+        await require_workflow_enabled(db, actor.id, "functional_feedback")
     await _revalidate_stored_targets(db, patient_id, actor, tasks)
 
     program.status = "active"
@@ -657,17 +679,20 @@ async def list_check_ins(
             items=[], total=total or 0, page=page, limit=limit
         )
 
-    tasks = {
-        task.id: task.title
-        for task in (
-            await db.execute(
-                select(HomeProgramTask).where(
-                    HomeProgramTask.id.in_([row.task_id for row in rows])
-                )
+    task_rows = (
+        await db.execute(
+            select(HomeProgramTask).where(
+                HomeProgramTask.id.in_([row.task_id for row in rows])
             )
         )
-        .scalars()
-        .all()
+    ).scalars().all()
+    tasks = {
+        task.id: task.title
+        for task in task_rows
+    }
+    task_questions = {
+        task.id: task.functional_question
+        for task in task_rows
     }
     grant_ids = [row.grant_id for row in rows if row.grant_id is not None]
     grants: dict[UUID, HomeProgramGrant] = {}
@@ -708,6 +733,9 @@ async def list_check_ins(
                 task_title=tasks.get(row.task_id, ""),
                 done=row.done,
                 comment=row.comment,
+                functional_question=task_questions.get(row.task_id),
+                functional_observation=row.functional_observation,
+                observation_context=row.observation_context,
                 responded_at=_as_utc(row.responded_at),
                 version=row.version,
                 has_photo=row.id in photo_ids,

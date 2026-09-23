@@ -13,11 +13,16 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 from app.schemas.common import CamelModel
 
 HomeProgramStatus = Literal["draft", "active", "archived"]
+FunctionalObservation = Literal[
+    "independent", "with_support", "not_observed", "no_opportunity"
+]
+ObservationContext = Literal["home", "school", "other"]
 
 MAX_TASKS = 50
 MAX_PERIOD_DAYS = 30
 MAX_RESOURCES_PER_TASK = 5
 MAX_CHECK_IN_COMMENT = 2000
+MAX_FUNCTIONAL_QUESTION = 500
 
 
 class StrictCamelModel(CamelModel):
@@ -52,6 +57,7 @@ class HomeProgramTaskInput(StrictCamelModel):
     id: UUID | None = None
     title: Annotated[str, Field(min_length=1, max_length=160)]
     instructions: Annotated[str, Field(min_length=1, max_length=4000)]
+    functional_question: Annotated[str | None, Field(max_length=MAX_FUNCTIONAL_QUESTION)] = None
     due_on: date
     goal_id: UUID | None = None
     intervention_program_id: UUID | None = None
@@ -63,6 +69,11 @@ class HomeProgramTaskInput(StrictCamelModel):
     @classmethod
     def strip_required_text(cls, value: str) -> str:
         return _strip_required(value)
+
+    @field_validator("functional_question")
+    @classmethod
+    def strip_functional_question(cls, value: str | None) -> str | None:
+        return _strip_required(value) if value is not None else None
 
     @model_validator(mode="after")
     def validate_target_and_resources(self):
@@ -138,6 +149,7 @@ class HomeProgramTaskResponse(CamelModel):
     client_task_id: str
     title: str
     instructions: str
+    functional_question: str | None
     due_on: date
     goal_id: str | None
     intervention_program_id: str | None
@@ -204,6 +216,8 @@ class HomeProgramCheckInCreate(StrictCamelModel):
     client_record_id: UUID
     done: bool
     comment: str | None = None
+    functional_observation: FunctionalObservation | None = None
+    observation_context: ObservationContext | None = None
 
     @field_validator("comment")
     @classmethod
@@ -218,6 +232,8 @@ class HomeProgramCheckInUpdate(StrictCamelModel):
     expected_version: Annotated[int, Field(ge=1)]
     done: bool
     comment: str | None = None
+    functional_observation: FunctionalObservation | None = None
+    observation_context: ObservationContext | None = None
 
     @field_validator("comment")
     @classmethod
@@ -232,6 +248,9 @@ class HomeProgramCheckInResponse(CamelModel):
     task_id: str
     done: bool
     comment: str | None
+    functional_question: str | None
+    functional_observation: FunctionalObservation | None
+    observation_context: ObservationContext | None
     responded_at: datetime
     version: int
     has_photo: bool
@@ -268,6 +287,9 @@ class HomeProgramCheckInSummaryResponse(CamelModel):
     task_title: str
     done: bool
     comment: str | None
+    functional_question: str | None
+    functional_observation: FunctionalObservation | None
+    observation_context: ObservationContext | None
     responded_at: datetime
     version: int
     has_photo: bool
@@ -285,6 +307,9 @@ class PublicHomeProgramCheckInResponse(CamelModel):
     id: str
     done: bool
     comment: str | None
+    functional_question: str | None
+    functional_observation: FunctionalObservation | None
+    observation_context: ObservationContext | None
     responded_at: datetime
     version: int
     has_photo: bool
@@ -294,6 +319,7 @@ class PublicHomeProgramTaskResponse(CamelModel):
     id: str
     title: str
     instructions: str
+    functional_question: str | None
     due_on: date
     materials: list[PublicHomeProgramMaterialResponse]
     check_in: PublicHomeProgramCheckInResponse | None

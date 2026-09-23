@@ -8,7 +8,9 @@ from sqlalchemy.pool import StaticPool
 import worker
 from app.db.base import Base
 from app.models.attachment import Attachment
+from app.models.caregiver import Caregiver
 from app.models.home_program import HomeProgramPhoto
+from app.models.intake import IntakeFile, IntakeRequest
 from app.models.patient import Patient
 from app.models.professional import Professional
 from app.models.resource import Resource
@@ -97,8 +99,11 @@ async def test_run_storage_cleanup_job_deletes_orphan_end_to_end(monkeypatch):
                 tables=[
                     Professional.__table__,
                     Patient.__table__,
+                    Caregiver.__table__,
                     Resource.__table__,
                     Attachment.__table__,
+                    IntakeRequest.__table__,
+                    IntakeFile.__table__,
                     StorageCleanupTask.__table__,
                     HomeProgramPhoto.__table__,
                 ],

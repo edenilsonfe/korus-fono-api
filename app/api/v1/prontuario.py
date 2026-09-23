@@ -178,7 +178,6 @@ async def bulk_upsert_anamnese(
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(patient_id, professional, db)
-    anamnese_service.assert_editable(patient)
     entries = await anamnese_service.upsert_entries(db, patient_id=patient_id, entries=body.entries)
     return anamnese_service.document_response(patient, entries)
 
@@ -202,7 +201,6 @@ async def upsert_anamnese(
     db: AsyncSession = Depends(get_db),
 ):
     patient = await get_patient_for_professional(patient_id, professional, db)
-    anamnese_service.assert_editable(patient)
     entries = await anamnese_service.upsert_entries(
         db,
         patient_id=patient_id,

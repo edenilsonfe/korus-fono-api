@@ -150,6 +150,37 @@ async def cancel_future_patient_appointments(
     list[GoogleCalendarSyncRecord],
 ]:
     """Cancel eligible future appointments and persist enabled integrations atomically."""
+    appointments, event_logs, google_records = await cancel_selected_future_patient_appointments(
+        db,
+        professional_id=professional_id,
+        patient_id=patient_id,
+        appointment_ids=None,
+        notify_via_whatsapp=notify_via_whatsapp,
+        clinic_now=clinic_now,
+    )
+    await db.commit()
+    return appointments, event_logs, google_records
+
+
+async def cancel_selected_future_patient_appointments(
+    db: AsyncSession,
+    *,
+    professional_id: UUID,
+    patient_id: UUID,
+    appointment_ids: list[UUID] | None,
+    notify_via_whatsapp: bool = True,
+    clinic_now: datetime | None = None,
+) -> tuple[
+    list[Appointment],
+    list[NotificationMessageLog],
+    list[GoogleCalendarSyncRecord],
+]:
+    """Cancel selected eligible future appointments without committing.
+
+    ``appointment_ids=None`` preserves the legacy "all eligible" operation;
+    callers that own a larger transaction (structured discharge) pass IDs and
+    commit only after their clinical record is written.
+    """
     if clinic_now is None:
         clinic_now = datetime.now(ZoneInfo(get_settings().clinic_timezone))
 
@@ -161,8 +192,10 @@ async def cancel_future_patient_appointments(
             Appointment.patient_id == patient_id,
             Appointment.date >= clinic_now.date(),
             Appointment.status.in_(CANCELLABLE_APPOINTMENT_STATUSES),
+            *([Appointment.id.in_(appointment_ids)] if appointment_ids is not None else []),
         )
         .order_by(Appointment.date.asc(), Appointment.time.asc())
+        .with_for_update()
     )
     rows = result.all()
     appointments = [
@@ -184,5 +217,4 @@ async def cancel_future_patient_appointments(
         record = await queue_appointment_sync(db, appointment, patient_name)
         if record:
             google_records.append(record)
-    await db.commit()
     return appointments, event_logs, google_records

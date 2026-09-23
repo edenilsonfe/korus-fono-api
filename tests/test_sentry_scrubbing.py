@@ -8,6 +8,7 @@ def test_scrub_removes_authorization_header():
         "request": {
             "headers": {
                 "Authorization": "Bearer secret-token",
+                "X-Intake-Token": "intake-secret",
                 "Content-Type": "application/json",
             }
         }
@@ -15,6 +16,7 @@ def test_scrub_removes_authorization_header():
     scrubbed = scrub_sentry_event(event, {})
     assert scrubbed is not None
     assert scrubbed["request"]["headers"]["Authorization"] == "[Filtered]"
+    assert scrubbed["request"]["headers"]["X-Intake-Token"] == "[Filtered]"
     assert scrubbed["request"]["headers"]["Content-Type"] == "application/json"
 
 

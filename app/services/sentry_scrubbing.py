@@ -29,6 +29,7 @@ _SENSITIVE_HEADERS = frozenset(
         "x-home-program-token",
         # F14 — raw access token of the family portal link (header).
         "x-family-portal-token",
+        "x-intake-token",
     }
 )
 
@@ -87,6 +88,8 @@ _SENSITIVE_EXTRA_KEYS = frozenset(
         # F14 — family portal access token (header of the public surface).
         "family_portal_token",
         "familyportal_token",
+        "intake_token",
+        "intaketoken",
     }
 )
 

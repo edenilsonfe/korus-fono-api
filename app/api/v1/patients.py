@@ -20,6 +20,8 @@ from app.models.assessment import Assessment
 from app.models.attachment import Attachment
 from app.models.care_team import PatientAccessEvent, PatientSharingConsentEvent
 from app.models.caregiver import Caregiver
+from app.models.clinical_review import ClinicalReview
+from app.models.intake import IntakeRequest
 from app.models.evolution import Evolution
 from app.models.family_portal import FamilyPortal
 from app.models.goal import Goal
@@ -53,6 +55,7 @@ from app.services.google_calendar_service import (
     queue_appointment_sync,
 )
 from app.services.home_program_access import revoke_grants_for_caregiver
+from app.services.intake_service import invalidate_intake_grants
 from app.services.patient import (
     get_patient_aggregates,
     get_patient_aggregates_batch,
@@ -375,6 +378,7 @@ async def update_caregiver(
             remaining[0].is_primary = True
 
     if previous_identity != (caregiver.name, caregiver.relation, caregiver.phone, caregiver.email):
+        await invalidate_intake_grants(db, patient_id=patient_id, caregiver_id=caregiver.id)
         await withdraw_recipient_for_caregiver(
             db,
             patient_id=patient_id,
@@ -396,6 +400,7 @@ async def delete_caregiver(
 ):
     caregiver = await _get_caregiver_for_patient(patient_id, caregiver_id, professional, db)
     was_primary = caregiver.is_primary
+    await invalidate_intake_grants(db, patient_id=patient_id, caregiver_id=caregiver_id)
     # F20: school deliveries derived from this caregiver's authorization are
     # revoked before the row disappears; the historical snapshot is preserved.
     await revoke_school_deliveries_for_caregiver(
@@ -498,6 +503,7 @@ async def update_patient(
     for field, value in data.items():
         setattr(patient, field, value)
     if previous_status != "inativo" and patient.status == "inativo":
+        await invalidate_intake_grants(db, patient_id=patient.id)
         # F14: o portal da família morre ANTES do cancelamento da agenda (que
         # faz commit interno): desativa, incrementa a época e revoga links na
         # MESMA transação da mudança de status.
@@ -590,7 +596,7 @@ async def delete_patient(
         .limit(1)
     )
     clinical_history = program_history is not None
-    for model in (Session, Assessment, Goal, Evolution, AnamneseEntry, Attachment):
+    for model in (Session, Assessment, Goal, Evolution, AnamneseEntry, Attachment, ClinicalReview, IntakeRequest):
         if await db.scalar(select(model.id).where(model.patient_id == patient.id).limit(1)):
             clinical_history = True
             break

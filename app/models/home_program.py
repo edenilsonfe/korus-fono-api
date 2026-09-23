@@ -93,6 +93,10 @@ class HomeProgramTask(Base, TimestampMixin):
             "(goal_id IS NOT NULL) <> (intervention_program_id IS NOT NULL)",
             name="ck_home_program_task_target_xor",
         ),
+        CheckConstraint(
+            "functional_question IS NULL OR length(functional_question) <= 500",
+            name="ck_home_program_task_functional_question_length",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -110,6 +114,9 @@ class HomeProgramTask(Base, TimestampMixin):
     client_task_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     instructions: Mapped[str] = mapped_column(Text, nullable=False)
+    functional_question: Mapped[str | None] = mapped_column(
+        String(500), nullable=True
+    )
     due_on: Mapped[date] = mapped_column(Date, nullable=False)
     goal_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("goals.id"), nullable=True
@@ -222,6 +229,16 @@ class HomeProgramCheckIn(Base):
     __table_args__ = (
         UniqueConstraint("task_id", name="uq_home_program_check_in_task"),
         CheckConstraint("version >= 1", name="ck_home_program_check_in_version"),
+        CheckConstraint(
+            "functional_observation IS NULL OR functional_observation IN "
+            "('independent', 'with_support', 'not_observed', 'no_opportunity')",
+            name="ck_home_program_check_in_functional_observation",
+        ),
+        CheckConstraint(
+            "observation_context IS NULL OR observation_context IN "
+            "('home', 'school', 'other')",
+            name="ck_home_program_check_in_observation_context",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -246,6 +263,15 @@ class HomeProgramCheckIn(Base):
     )
     done: Mapped[bool] = mapped_column(Boolean, nullable=False)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    functional_question: Mapped[str | None] = mapped_column(
+        String(500), nullable=True
+    )
+    functional_observation: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    observation_context: Mapped[str | None] = mapped_column(
+        String(16), nullable=True
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     responded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -256,6 +282,18 @@ class HomeProgramCheckInRevision(Base):
     """Conteúdo anterior de uma resposta, com o grant que a registrou."""
 
     __tablename__ = "home_program_check_in_revisions"
+    __table_args__ = (
+        CheckConstraint(
+            "functional_observation IS NULL OR functional_observation IN "
+            "('independent', 'with_support', 'not_observed', 'no_opportunity')",
+            name="ck_home_program_check_in_revision_functional_observation",
+        ),
+        CheckConstraint(
+            "observation_context IS NULL OR observation_context IN "
+            "('home', 'school', 'other')",
+            name="ck_home_program_check_in_revision_observation_context",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=new_uuid
@@ -274,6 +312,15 @@ class HomeProgramCheckInRevision(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     done: Mapped[bool] = mapped_column(Boolean, nullable=False)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    functional_question: Mapped[str | None] = mapped_column(
+        String(500), nullable=True
+    )
+    functional_observation: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    observation_context: Mapped[str | None] = mapped_column(
+        String(16), nullable=True
+    )
     recorded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -52,12 +52,28 @@ def assert_editable(patient: Patient) -> None:
         )
 
 
+async def _lock_patient(db: AsyncSession, patient_id: UUID) -> Patient:
+    patient = await db.scalar(
+        select(Patient)
+        .where(Patient.id == patient_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if patient is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paciente não encontrado")
+    return patient
+
+
 async def upsert_entries(
     db: AsyncSession,
     *,
     patient_id: UUID,
     entries: list[AnamneseEntryInput],
 ) -> list[AnamneseEntry]:
+    # All writers share the patient-row lock. Re-read the status after waiting
+    # for the lock so a stale router object cannot edit a completed document.
+    patient = await _lock_patient(db, patient_id)
+    assert_editable(patient)
     for item in entries:
         section = item.section.strip()
         if not section:
@@ -88,11 +104,8 @@ async def complete_anamnese(
     patient: Patient,
     entries: list[AnamneseEntryInput] | None,
 ) -> AnamneseDocumentResponse:
-    if patient.anamnese_status == ANAMNESE_STATUS_COMPLETED:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Anamnese já está concluída.",
-        )
+    patient = await _lock_patient(db, patient.id)
+    assert_editable(patient)
 
     if entries:
         saved = await upsert_entries(db, patient_id=patient.id, entries=entries)
