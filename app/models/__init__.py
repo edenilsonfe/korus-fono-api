@@ -82,6 +82,7 @@ from app.models.report_delivery import ReportDelivery
 from app.models.password_reset_token import PasswordResetToken
 from app.models.refresh_session import RefreshSession
 from app.models.schedule_block import ScheduleBlock
+from app.models.personal_task import PersonalTask
 from app.models.patient import Patient
 from app.models.patient_record_export import PatientRecordExport
 from app.models.professional import Professional
@@ -111,6 +112,7 @@ __all__ = [
     "PasswordResetToken",
     "RefreshSession",
     "ScheduleBlock",
+    "PersonalTask",
     "Patient",
     "PatientRecordExport",
     "Caregiver",

@@ -39,6 +39,7 @@ from app.api.v1 import (
     notifications,
     patient_exports,
     patients,
+    personal_tasks,
     prontuario,
     report_compositions,
     report_deliveries,
@@ -62,6 +63,7 @@ api_router.include_router(me.router)
 api_router.include_router(catalog.router)
 api_router.include_router(care_team.router)
 api_router.include_router(patients.router)
+api_router.include_router(personal_tasks.router)
 api_router.include_router(patient_exports.router)
 api_router.include_router(appointments.router)
 api_router.include_router(schedule_blocks.router)
