@@ -25,6 +25,7 @@ from app.models.admin_audit_log import AdminAuditLog
 from app.models.app_notification import AppNotification, AppNotificationRead
 from app.models.notification_settings import NotificationSettings
 from app.models.patient import Patient
+from app.models.personal_task import PersonalTask
 from app.models.professional import Professional
 from app.schemas.app_notification import AnnouncementCreate, AnnouncementUpdate
 from app.services.notification_service import (
@@ -52,6 +53,7 @@ async def engine():
                     AppNotificationRead.__table__,
                     NotificationSettings.__table__,
                     Patient.__table__,
+                    PersonalTask.__table__,
                     AdminAuditLog.__table__,
                 ],
             )

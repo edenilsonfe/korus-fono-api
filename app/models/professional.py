@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, JSON, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -85,6 +85,7 @@ class Professional(Base, TimestampMixin):
     )
     branding_logo_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     branding_signature_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    personal_task_columns: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     patients: Mapped[list["Patient"]] = relationship(back_populates="professional")  # noqa: F821
     subscriptions: Mapped[list["Subscription"]] = relationship(back_populates="professional")  # noqa: F821

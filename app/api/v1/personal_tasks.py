@@ -6,16 +6,52 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import require_verified_professional
 from app.db.session import get_db
 from app.models.professional import Professional
-from app.schemas.personal_task import PersonalTaskCreate, PersonalTaskResponse, PersonalTaskUpdate
+from app.schemas.personal_task import (
+    PersonalTaskColumn,
+    PersonalTaskColumnCreate,
+    PersonalTaskColumnOrder,
+    PersonalTaskCreate,
+    PersonalTaskResponse,
+    PersonalTaskUpdate,
+)
 from app.services.personal_task_service import (
+    create_task_column,
     create_personal_task,
     delete_personal_task,
+    list_task_columns,
     list_personal_tasks,
+    reorder_task_columns,
     update_personal_task,
 )
 
 
 router = APIRouter(prefix="/personal-tasks", tags=["personal-tasks"])
+
+
+@router.get("/columns", response_model=list[PersonalTaskColumn])
+async def list_columns(
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    return await list_task_columns(db, professional.id)
+
+
+@router.post("/columns", response_model=PersonalTaskColumn, status_code=status.HTTP_201_CREATED)
+async def create_column(
+    body: PersonalTaskColumnCreate,
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    return await create_task_column(db, professional.id, body)
+
+
+@router.put("/columns/order", response_model=list[PersonalTaskColumn])
+async def reorder_columns(
+    body: PersonalTaskColumnOrder,
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
+):
+    return await reorder_task_columns(db, professional.id, body)
 
 
 @router.get("", response_model=list[PersonalTaskResponse])

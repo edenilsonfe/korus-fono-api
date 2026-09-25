@@ -31,6 +31,7 @@ from app.services.birthday_service import (
     birthday_reminder_enabled,
     ensure_birthday_reminder,
 )
+from app.services.personal_task_service import ensure_task_reminders
 
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 50
@@ -227,6 +228,7 @@ class NotificationService:
         ar = AppNotificationRead
         n = AppNotification
         birthdays_enabled = await ensure_birthday_reminder(self.db, professional.id, now)
+        await ensure_task_reminders(self.db, professional.id, now)
 
         stmt = (
             select(

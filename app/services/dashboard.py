@@ -370,7 +370,7 @@ async def build_dashboard(db: AsyncSession, professional_id) -> dict:
 
     # Pending evolutions: past appointments without session on that date
     past_appts_result = await db.execute(
-        select(Appointment)
+        select(Appointment, Patient.name)
         .join(Patient, Appointment.patient_id == Patient.id)
         .where(
             Appointment.professional_id == professional_id,
@@ -381,15 +381,38 @@ async def build_dashboard(db: AsyncSession, professional_id) -> dict:
         )
     )
     past_appts = [
-        appt
-        for appt in past_appts_result.scalars().all()
+        (appt, patient_name)
+        for appt, patient_name in past_appts_result.all()
         if appt.date < today or is_appointment_past(appt.date, appt.time, now)
     ]
-    past_pairs = {(appt.patient_id, appt.date) for appt in past_appts}
+    past_pairs = {(appt.patient_id, appt.date) for appt, _ in past_appts}
     sessions_past = await _patients_with_session_on_dates(db, professional_id, past_pairs)
-    evolutions_pending = sum(
-        1 for appt in past_appts if (appt.patient_id, appt.date) not in sessions_past
-    )
+    evolution_items = [
+        {
+            "id": str(appt.id), "kind": "evolution", "title": "Registrar evolução",
+            "patientName": patient_name, "date": appt.date,
+            "href": f"/agenda?date={appt.date.isoformat()}&appointmentId={appt.id}",
+        }
+        for appt, patient_name in past_appts
+        if (appt.patient_id, appt.date) not in sessions_past
+    ]
+    evolutions_pending = len(evolution_items)
+
+    report_rows = (await db.execute(
+        select(AIReport, Patient.name).join(Patient, AIReport.patient_id == Patient.id).where(
+            AIReport.professional_id == professional_id,
+            Patient.is_demo.is_(False), AIReport.status == "draft",
+        ).order_by(AIReport.date.asc(), AIReport.id.asc()).limit(10)
+    )).all()
+    report_items = [
+        {
+            "id": str(report.id), "kind": "report", "title": "Revisar relatório",
+            "patientName": patient_name, "date": report.date,
+            "href": f"/relatorios?patientId={report.patient_id}&reportId={report.id}",
+        }
+        for report, patient_name in report_rows
+    ]
+    action_items = sorted(evolution_items, key=lambda item: (item["date"], item["id"]))[:10] + report_items
 
     awaiting_clause = Assessment.result.ilike("%aguardando%")
     assessment_counts = (
@@ -455,4 +478,5 @@ async def build_dashboard(db: AsyncSession, professional_id) -> dict:
         "birthdaysToday": birthdays_today,
         "pending": pending,
         "suggestions": suggestions,
+        "actionItems": action_items,
     }

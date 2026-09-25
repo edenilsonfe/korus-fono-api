@@ -1,3 +1,5 @@
+from datetime import date
+
 from app.schemas.common import CamelModel
 
 
@@ -66,6 +68,15 @@ class DashboardBirthday(CamelModel):
     avatar_color: str
 
 
+class DashboardActionItem(CamelModel):
+    id: str
+    kind: str
+    title: str
+    patient_name: str
+    date: date
+    href: str
+
+
 class DashboardResponse(CamelModel):
     kpis: DashboardKpis
     patient_evolution: list[DashboardPatientEvolution]
@@ -76,3 +87,4 @@ class DashboardResponse(CamelModel):
     birthdays_today: list[DashboardBirthday]
     pending: DashboardPending
     suggestions: list[DashboardSuggestion]
+    action_items: list[DashboardActionItem]
