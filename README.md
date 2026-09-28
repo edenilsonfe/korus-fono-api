@@ -2,6 +2,12 @@
 
 Backend FastAPI para o Korus Fono — sistema operacional para terapias infantis.
 
+O relatório descritivo do Portage reutiliza `metadata` das avaliações para preservar
+faixa, domínios, idade na aplicação e `clinical_synthesis` (texto opcional do profissional).
+Esse contexto é devolvido nas leituras autenticadas do histórico. A apresentação e
+a impressão para PDF vivem no web; não há endpoint novo ou migration. A regressão
+por idade permanece indisponível até a validação das referências do manual.
+
 ## Requisitos
 
 - Python 3.11+
