@@ -74,7 +74,7 @@ from app.models.home_program import (
     HomeProgramTaskResource,
 )
 from app.models.intervention_program import InterventionProgram, ProgramMeasurement
-from app.models.google_calendar import GoogleCalendarConnection, GoogleCalendarSyncRecord
+from app.models.google_calendar import GoogleCalendarConnection, GoogleCalendarOAuthRequest, GoogleCalendarSyncRecord
 from app.models.notification_message_log import NotificationMessageLog
 from app.models.notification_settings import NotificationSettings
 from app.models.report_composition import AIReportComposition
@@ -162,6 +162,7 @@ __all__ = [
     "InterventionProgram",
     "ProgramMeasurement",
     "GoogleCalendarConnection",
+    "GoogleCalendarOAuthRequest",
     "GoogleCalendarSyncRecord",
     "AIReport",
     "Conversation",

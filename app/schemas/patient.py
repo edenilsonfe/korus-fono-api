@@ -91,12 +91,12 @@ class PatientCreate(CamelModel):
 
 
 class PatientUpdate(CamelModel):
-    name: str | None = None
-    birth_date: DateType | None = None
+    name: str = Field(default=None)
+    birth_date: DateType = Field(default=None)
     address: PatientAddress = None
     notes: PatientNotes = None
-    diagnosis_keys: list[str] | None = None
-    status: PatientStatus | None = None
+    diagnosis_keys: list[str] = Field(default=None)
+    status: PatientStatus = Field(default=None)
 
     @field_validator("diagnosis_keys")
     @classmethod

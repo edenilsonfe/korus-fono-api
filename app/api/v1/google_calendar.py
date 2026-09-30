@@ -1,11 +1,13 @@
 from urllib.parse import urlencode
+import secrets
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.auth_cookies import GOOGLE_OAUTH_COOKIE, GOOGLE_OAUTH_COOKIE_PATH
 from app.core.deps import require_verified_professional
 from app.db.session import get_db
 from app.models.google_calendar import GoogleCalendarConnection, GoogleCalendarSyncRecord
@@ -18,8 +20,8 @@ from app.schemas.google_calendar import (
 )
 from app.services.google_calendar_service import (
     GoogleCalendarError,
-    build_authorization_url,
-    decode_oauth_state,
+    begin_authorization,
+    consume_authorization,
     dispatch_sync_records,
     exchange_authorization_code,
     queue_future_appointments,
@@ -33,7 +35,10 @@ router = APIRouter(prefix="/google-calendar", tags=["google-calendar"])
 
 def _frontend_redirect(result: str) -> RedirectResponse:
     base = get_settings().frontend_url.rstrip("/")
-    return RedirectResponse(f"{base}/configuracoes?{urlencode({'googleCalendar': result})}")
+    response = RedirectResponse(f"{base}/configuracoes?{urlencode({'googleCalendar': result})}")
+    response.delete_cookie(GOOGLE_OAUTH_COOKIE, path=GOOGLE_OAUTH_COOKIE_PATH,
+                           secure=not get_settings().debug, httponly=True, samesite="lax")
+    return response
 
 
 @router.get("/status", response_model=GoogleCalendarStatusResponse)
@@ -63,18 +68,26 @@ async def get_status(
 
 @router.post("/oauth/authorize", response_model=GoogleCalendarAuthorizationResponse)
 async def authorize(
+    response: Response,
     professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
 ):
     try:
-        return GoogleCalendarAuthorizationResponse(
-            authorization_url=build_authorization_url(professional.id)
+        browser_nonce = secrets.token_urlsafe(32)
+        url = await begin_authorization(db, professional, browser_nonce)
+        response.set_cookie(
+            GOOGLE_OAUTH_COOKIE, browser_nonce, max_age=600,
+            path=GOOGLE_OAUTH_COOKIE_PATH, secure=not get_settings().debug,
+            httponly=True, samesite="lax",
         )
+        return GoogleCalendarAuthorizationResponse(authorization_url=url)
     except GoogleCalendarError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
 
 @router.get("/oauth/callback", include_in_schema=False)
 async def oauth_callback(
+    request: Request,
     code: str | None = Query(default=None),
     state_token: str | None = Query(default=None, alias="state"),
     error: str | None = Query(default=None),
@@ -83,9 +96,11 @@ async def oauth_callback(
     if error or not code or not state_token:
         return _frontend_redirect("error")
     try:
-        professional_id = decode_oauth_state(state_token)
+        professional_id, token_version = await consume_authorization(
+            db, state_token, request.cookies.get(GOOGLE_OAUTH_COOKIE, "")
+        )
         payload = await exchange_authorization_code(code)
-        await save_connection(db, professional_id, payload)
+        await save_connection(db, professional_id, payload, token_version=token_version)
     except GoogleCalendarError:
         return _frontend_redirect("error")
     return _frontend_redirect("connected")

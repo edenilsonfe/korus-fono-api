@@ -85,7 +85,7 @@ async def build_patient_context(db: AsyncSession, patient_id: UUID) -> str:
     if goals:
         lines.append("Metas: " + "; ".join(f"{g.title} ({g.progress}%)" for g in goals))
     if evolutions:
-        lines.append("Evoluções recentes: " + "; ".join(e.title for e in evolutions))
+        lines.append("Evoluções recentes: " + "; ".join(e.title or "Evolução registrada" for e in evolutions))
     if assessments:
         lines.append("Avaliações: " + "; ".join(f"{a.protocol_id} ({a.percentage}%)" for a in assessments))
     return "\n".join(lines)

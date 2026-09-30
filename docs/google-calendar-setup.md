@@ -43,11 +43,18 @@ Em **Clients > Create client**:
   barra final):
 
   ```text
-  http://localhost:8000/api/v1/google-calendar/oauth/callback
-  https://<URL_PUBLICA_DA_API>/api/v1/google-calendar/oauth/callback
+  http://localhost:8080/api/v1/google-calendar/oauth/callback
+  https://<URL_DO_WEB>/api/v1/google-calendar/oauth/callback
   ```
 
 Copie o Client ID e o Client Secret. Nunca coloque o Client Secret no frontend.
+
+O callback usa `FRONTEND_URL`, passa pelo proxy `/api` do web e recebe o cookie
+HttpOnly do navegador que iniciou a conexão. Configure a porta/origem real do web
+em desenvolvimento. Antes de publicar a revisão `gc20260930a`, cadastre a URL do
+web no cliente Google; a URL antiga da API não atende ao novo vínculo de navegador.
+O `state` expira em dez minutos, tem consumo único no banco e exige a versão
+vigente da conta. Esse vínculo segue a [orientação OAuth do Google](https://developers.google.com/identity/protocols/oauth2/web-server#creatingclient).
 
 ## 4. Configurar API e worker
 
@@ -72,8 +79,16 @@ valores. A API despacha imediatamente; o worker recupera filas interrompidas a c
 15 minutos. Não troque a chave Fernet enquanto conexões estiverem ativas — se for
 necessário rotacioná-la, os profissionais terão de reconectar o Google.
 
-Depois do deploy, aplique a migration `q8r9s0t1u2v3` e confirme que API e worker
-subiram na mesma revisão.
+Antes de iniciar os processos novos, aplique as migrations até `gc20260930a` e
+confirme que API e worker usam a mesma revisão. Na atualização, drene/interrompa
+os dispatchers antigos antes de iniciar os novos: o código antigo não conhece a
+posse e a versão da fila. As credenciais Google existentes são preservadas.
+
+A posse de processamento expira após dez minutos; reenfileirar uma edição ou um
+cancelamento preserva essa posse e incrementa a versão. A conclusão antiga não
+marca a nova versão como sincronizada. O ID de criação remoto é salvo antes do
+POST e reutilizado em retries de resultado incerto, conforme o suporte a
+[IDs de eventos definidos pelo cliente](https://developers.google.com/workspace/calendar/api/v3/reference/events/insert).
 
 ## 5. Testar e publicar
 

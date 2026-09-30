@@ -133,6 +133,25 @@ def _clear_override():
     app.dependency_overrides.pop(get_db, None)
 
 
+async def test_speech_context_handles_evolution_created_without_title(
+    api_client, auth_headers, patient, monkeypatch,
+):
+    monkeypatch.setattr("app.api.v1.ai.get_settings", lambda: get_settings().model_copy(
+        update={"opencode_api_key": "fake-for-mocked-llm"}
+    ))
+    llm = AsyncMock(return_value="Análise para revisão profissional")
+    monkeypatch.setattr("app.api.v1.ai.run_llm", llm)
+    evolution = await api_client.post(f"/api/v1/patients/{patient.id}/evolutions", headers=auth_headers,
+                                     json={"content": "Registro clínico sem título"})
+    assert evolution.status_code == 201
+    assert evolution.json()["title"] is None
+    analysis = await api_client.post("/api/v1/ai/speech-analysis", headers=auth_headers,
+                                    json={"patientId": str(patient.id), "text": "papai mamãe"})
+    assert analysis.status_code == 200, analysis.text
+    assert analysis.json()["status"] == "completed"
+    assert "Evolução registrada" in llm.await_args.args[0]
+
+
 @pytest.mark.asyncio
 async def test_speech_analysis_cross_tenant_patient_returns_404(monkeypatch):
     """Professional A must not target professional B's patient via patientId."""

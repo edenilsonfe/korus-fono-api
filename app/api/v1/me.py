@@ -19,6 +19,7 @@ from app.schemas.onboarding import OnboardingResponse, OnboardingUpdate
 from app.services.onboarding_service import build_onboarding_response, update_onboarding
 from app.services.billing_profile_service import billing_profile_is_complete
 from app.services.professional_branding import (
+    MAX_BRANDING_BYTES,
     branding_urls,
     delete_branding_image,
     store_branding_image,
@@ -118,7 +119,7 @@ async def upload_branding_asset(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    body = await file.read()
+    body = await file.read(MAX_BRANDING_BYTES + 1)
     await store_branding_image(
         db, professional, asset, content_type=file.content_type, body=body
     )

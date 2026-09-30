@@ -111,6 +111,15 @@ class Settings(BaseSettings):
     whatsapp_billing_reminder_days_before: int = 3
 
     billing_provider: str = "stub"
+
+    @field_validator("billing_provider", mode="before")
+    @classmethod
+    def validate_billing_provider(cls, value: object) -> str:
+        provider = str(value).strip().lower()
+        if provider not in {"stub", "asaas"}:
+            raise ValueError("BILLING_PROVIDER deve ser stub ou asaas")
+        return provider
+
     asaas_api_key: str = ""
     asaas_api_base_url: str = "https://api-sandbox.asaas.com/v3"
     asaas_webhook_token: str = ""
@@ -188,9 +197,8 @@ class Settings(BaseSettings):
 
     @property
     def google_calendar_redirect_uri(self) -> str:
-        base = (self.app_public_url or "").strip().rstrip("/")
-        if not base:
-            base = "http://localhost:8000"
+        # O callback atravessa o proxy do web para receber o cookie iniciador.
+        base = self.frontend_url.strip().rstrip("/")
         return f"{base}/api/v1/google-calendar/oauth/callback"
 
     @property

@@ -1,0 +1,85 @@
+{
+  "baseline_revision": "38a328a",
+  "environment": "Python 3.11.15; local disposable PostgreSQL 18.6; tests use SQLite or isolated PostgreSQL schemas; no .env loaded",
+  "baseline": {
+    "passed": 1390,
+    "failed": 47,
+    "duration_seconds": 551.177,
+    "failed_tests": [
+      "tests.test_auth::test_register_checkout_blocks_dashboard_until_payment_is_confirmed",
+      "tests.test_feature_cycle_integration::test_f14_report_item_serves_frozen_snapshot_and_revocation_blocks_it",
+      "tests.test_feature_cycle_integration::test_f14_material_item_freezes_license_and_reference_guard_blocks_delete",
+      "tests.test_feature_cycle_integration::test_f14_and_f16_public_surfaces_do_not_share_tokens",
+      "tests.test_feature_cycle_migrations::test_f14_migrations_run_for_real_in_disposable_schema",
+      "tests.test_home_program_photos::test_professional_tracking_and_photo_acl",
+      "tests.test_home_program_photos::test_delete_photo_is_idempotent_per_request",
+      "tests.test_home_program_responses::test_public_get_projects_minimal_family_view",
+      "tests.test_home_program_responses::test_public_get_response_headers_are_private",
+      "tests.test_home_program_responses::test_public_get_never_leaks_another_case",
+      "tests.test_home_program_responses::test_missing_or_unknown_token_is_410_generic",
+      "tests.test_home_program_responses::test_410_after_rotation_revokes_previous_link",
+      "tests.test_home_program_responses::test_410_after_revoke_and_expiry",
+      "tests.test_home_program_responses::test_410_for_archived_program_removed_caregiver_and_disabled_owner",
+      "tests.test_home_program_responses::test_410_when_aba_derivation_is_invalidated",
+      "tests.test_home_program_responses::test_410_when_aba_flag_is_disabled",
+      "tests.test_home_program_responses::test_can_respond_false_in_read_only_without_financial_reason",
+      "tests.test_home_program_responses::test_read_only_owner_blocks_check_in_writes_with_403",
+      "tests.test_home_program_responses::test_stale_professional_cookie_neither_blocks_nor_bypasses_family_path",
+      "tests.test_home_program_responses::test_create_check_in_201_then_replay_200",
+      "tests.test_home_program_responses::test_absence_and_negative_response_are_distinct",
+      "tests.test_home_program_responses::test_second_creation_and_record_reuse_are_conflicts",
+      "tests.test_home_program_responses::test_objects_outside_the_grant_are_404",
+      "tests.test_home_program_responses::test_comment_boundary_is_2000_characters",
+      "tests.test_home_program_responses::test_rotation_does_not_transfer_previous_authoring",
+      "tests.test_home_program_responses::test_patch_creates_revision_and_enforces_version",
+      "tests.test_home_program_responses::test_patch_rejects_invalid_payloads_with_422[payload0]",
+      "tests.test_home_program_responses::test_patch_rejects_invalid_payloads_with_422[payload1]",
+      "tests.test_home_program_responses::test_patch_rejects_invalid_payloads_with_422[payload2]",
+      "tests.test_home_program_responses::test_patch_rejects_invalid_payloads_with_422[payload3]",
+      "tests.test_home_program_responses::test_materials_list_license_availability",
+      "tests.test_home_program_responses::test_has_photo_reflects_current_photo",
+      "tests.test_home_program_responses::test_public_tasks_are_limited_to_the_granted_program",
+      "tests.test_personal_tasks_postgres::test_personal_tasks_http_persist_scope_and_patient_fk",
+      "tests.test_resource_storage_lifecycle::test_failed_upload_leaves_committed_orphan_for_janitor",
+      "tests.test_resource_storage_lifecycle::test_replace_uses_immutable_key_and_queues_previous_blob",
+      "tests.test_resource_storage_lifecycle::test_janitor_keeps_blob_associated_after_lost_reservation",
+      "tests.test_resource_storage_lifecycle::test_delete_referenced_resource_conflicts_and_unreferenced_queues_cleanup",
+      "tests.test_storage_cleanup::test_janitor_deletes_orphan_and_marks_deleted",
+      "tests.test_storage_cleanup::test_janitor_counts_missing_object_as_deleted",
+      "tests.test_storage_cleanup::test_janitor_never_removes_blob_referenced_by_resource",
+      "tests.test_storage_cleanup::test_janitor_preserves_legacy_attachment_and_branding_assets",
+      "tests.test_storage_cleanup::test_janitor_keeps_blob_referenced_by_live_photo",
+      "tests.test_storage_cleanup::test_janitor_removes_blob_of_replaced_photo",
+      "tests.test_storage_cleanup::test_janitor_retries_with_backoff_then_marks_visible_failure",
+      "tests.test_storage_cleanup::test_janitor_respects_not_before_and_terminal_statuses",
+      "tests.test_storage_cleanup::test_janitor_batch_is_capped_at_100"
+    ]
+  },
+  "corrected_full_suite_before_fixture_adjustment": {
+    "passed": 1433,
+    "failed": 48,
+    "additional_failure": "tests.test_report_composition::test_create_consolidated_report_captures_selected_sources_only",
+    "additional_failure_cause": "CARS fixture supplied synthetic answers and precomputed scores; authoritative manifest scoring correctly rejected missing cars_01"
+  },
+  "final_targeted_api": {
+    "passed": 92,
+    "failed": 0
+  },
+  "final_targeted_web_proxy_cookies": {
+    "passed": 24,
+    "failed": 0
+  },
+  "component_test": {
+    "passed": 1,
+    "failed": 0
+  },
+  "typecheck": "passed",
+  "targeted_eslint": "passed",
+  "web_build": "passed",
+  "migration": "full history upgrade to gc20260930a; downgrade to pt20260925a; upgrade again; preservation test passed on disposable PostgreSQL",
+  "production_actions": "none",
+  "report_composition_after_fixture_adjustment": {
+    "passed": 14,
+    "failed": 0
+  }
+}

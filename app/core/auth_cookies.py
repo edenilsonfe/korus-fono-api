@@ -6,6 +6,8 @@ ACCESS_COOKIE = "korus_access"
 REFRESH_COOKIE = "korus_refresh"
 # Readable by JS/SSR route guards — not a secret; real auth is HttpOnly tokens.
 SESSION_HINT_COOKIE = "korus_session"
+GOOGLE_OAUTH_COOKIE = "korus_google_oauth"
+GOOGLE_OAUTH_COOKIE_PATH = "/api/v1/google-calendar/oauth"
 
 
 def _cookie_secure() -> bool:
@@ -48,6 +50,10 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str) 
 
 def clear_auth_cookies(response: Response) -> None:
     secure = _cookie_secure()
+    response.delete_cookie(
+        key=GOOGLE_OAUTH_COOKIE, path=GOOGLE_OAUTH_COOKIE_PATH,
+        secure=secure, httponly=True, samesite="lax",
+    )
     response.delete_cookie(key=ACCESS_COOKIE, path="/", secure=secure, httponly=True, samesite="lax")
     response.delete_cookie(
         key=REFRESH_COOKIE,

@@ -196,7 +196,9 @@ async def test_create_consolidated_report_captures_selected_sources_only(
 
     scaffold = await _selection_scaffold(api_client, auth_headers, db_session, professional, patient)
     excluded = await _create_assessment(
-        api_client, auth_headers, patient, _assessment_body("cars", "2026-02-02", 30)
+        api_client, auth_headers, patient,
+        {**_assessment_body("cars", "2026-02-02", 30),
+         "answers": {f"cars_{number:02d}": 1 for number in range(1, 16)}},
     )
 
     response = await _create_consolidated(

@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from app.core.config import Settings, is_production_runtime, validate_settings
 
@@ -109,3 +110,39 @@ def test_local_stub_billing_still_allowed():
         billing_provider="stub",
     )
     validate_settings(settings)
+
+
+@pytest.mark.parametrize("provider", ["assas", "stripe", "", "   "])
+def test_unknown_billing_provider_is_rejected(provider):
+    with pytest.raises(ValidationError, match="BILLING_PROVIDER"):
+        _prod_asaas(billing_provider=provider)
+
+
+def test_billing_provider_normalizes_known_values():
+    assert _prod_asaas(billing_provider=" ASAAS ").effective_billing_provider == "asaas"
+
+
+async def test_invalid_gateway_returns_503_without_persisting_checkout(
+    api_client, auth_headers, db_session, monkeypatch,
+):
+    from sqlalchemy import func, select
+    from app.core.config import get_settings
+    from app.models.billing import BillingCustomer, Plan, Subscription
+    from app.services.plan_catalog_seed import COMMERCIAL_PLAN_SEEDS
+
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[1])
+    db_session.add(plan)
+    await db_session.commit()
+    monkeypatch.setattr(get_settings(), "billing_provider", "assas")
+    response = await api_client.post("/api/v1/billing/checkout", headers=auth_headers,
+                                    json={"planSlug": plan.slug})
+    assert response.status_code == 503
+    assert await db_session.scalar(select(func.count()).select_from(Subscription)) == 0
+    assert await db_session.scalar(select(func.count()).select_from(BillingCustomer)) == 0
+
+
+@pytest.mark.parametrize("provider", ["assas", ""])
+def test_explicit_unknown_gateway_never_falls_back(provider):
+    from app.billing import PaymentGatewayConfigError, get_payment_gateway
+    with pytest.raises(PaymentGatewayConfigError):
+        get_payment_gateway(provider)

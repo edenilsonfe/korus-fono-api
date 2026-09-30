@@ -44,16 +44,17 @@ class BrandingAssetsResponse(CamelModel):
 
 
 class ProfessionalUpdate(CamelModel):
-    name: str | None = None
-    specialty_key: str | None = None
-    council: str | None = None
-    phone: str | None = None
-    avatar_color: str | None = None
-    billing_address: str | None = Field(default=None, max_length=255)
-    billing_address_number: str | None = Field(default=None, max_length=30)
-    billing_address_complement: str | None = Field(default=None, max_length=100)
-    billing_province: str | None = Field(default=None, max_length=100)
-    billing_postal_code: str | None = Field(default=None, max_length=12)
+    # Omissão preserva o valor; null explícito é inválido para colunas obrigatórias.
+    name: str = Field(default=None)
+    specialty_key: str = Field(default=None)
+    council: str = Field(default=None)
+    phone: str = Field(default=None)
+    avatar_color: str = Field(default=None)
+    billing_address: str = Field(default=None, max_length=255)
+    billing_address_number: str = Field(default=None, max_length=30)
+    billing_address_complement: str = Field(default=None, max_length=100)
+    billing_province: str = Field(default=None, max_length=100)
+    billing_postal_code: str = Field(default=None, max_length=12)
 
     @field_validator("specialty_key")
     @classmethod

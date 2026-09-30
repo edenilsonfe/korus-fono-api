@@ -129,6 +129,27 @@ async def test_upload_rejects_unknown_asset(api_client, auth_headers, storage_mo
     assert response.status_code == 422
 
 
+async def test_branding_oversize_read_is_bounded(
+    api_client, auth_headers, professional, db_session, storage_mocks, monkeypatch,
+):
+    from starlette.datastructures import UploadFile
+    original_read = UploadFile.read
+    reads = []
+
+    async def read(file, size=-1):
+        reads.append(size)
+        return await original_read(file, size)
+
+    monkeypatch.setattr(UploadFile, "read", read)
+    response = await api_client.post("/api/v1/me/branding/logo", headers=auth_headers,
+                                    files={"file": ("logo.png", PNG_BYTES + bytes(MAX_BRANDING_BYTES * 2), "image/png")})
+    assert response.status_code == 400
+    assert reads == [MAX_BRANDING_BYTES + 1]
+    storage_mocks[0].assert_not_awaited()
+    await db_session.refresh(professional)
+    assert professional.branding_logo_key is None
+
+
 async def test_delete_branding_clears_key(
     api_client, auth_headers, db_session, professional, storage_mocks
 ):

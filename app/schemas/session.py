@@ -16,10 +16,10 @@ class SessionCreate(CamelModel):
 
 
 class SessionUpdate(CamelModel):
-    duration: int | None = None
-    type: str | None = None
-    objectives: list[str] | None = None
-    notes: str | None = None
+    duration: int = Field(default=None)
+    type: str = Field(default=None)
+    objectives: list[str] = Field(default=None)
+    notes: str = Field(default=None)
 
 
 class SessionGlobalResponse(CamelModel):

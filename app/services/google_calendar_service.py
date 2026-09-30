@@ -1,22 +1,25 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import hmac
 from datetime import UTC, date, datetime, timedelta, timezone
 from urllib.parse import quote, urlencode
-from uuid import UUID
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 import jwt
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
 from app.models.appointment import Appointment
-from app.models.google_calendar import GoogleCalendarConnection, GoogleCalendarSyncRecord
+from app.models.google_calendar import GoogleCalendarConnection, GoogleCalendarOAuthRequest, GoogleCalendarSyncRecord
 from app.models.patient import Patient
+from app.models.professional import Professional
 
 logger = logging.getLogger(__name__)
 
@@ -59,13 +62,16 @@ def decrypt_refresh_token(token: str) -> str:
         raise GoogleCalendarError("Não foi possível ler a credencial salva do Google.") from exc
 
 
-def create_oauth_state(professional_id: UUID) -> str:
+def create_oauth_state(professional_id: UUID, browser_nonce: str, request_id: UUID, token_version: int) -> str:
     settings = get_settings()
     now = datetime.now(UTC)
     return jwt.encode(
         {
             "sub": str(professional_id),
             "type": OAUTH_STATE_TYPE,
+            "jti": str(request_id),
+            "version": token_version,
+            "browser_hash": hashlib.sha256(browser_nonce.encode()).hexdigest(),
             "iat": now,
             "exp": now + timedelta(minutes=10),
         },
@@ -74,23 +80,29 @@ def create_oauth_state(professional_id: UUID) -> str:
     )
 
 
-def decode_oauth_state(state: str) -> UUID:
+def decode_oauth_state(state: str, browser_nonce: str) -> tuple[UUID, UUID, int]:
     settings = get_settings()
     try:
         payload = jwt.decode(
             state,
             settings.jwt_secret,
             algorithms=[settings.jwt_algorithm],
-            options={"require": ["sub", "type", "iat", "exp"]},
+            options={"require": ["sub", "type", "iat", "exp", "jti", "version", "browser_hash"]},
         )
         if payload.get("type") != OAUTH_STATE_TYPE:
             raise ValueError("wrong state type")
-        return UUID(payload["sub"])
+        if not browser_nonce or not hmac.compare_digest(
+            payload["browser_hash"], hashlib.sha256(browser_nonce.encode()).hexdigest()
+        ):
+            raise ValueError("wrong initiating browser")
+        if not isinstance(payload["version"], int):
+            raise ValueError("wrong session version")
+        return UUID(payload["sub"]), UUID(payload["jti"]), payload["version"]
     except (jwt.PyJWTError, KeyError, TypeError, ValueError) as exc:
         raise GoogleCalendarError("A autorização do Google expirou ou é inválida.") from exc
 
 
-def build_authorization_url(professional_id: UUID) -> str:
+def build_authorization_url(professional_id: UUID, browser_nonce: str, request_id: UUID, token_version: int) -> str:
     settings = get_settings()
     if not settings.google_calendar_configured:
         raise GoogleCalendarError("A integração com Google Agenda ainda não foi configurada.")
@@ -102,9 +114,48 @@ def build_authorization_url(professional_id: UUID) -> str:
         "access_type": "offline",
         "include_granted_scopes": "true",
         "prompt": "consent",
-        "state": create_oauth_state(professional_id),
+        "state": create_oauth_state(professional_id, browser_nonce, request_id, token_version),
     }
     return "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
+
+
+async def begin_authorization(db: AsyncSession, professional: Professional, browser_nonce: str) -> str:
+    request_id = uuid4()
+    url = build_authorization_url(professional.id, browser_nonce, request_id, professional.token_version)
+    now = datetime.now(UTC)
+    await db.execute(delete(GoogleCalendarOAuthRequest).where(or_(
+        GoogleCalendarOAuthRequest.professional_id == professional.id,
+        GoogleCalendarOAuthRequest.expires_at <= now,
+    )))
+    db.add(GoogleCalendarOAuthRequest(
+        id=request_id, professional_id=professional.id,
+        token_version=professional.token_version, expires_at=now + timedelta(minutes=10),
+    ))
+    await db.commit()
+    return url
+
+
+async def consume_authorization(db: AsyncSession, state: str, browser_nonce: str) -> tuple[UUID, int]:
+    professional_id, request_id, token_version = decode_oauth_state(state, browser_nonce)
+    consumed = await db.scalar(delete(GoogleCalendarOAuthRequest).where(
+        GoogleCalendarOAuthRequest.id == request_id,
+        GoogleCalendarOAuthRequest.professional_id == professional_id,
+        GoogleCalendarOAuthRequest.token_version == token_version,
+        GoogleCalendarOAuthRequest.expires_at > datetime.now(UTC),
+    ).returning(GoogleCalendarOAuthRequest.id))
+    if consumed is None:
+        raise GoogleCalendarError("A autorização do Google expirou ou já foi utilizada.")
+    # Consome antes do I/O: um callback concorrente não pode trocar outro código.
+    await db.commit()
+    professional = await db.scalar(select(Professional.id).where(
+        Professional.id == professional_id,
+        Professional.token_version == token_version,
+        Professional.is_disabled.is_(False),
+        Professional.email_verified_at.is_not(None),
+    ))
+    if professional is None:
+        raise GoogleCalendarError("A sessão iniciadora não é mais válida. Conecte novamente.")
+    return professional_id, token_version
 
 
 async def exchange_authorization_code(code: str) -> dict:
@@ -129,7 +180,15 @@ async def exchange_authorization_code(code: str) -> dict:
     return payload
 
 
-async def save_connection(db: AsyncSession, professional_id: UUID, token_payload: dict) -> None:
+async def save_connection(db: AsyncSession, professional_id: UUID, token_payload: dict, *, token_version: int) -> None:
+    professional = await db.scalar(select(Professional.id).where(
+        Professional.id == professional_id,
+        Professional.token_version == token_version,
+        Professional.is_disabled.is_(False),
+        Professional.email_verified_at.is_not(None),
+    ).with_for_update())
+    if professional is None:
+        raise GoogleCalendarError("A sessão iniciadora não é mais válida. Conecte novamente.")
     connection = (
         await db.execute(
             select(GoogleCalendarConnection).where(
@@ -203,11 +262,13 @@ async def queue_appointment_sync(
     ).scalar_one_or_none()
     if connection is None:
         return None
+    # Serializa também a primeira inserção, antes de existir uma linha na fila.
+    await db.execute(select(Appointment.id).where(Appointment.id == appointment.id).with_for_update())
     record = (
         await db.execute(
             select(GoogleCalendarSyncRecord).where(
                 GoogleCalendarSyncRecord.appointment_id == appointment.id
-            )
+            ).with_for_update().execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
     resolved_operation = operation or ("delete" if appointment.status == "cancelado" else "upsert")
@@ -217,9 +278,12 @@ async def queue_appointment_sync(
             appointment_id=appointment.id,
         )
         db.add(record)
+    else:
+        record.sync_version += 1
     record.operation = resolved_operation
     record.event_snapshot = appointment_snapshot(appointment, patient_name)
-    record.status = "queued"
+    if record.processing_token is None:
+        record.status = "queued"
     record.attempt_count = 0
     record.last_error = None
     record.processed_at = None
@@ -294,11 +358,25 @@ async def _find_existing_event(token: str, calendar_id: str, appointment_id: str
     return str(items[0]["id"]) if items else None
 
 
-async def dispatch_sync_record(record_id: UUID) -> None:
+async def _dispatch_once(record_id: UUID) -> bool:
     async with AsyncSessionLocal() as db:
-        record = await db.get(GoogleCalendarSyncRecord, record_id)
-        if record is None or record.status not in {"queued", "failed", "processing"}:
-            return
+        now = datetime.now(UTC)
+        stale = now - timedelta(minutes=10)
+        claim_token = uuid4()
+        record = await db.scalar(update(GoogleCalendarSyncRecord).where(
+            GoogleCalendarSyncRecord.id == record_id,
+            or_(
+                GoogleCalendarSyncRecord.status == "queued",
+                (GoogleCalendarSyncRecord.status == "failed") & (GoogleCalendarSyncRecord.attempt_count < 5),
+                (GoogleCalendarSyncRecord.status == "processing") & or_(
+                    GoogleCalendarSyncRecord.processing_started_at < stale,
+                    GoogleCalendarSyncRecord.processing_started_at.is_(None) & (GoogleCalendarSyncRecord.updated_at < stale),
+                ),
+            ),
+        ).values(status="processing", processing_token=claim_token, processing_started_at=now,
+                 attempt_count=GoogleCalendarSyncRecord.attempt_count + 1).returning(GoogleCalendarSyncRecord))
+        if record is None:
+            return False
         connection = (
             await db.execute(
                 select(GoogleCalendarConnection).where(
@@ -307,16 +385,17 @@ async def dispatch_sync_record(record_id: UUID) -> None:
             )
         ).scalar_one_or_none()
         if connection is None:
-            return
-        record.status = "processing"
-        record.attempt_count += 1
+            return False
+        claimed_version = record.sync_version
+        operation = record.operation
+        snapshot = record.event_snapshot or {}
+        event_id = record.google_event_id
         await db.commit()
+        message = None
         try:
             token = await _access_token(connection)
             calendar_path = quote(connection.calendar_id, safe="")
-            snapshot = record.event_snapshot or {}
-            event_id = record.google_event_id
-            if record.operation == "delete":
+            if operation == "delete":
                 if event_id:
                     response = await _google_request(
                         token,
@@ -331,6 +410,7 @@ async def dispatch_sync_record(record_id: UUID) -> None:
                         token, connection.calendar_id, snapshot["appointment_id"]
                     )
                 body = _event_body(snapshot, include_patient_name=connection.include_patient_name)
+                create_event = not event_id
                 if event_id:
                     response = await _google_request(
                         token,
@@ -338,31 +418,65 @@ async def dispatch_sync_record(record_id: UUID) -> None:
                         f"/calendars/{calendar_path}/events/{quote(event_id, safe='')}",
                         json_body=body,
                     )
-                    if response.status_code == 404:
+                    if response.status_code == 410:
                         event_id = None
-                if not event_id:
+                    create_event = response.status_code in {404, 410}
+                if create_event:
+                    # Persiste o ID antes do POST: timeout/retry reutiliza o mesmo ID.
+                    event_id = event_id or "korus" + uuid4().hex
+                    remembered = await db.execute(update(GoogleCalendarSyncRecord).where(
+                        GoogleCalendarSyncRecord.id == record_id,
+                        GoogleCalendarSyncRecord.processing_token == claim_token,
+                    ).values(google_event_id=event_id))
+                    if remembered.rowcount != 1:
+                        return False
+                    await db.commit()
+                    body["id"] = event_id
                     response = await _google_request(
                         token,
                         "POST",
                         f"/calendars/{calendar_path}/events",
                         json_body=body,
                     )
+                    if response.status_code == 409:
+                        response = await _google_request(
+                            token, "PUT", f"/calendars/{calendar_path}/events/{quote(event_id, safe='')}",
+                            json_body=body,
+                        )
                 if response.status_code >= 400:
                     raise GoogleCalendarError("Não foi possível salvar o evento no Google Agenda.")
                 event_id = str(response.json().get("id") or event_id or "") or None
-            record.google_event_id = event_id
-            record.status = "synced"
-            record.last_error = None
-            record.processed_at = datetime.now(UTC)
-            connection.last_sync_at = record.processed_at
-            connection.last_error = None
         except Exception as exc:
             message = str(exc)[:500] if isinstance(exc, GoogleCalendarError) else "Falha temporária ao sincronizar com o Google Agenda."
-            record.status = "failed"
-            record.last_error = message
-            connection.last_error = message
             logger.warning("Google Calendar sync failed for record %s: %s", record.id, type(exc).__name__)
+        record = await db.scalar(select(GoogleCalendarSyncRecord).where(
+            GoogleCalendarSyncRecord.id == record_id,
+            GoogleCalendarSyncRecord.processing_token == claim_token,
+        ).with_for_update().execution_options(populate_existing=True))
+        if record is None:
+            return False
+        changed = record.sync_version != claimed_version
+        record.google_event_id = event_id
+        record.status = "queued" if changed else "failed" if message else "synced"
+        record.processing_token = None
+        record.processing_started_at = None
+        record.last_error = None if changed else message
+        record.processed_at = None if changed or message else datetime.now(UTC)
+        connection_values = {"last_error": None if changed else message}
+        if record.processed_at:
+            connection_values["last_sync_at"] = record.processed_at
+        await db.execute(update(GoogleCalendarConnection).where(
+            GoogleCalendarConnection.id == connection.id,
+        ).values(**connection_values))
         await db.commit()
+        return changed
+
+
+async def dispatch_sync_record(record_id: UUID) -> None:
+    # ponytail: drena até 5 versões; edição contínua deixa a próxima para o cron.
+    for _ in range(5):
+        if not await _dispatch_once(record_id):
+            return
 
 
 async def dispatch_sync_records(record_ids: list[UUID]) -> None:
@@ -386,7 +500,11 @@ async def retry_pending_syncs(_ctx=None) -> None:
                             ),
                             (
                                 (GoogleCalendarSyncRecord.status == "processing")
-                                & (GoogleCalendarSyncRecord.updated_at < stale_processing)
+                                & or_(
+                                    GoogleCalendarSyncRecord.processing_started_at < stale_processing,
+                                    GoogleCalendarSyncRecord.processing_started_at.is_(None)
+                                    & (GoogleCalendarSyncRecord.updated_at < stale_processing),
+                                )
                             ),
                         )
                     )

@@ -9,12 +9,12 @@ from app.core.config import get_settings
 
 def get_payment_gateway(provider_key: str | None = None) -> PaymentGateway:
     settings = get_settings()
-    key = (provider_key or settings.effective_billing_provider).lower().strip()
+    key = (settings.effective_billing_provider if provider_key is None else provider_key).lower().strip()
     if key == "stub":
         return StubPaymentGateway()  # type: ignore[return-value]
     if key == "asaas":
         return AsaasPaymentGateway()  # type: ignore[return-value]
-    return StubPaymentGateway()  # type: ignore[return-value]
+    raise PaymentGatewayConfigError("Provedor de pagamento não configurado corretamente.")
 
 
 __all__ = ["PaymentGatewayConfigError", "get_payment_gateway"]

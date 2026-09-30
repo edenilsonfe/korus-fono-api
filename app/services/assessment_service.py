@@ -34,7 +34,9 @@ def _prepare_values(protocol: ProtocolCatalog, body: AssessmentCreate) -> dict:
     fields = [field.model_dump() for field in body.fields]
 
     mode = get_protocol_scoring_mode(protocol.id)
-    if answers and mode == "manifest" and scores is None:
+    if mode == "manifest":
+        if not answers:
+            raise HTTPException(status_code=400, detail="Respostas da avaliação são obrigatórias")
         try:
             normalized = ScoringSession.from_protocol(protocol.id, "manifest").score(answers)
         except ScoreError as exc:
@@ -46,10 +48,10 @@ def _prepare_values(protocol: ProtocolCatalog, body: AssessmentCreate) -> dict:
             )
             raise HTTPException(status_code=code, detail=detail) from exc
         scores = normalized.raw_scores
-        result_text = result_text or normalized.result
-        percentage = percentage or normalized.percentage
+        result_text = normalized.result
+        percentage = normalized.percentage
         interpretation = interpretation or normalized.interpretation
-        fields = fields or normalized.to_assessment_fields()
+        fields = normalized.to_assessment_fields()
     elif scores:
         normalized = ScoringSession.from_scores(scores).score({})
         result_text = result_text or normalized.result
