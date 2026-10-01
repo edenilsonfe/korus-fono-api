@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
+from app.api.v1.ai_workflow import router
 from app.constants.ai_flags import AI_EVOLUTION_DICTATION_FLAG
 from app.core.config import get_settings
 from app.core.security import hash_password
@@ -18,6 +19,7 @@ from app.models.goal import Goal
 from app.models.patient import Patient
 from app.models.professional import Professional
 from app.models.session import Session as ClinicalSession
+from app.schemas.ai import EvolutionDraftResponse
 
 URL = "/api/v1/ai/evolution-draft"
 NOTES = "Trabalhamos /r/ em início de palavra com 7 acertos em 10."
@@ -77,6 +79,9 @@ async def test_draft_uses_goals_and_two_latest_evolutions(
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
+    assert set(body) == {"jobId", "status", "result"}
+    route = next(route for route in router.routes if route.path == "/ai/evolution-draft")
+    assert route.response_model is EvolutionDraftResponse
     assert body["status"] == "completed"
     assert body["result"].startswith("Objetivos trabalhados:")
     prompt, system = llm.await_args.args[0], llm.await_args.args[1]

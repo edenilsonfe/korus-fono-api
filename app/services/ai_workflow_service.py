@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from uuid import UUID
@@ -12,15 +13,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import get_settings
 from app.core.utils import utcnow
 from app.models.assessment import Assessment
 from app.models.professional import Professional
 from app.models.session import Session as ClinicalSession
-from app.schemas.ai import AssessmentGoalSuggestion, AssessmentGoalsResponse
+from app.schemas.ai import AssessmentGoalSuggestion, AssessmentGoalsResponse, EvolutionDraftResponse
 from app.services.ai_context import build_context, build_focused_assessment_section
 from app.services.ai_json import LLMJsonError, parse_llm_json
 from app.services.ai_prompts import AI_TOOL_SPECS, build_tool_prompt
-from app.services.ai_service import create_ai_job, run_llm
+from app.services.ai_service import LLM_TIMEOUT_SECONDS, create_ai_job, run_llm
 from app.services.feature_flag_service import FeatureFlagService
 
 FLAG_DISABLED_DETAIL = "Recurso ainda não liberado para sua conta."
@@ -38,7 +40,7 @@ async def draft_evolution(
     patient_id: UUID,
     session_id: UUID | None,
     notes: str,
-) -> dict:
+) -> EvolutionDraftResponse:
     if session_id is not None:
         clinical_session = await db.get(ClinicalSession, session_id)
         if clinical_session is None or clinical_session.patient_id != patient_id:
@@ -65,7 +67,7 @@ async def draft_evolution(
     job.result = result
     job.completed_at = utcnow()
     await db.flush()
-    return {"jobId": str(job.id), "status": "completed", "result": result}
+    return EvolutionDraftResponse(job_id=str(job.id), status="completed", result=result)
 
 
 ASSESSMENT_GOALS_PARSE_ERROR = "Não foi possível interpretar as sugestões da IA. Tente novamente."
@@ -133,8 +135,13 @@ async def suggest_assessment_goals(
         job_type="assessment-goals",
         input_data={"assessmentId": str(assessment.id)},
     )
+    deadline = asyncio.get_running_loop().time() + min(
+        get_settings().assistant_llm_timeout_seconds, LLM_TIMEOUT_SECONDS
+    )
     try:
-        parsed = parse_llm_json(await run_llm(prompt, spec.system, output="json"), SuggestedGoals)
+        parsed = parse_llm_json(
+            await run_llm(prompt, spec.system, output="json", deadline=deadline), SuggestedGoals
+        )
     except LLMJsonError as first_error:
         retry_prompt = (
             f"{prompt}\n\nSua resposta anterior foi rejeitada: {first_error} "
@@ -142,7 +149,7 @@ async def suggest_assessment_goals(
         )
         try:
             parsed = parse_llm_json(
-                await run_llm(retry_prompt, spec.system, output="json"), SuggestedGoals
+                await run_llm(retry_prompt, spec.system, output="json", deadline=deadline), SuggestedGoals
             )
         except LLMJsonError as exc:
             job.status = "failed"

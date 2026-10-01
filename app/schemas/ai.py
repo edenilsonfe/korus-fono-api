@@ -118,6 +118,12 @@ class EvolutionDraftRequest(CamelModel):
         return cleaned
 
 
+class EvolutionDraftResponse(CamelModel):
+    job_id: str
+    status: Literal["completed"]
+    result: str
+
+
 class AssessmentGoalsRequest(CamelModel):
     assessment_id: UUID
 

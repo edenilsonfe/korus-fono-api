@@ -267,7 +267,8 @@ Duas flags, desativadas por padrão e ligadas por conta em `/admin/flags`:
   opcional, apenas registrado no job; o áudio continua descartado.
 - `ai_assessment_goals`: `POST /api/v1/ai/assessment-goals` (`assessmentId`, inclusive
   baterias) devolve `{jobId, goals: [{title, area, rationale}]}` (até 8). JSON inválido gera
-  uma nova tentativa; persistindo, 502 com o job `failed`.
+  uma nova tentativa dentro do mesmo prazo total (até 90 segundos, respeitando o timeout configurado);
+  persistindo, 502 com o job `failed`. Prazo esgotado cancela a chamada e retorna 503 com `Retry-After`.
 
 `GET /api/v1/ai/capabilities` informa `evolutionDictationEnabled` e `assessmentGoalsEnabled`
 (flag da conta e IA configurada). Nada é salvo automaticamente: evolução e metas usam os

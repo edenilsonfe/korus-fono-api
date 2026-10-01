@@ -1,5 +1,7 @@
+import asyncio
 import json
 from datetime import UTC, date, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -7,6 +9,7 @@ import pytest
 from sqlalchemy import select
 
 from app.constants.ai_flags import AI_ASSESSMENT_GOALS_FLAG
+from app.core.config import get_settings
 from app.core.security import hash_password
 from app.models.ai import AIJob
 from app.models.assessment import Assessment
@@ -133,6 +136,45 @@ async def test_invalid_then_valid_json_retries_once(
     assert resp.status_code == 200
     assert llm.await_count == 2
     assert "Sua resposta anterior foi rejeitada" in llm.await_args_list[1].args[0]
+    assert llm.await_args_list[0].kwargs["deadline"] == llm.await_args_list[1].kwargs["deadline"]
+
+
+async def test_json_retry_shares_deadline_and_cancels_provider_on_timeout(
+    api_client, auth_headers, patient, professional, db_session, monkeypatch
+):
+    await _flag(db_session)
+    assessment = await _assessment(db_session, patient, professional)
+    monkeypatch.setattr("app.services.ai_workflow_service.LLM_TIMEOUT_SECONDS", 0.1)
+    settings = get_settings()
+    monkeypatch.setattr(settings, "opencode_api_key", "test-key")
+    client = AsyncMock()
+    cancelled = asyncio.Event()
+
+    async def respond(**_kwargs):
+        if client.chat.completions.create.await_count == 1:
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="sem json"))])
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    client.chat.completions.create.side_effect = respond
+    monkeypatch.setattr("openai.AsyncOpenAI", lambda **_kwargs: client)
+    deadlines = []
+    timeout_at = asyncio.timeout_at
+
+    def record_timeout(deadline):
+        deadlines.append(deadline)
+        return timeout_at(deadline)
+
+    monkeypatch.setattr("app.services.ai_service.asyncio.timeout_at", record_timeout)
+    resp = await api_client.post(URL, headers=auth_headers, json={"assessmentId": str(assessment.id)})
+
+    assert resp.status_code == 503, resp.text
+    assert resp.headers["Retry-After"] == "60"
+    assert len(deadlines) == 2 and deadlines[0] == deadlines[1]
+    assert cancelled.is_set()
+    assert client.close.await_count == 2
 
 
 async def test_invalid_json_twice_returns_502_and_marks_job_failed(

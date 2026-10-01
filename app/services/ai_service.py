@@ -17,6 +17,7 @@ from app.services.patient import get_patient_aggregates
 
 
 logger = logging.getLogger(__name__)
+LLM_TIMEOUT_SECONDS = 90
 
 
 def hash_input(data: dict) -> str:
@@ -91,7 +92,9 @@ async def build_patient_context(db: AsyncSession, patient_id: UUID) -> str:
     return "\n".join(lines)
 
 
-async def run_llm(prompt: str, system: str = "", output: str = "plain") -> str:
+async def run_llm(
+    prompt: str, system: str = "", output: str = "plain", *, deadline: float | None = None
+) -> str:
     settings = get_settings()
     if not settings.opencode_api_key:
         logger.error("AI provider is not configured")
@@ -113,9 +116,12 @@ async def run_llm(prompt: str, system: str = "", output: str = "plain") -> str:
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
+    call_deadline = asyncio.get_running_loop().time() + min(
+        settings.assistant_llm_timeout_seconds, LLM_TIMEOUT_SECONDS
+    )
     try:
         # Synchronous HTTP contract: finish before the web's 120-second budget.
-        async with asyncio.timeout(min(settings.assistant_llm_timeout_seconds, 90)):
+        async with asyncio.timeout_at(min(call_deadline, deadline) if deadline is not None else call_deadline):
             response = await client.chat.completions.create(
                 model=settings.opencode_model,
                 messages=messages,

@@ -10,14 +10,19 @@ from app.constants.ai_flags import AI_ASSESSMENT_GOALS_FLAG, AI_EVOLUTION_DICTAT
 from app.core.deps import require_verified_professional
 from app.db.session import get_db
 from app.models.professional import Professional
-from app.schemas.ai import AssessmentGoalsRequest, AssessmentGoalsResponse, EvolutionDraftRequest
+from app.schemas.ai import (
+    AssessmentGoalsRequest,
+    AssessmentGoalsResponse,
+    EvolutionDraftRequest,
+    EvolutionDraftResponse,
+)
 from app.services import ai_workflow_service
 from app.services.assistant.rate_limit import enforce_assistant_rate_limit
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
 
-@router.post("/evolution-draft", status_code=status.HTTP_200_OK)
+@router.post("/evolution-draft", response_model=EvolutionDraftResponse, status_code=status.HTTP_200_OK)
 async def evolution_draft(
     body: EvolutionDraftRequest,
     professional: Professional = Depends(require_verified_professional),
