@@ -936,8 +936,12 @@ class WhatsAppNotificationService:
             await service._dispatch_appointment_event(appointment_id, event_id)
 
     async def dispatch_appointment_reminder(self, appointment: Appointment) -> bool:
-        current = await self._current_appointment(appointment.id)
-        if not current or not current.patient:
+        # `appointment` vem do lote carregado pelo scheduler (com `patient`).
+        # Não rebuscamos aqui para evitar N+1: `dispatch_event_log` recarrega o
+        # agendamento e compara com o snapshot do evento antes de enviar,
+        # marcando como superseded qualquer mudança de status/data/hora.
+        current = appointment
+        if not current.patient:
             return False
         deduplication_key = (
             f"appointment-reminder-24h:{current.id}:"

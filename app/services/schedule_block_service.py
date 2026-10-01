@@ -36,6 +36,12 @@ def _to_response(block: ScheduleBlock) -> ScheduleBlockResponse:
     )
 
 
+async def lock_professional_agenda(db: AsyncSession, professional_id: UUID) -> None:
+    await db.execute(
+        select(Professional.id).where(Professional.id == professional_id).with_for_update()
+    )
+
+
 async def ensure_appointment_slot_available(
     db: AsyncSession,
     professional_id: UUID,
@@ -45,9 +51,14 @@ async def ensure_appointment_slot_available(
     exclude_appointment_id: UUID | None = None,
     *,
     exclude_appointment_ids: set[UUID] | None = None,
+    lock_professional: bool = True,
 ) -> None:
     # Serialize all agenda writers, including two reservations of an empty slot.
-    await db.execute(select(Professional.id).where(Professional.id == professional_id).with_for_update())
+    # Callers validating many slots in one transaction may lock once up front
+    # (see `lock_professional_agenda`) and pass lock_professional=False, since
+    # the row lock is held until commit/rollback anyway.
+    if lock_professional:
+        await lock_professional_agenda(db, professional_id)
     appointment_start = _time_to_minutes(appointment_time)
     appointment_end = appointment_start + duration
 

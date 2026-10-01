@@ -162,6 +162,7 @@ class WhatsAppSchedulerService:
                 Appointment.date >= now.date(),
                 Appointment.date <= horizon_end.date(),
             )
+            .execution_options(populate_existing=True)
         )
         appointments = result.scalars().unique().all()
         candidates = []

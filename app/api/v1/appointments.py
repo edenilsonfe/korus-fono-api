@@ -41,7 +41,10 @@ from app.services.google_calendar_service import (
     dispatch_sync_records,
     queue_appointment_sync,
 )
-from app.services.schedule_block_service import ensure_appointment_slot_available
+from app.services.schedule_block_service import (
+    ensure_appointment_slot_available,
+    lock_professional_agenda,
+)
 from app.services.whatsapp_appointment_outbox import create_appointment_event_log
 from app.services.whatsapp_queue import enqueue_whatsapp_appointment_event_log
 
@@ -244,6 +247,7 @@ async def create_appointment(
     children_created = 0
     created_appointments = [anchor]
     if appointment_type == "recorrente" and body.end_date:
+        # The first availability check above already holds the agenda lock.
         for slot in iter_recurring_child_slots(
             body.frequency,
             body.date,
@@ -255,7 +259,12 @@ async def create_appointment(
             weekday_rules=weekday_rules,
         ):
             await ensure_appointment_slot_available(
-                db, professional.id, slot.start_date, slot.start_time, slot.duration
+                db,
+                professional.id,
+                slot.start_date,
+                slot.start_time,
+                slot.duration,
+                lock_professional=False,
             )
             child = Appointment(
                 professional_id=professional.id,

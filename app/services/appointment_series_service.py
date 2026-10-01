@@ -22,7 +22,10 @@ from app.services.appointment_series_slots import (
 from app.services.care_team_service import require_clinical_access
 from app.services.google_calendar_service import queue_appointment_sync
 from app.services.patient_appointment_service import appointment_occurs_in_future
-from app.services.schedule_block_service import ensure_appointment_slot_available
+from app.services.schedule_block_service import (
+    ensure_appointment_slot_available,
+    lock_professional_agenda,
+)
 from app.services.whatsapp_appointment_outbox import create_appointment_event_logs
 
 
@@ -32,9 +35,7 @@ async def update_appointment_series(
     appointment_id: UUID,
     body: AppointmentSeriesUpdate,
 ):
-    await db.execute(
-        select(Professional.id).where(Professional.id == professional.id).with_for_update()
-    )
+    await lock_professional_agenda(db, professional.id)
     selected = await db.scalar(
         select(Appointment).where(
             Appointment.id == appointment_id,
@@ -102,6 +103,7 @@ async def update_appointment_series(
             await ensure_appointment_slot_available(
                 db, professional.id, slot.start_date, slot.start_time, slot.duration,
                 exclude_appointment_ids=mutable_ids,
+                lock_professional=False,
             )
         except HTTPException as exc:
             if exc.status_code != 409:
