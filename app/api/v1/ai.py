@@ -653,11 +653,18 @@ async def _run_tool_job(
 @router.post("/transcribe", status_code=status.HTTP_200_OK)
 async def transcribe(
     patient_id: str = Form(alias="patientId"),
+    session_id: str | None = Form(default=None, alias="sessionId"),
     file: UploadFile = File(...),
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
     await run_in_threadpool(enforce_assistant_rate_limit, str(professional.id))
+    try:
+        parsed_session_id = str(UUID(session_id)) if session_id else None
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422, detail="Sessão inválida."
+        ) from exc
     parsed_patient_id = UUID(patient_id)
     await _get_ai_patient(db, parsed_patient_id, professional)
     transcription = await transcribe_audio(file)
@@ -671,6 +678,7 @@ async def transcribe(
             "contentType": transcription.content_type,
             "sizeBytes": transcription.size_bytes,
             "audioSha256": transcription.sha256,
+            "sessionId": parsed_session_id,
         },
     )
     job.status = "completed"

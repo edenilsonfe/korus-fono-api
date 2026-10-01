@@ -1,7 +1,8 @@
 from typing import Literal
 from datetime import datetime
+from uuid import UUID
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from app.schemas.common import CamelModel
 from app.schemas.report_composition import ReportCompositionCreate
@@ -101,6 +102,20 @@ class AIToolRequest(CamelModel):
     text: str | None = None
     prompt: str | None = None
     session_notes: str | None = None
+
+
+class EvolutionDraftRequest(CamelModel):
+    patient_id: UUID
+    session_id: UUID | None = None
+    notes: str = Field(max_length=20000)
+
+    @field_validator("notes")
+    @classmethod
+    def _strip_notes(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Informe as anotações da sessão.")
+        return cleaned
 
 
 class AICapabilitiesResponse(CamelModel):
