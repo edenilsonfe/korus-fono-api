@@ -254,6 +254,24 @@ Aplicar a migration `v3w4x5y6z7a8` antes de subir a nova API/worker. O envio
 automático por WhatsApp exige o worker em execução; o lembrete no sino é gerado
 ao consultar a caixa de notificações e não exige o worker.
 
+## IA no fluxo clínico (pilotos)
+
+Duas flags, desativadas por padrão e ligadas por conta em `/admin/flags`:
+
+- `ai_evolution_dictation`: `POST /api/v1/ai/evolution-draft` (`patientId`, `sessionId?`,
+  `notes` 1–20.000) devolve um rascunho em texto com as seções Objetivos trabalhados,
+  Atividades e estratégias, Desempenho e respostas, Orientações à família e Próximos passos.
+  O job guarda só o SHA-256 das anotações. `POST /api/v1/ai/transcribe` aceita `sessionId`
+  opcional, apenas registrado no job; o áudio continua descartado.
+- `ai_assessment_goals`: `POST /api/v1/ai/assessment-goals` (`assessmentId`, inclusive
+  baterias) devolve `{jobId, goals: [{title, area, rationale}]}` (até 8). JSON inválido gera
+  uma nova tentativa; persistindo, 502 com o job `failed`.
+
+`GET /api/v1/ai/capabilities` informa `evolutionDictationEnabled` e `assessmentGoalsEnabled`
+(flag da conta e IA configurada). Nada é salvo automaticamente: evolução e metas usam os
+endpoints existentes após a confirmação da profissional.
+Aplicar a migration `ai20261001a` (apenas insere as flags) antes de publicar API e web.
+
 ## Worker IA (opcional)
 
 As ferramentas HTTP de IA e a geração de relatórios aguardam o resultado na própria

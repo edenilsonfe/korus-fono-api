@@ -118,6 +118,21 @@ class EvolutionDraftRequest(CamelModel):
         return cleaned
 
 
+class AssessmentGoalsRequest(CamelModel):
+    assessment_id: UUID
+
+
+class AssessmentGoalSuggestion(CamelModel):
+    title: str
+    area: str
+    rationale: str
+
+
+class AssessmentGoalsResponse(CamelModel):
+    job_id: str
+    goals: list[AssessmentGoalSuggestion]
+
+
 class AICapabilitiesResponse(CamelModel):
     llm_enabled: bool
     audio_transcription_enabled: bool

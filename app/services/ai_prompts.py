@@ -204,6 +204,24 @@ AI_TOOL_SPECS: dict[str, ToolSpec] = {
         ),
         output="plain",
     ),
+    "assessment-goals": ToolSpec(
+        system=(
+            f"{BASE_PERSONA}\n\n"
+            "Sugira metas terapêuticas SMART a partir de uma avaliação específica. "
+            "Responda somente com JSON válido, sem texto antes ou depois."
+        ),
+        sections=["identity", "goals"],
+        limits={},
+        prompt_template=(
+            "Com base na avaliação em foco, sugira de 3 a 6 metas terapêuticas SMART. "
+            "Cada justificativa deve citar o achado da avaliação que motiva a meta. "
+            "Não repita metas já listadas no contexto.\n"
+            'Responda exatamente no formato {{"goals": [{{"title": "...", "area": "...", '
+            '"rationale": "..."}}]}}.\n\n'
+            "{input_text}"
+        ),
+        output="json",
+    ),
     "proofread": ToolSpec(
         system=(
             f"{BASE_PERSONA}\n\n"
