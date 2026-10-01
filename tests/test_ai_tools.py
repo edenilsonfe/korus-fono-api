@@ -53,6 +53,7 @@ def test_tool_specs_cover_expected_keys():
         "clinical-trends",
         "session-summary",
         "proofread",
+        "evolution-draft",
     }
     assert set(AI_TOOL_SPECS) == expected
 
