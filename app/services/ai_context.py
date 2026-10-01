@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
+from app.constants.battery import BATTERY_SUBFORM_STATUS_COMPLETED
 from app.core.diagnosis_catalog import diagnosis_labels
 from app.models.anamnese import AnamneseEntry
 from app.models.appointment import Appointment
@@ -217,6 +218,34 @@ async def build_assessments_section(
             lines.append(f"Domínios: {scores_summary}")
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
+
+
+def build_focused_assessment_section(assessment: Assessment) -> str:
+    """Bloco de contexto de uma única aplicação; exige protocol e battery_subforms carregados."""
+    protocol_name = (
+        assessment.protocol.full_name if assessment.protocol else assessment.protocol_id
+    )
+    lines = [
+        f"Protocolo: {protocol_name}",
+        f"Data: {assessment.date.isoformat()}",
+        f"Resultado: {assessment.result} ({assessment.percentage}%)",
+    ]
+    if assessment.interpretation:
+        lines.append(f"Interpretação: {assessment.interpretation}")
+    scores_summary = _summarize_scores(assessment.scores)
+    if scores_summary:
+        lines.append(f"Domínios: {scores_summary}")
+    completed = [
+        subform
+        for subform in assessment.battery_subforms
+        if subform.status == BATTERY_SUBFORM_STATUS_COMPLETED
+    ]
+    if completed:
+        lines.append("Subtestes concluídos:")
+        for subform in completed:
+            summary = _summarize_scores(subform.scores)
+            lines.append(f"- {subform.subform_slug}: {summary}" if summary else f"- {subform.subform_slug}")
+    return "### Avaliação em foco\n" + "\n".join(lines)
 
 
 @_register("domain_snapshots")

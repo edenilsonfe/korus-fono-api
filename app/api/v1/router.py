@@ -12,6 +12,7 @@ from app.api.v1 import (
     admin_trial_emails,
     admin_whatsapp,
     ai,
+    ai_workflow,
     affiliates,
     affiliate_portal,
     appointment_responses,
@@ -95,6 +96,7 @@ api_router.include_router(home_program_responses.router)
 api_router.include_router(batteries.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(ai.router)
+api_router.include_router(ai_workflow.router)
 api_router.include_router(whatsapp.router)
 api_router.include_router(webhooks.router)
 api_router.include_router(notifications.router)

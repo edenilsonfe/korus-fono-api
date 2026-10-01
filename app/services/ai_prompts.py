@@ -21,7 +21,7 @@ class ToolSpec:
     sections: list[str]
     limits: dict[str, int]
     prompt_template: str
-    output: Literal["markdown", "plain"]
+    output: Literal["markdown", "plain", "json"]
 
 
 def _report_system(audience: str) -> str:
@@ -179,6 +179,49 @@ AI_TOOL_SPECS: dict[str, ToolSpec] = {
         prompt_template="Resuma a sessão a seguir em formato de evolução clínica:\n\n{input_text}",
         output="plain",
     ),
+    "evolution-draft": ToolSpec(
+        system=(
+            f"{BASE_PERSONA}\n\n"
+            "Você redige rascunhos de evolução clínica fonoaudiológica a partir das anotações "
+            "da própria profissional. Escreva somente o que estiver nas anotações. Não invente "
+            "desempenho, números, condutas ou falas. Use as metas e evoluções do contexto apenas "
+            "para nomear objetivos e manter continuidade. Omita seções sem informação."
+        ),
+        sections=["identity", "goals", "evolutions"],
+        limits={"evolutions": 2},
+        prompt_template=(
+            "Redija a evolução da sessão a partir das anotações abaixo. Use somente estas seções, "
+            "nesta ordem, cada título sozinho em uma linha, e omita as que não tiverem informação "
+            "nas anotações:\n"
+            "Objetivos trabalhados:\n"
+            "Atividades e estratégias:\n"
+            "Desempenho e respostas:\n"
+            "Orientações à família:\n"
+            "Próximos passos:\n"
+            "Abaixo de cada título, escreva frases curtas ou itens iniciados por '- '. "
+            "Não use markdown.\n\n"
+            "Anotações da profissional:\n{input_text}"
+        ),
+        output="plain",
+    ),
+    "assessment-goals": ToolSpec(
+        system=(
+            f"{BASE_PERSONA}\n\n"
+            "Sugira metas terapêuticas SMART a partir de uma avaliação específica. "
+            "Responda somente com JSON válido, sem texto antes ou depois."
+        ),
+        sections=["identity", "goals"],
+        limits={},
+        prompt_template=(
+            "Com base na avaliação em foco, sugira de 3 a 6 metas terapêuticas SMART. "
+            "Cada justificativa deve citar o achado da avaliação que motiva a meta. "
+            "Não repita metas já listadas no contexto.\n"
+            'Responda exatamente no formato {{"goals": [{{"title": "...", "area": "...", '
+            '"rationale": "..."}}]}}.\n\n'
+            "{input_text}"
+        ),
+        output="json",
+    ),
     "proofread": ToolSpec(
         system=(
             f"{BASE_PERSONA}\n\n"
@@ -205,8 +248,8 @@ def build_tool_prompt(
         prompt = spec.prompt_template.format(input_text=input_text or "")
     else:
         prompt = spec.prompt_template
-        if context:
-            prompt += f"\n\nContexto clínico:\n{context}"
+    if context:
+        prompt += f"\n\nContexto clínico:\n{context}"
     if extra_prompt:
         prompt += f"\n\nInstruções adicionais: {extra_prompt}"
     return prompt
