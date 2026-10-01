@@ -23,7 +23,8 @@ from app.services.care_team_service import require_clinical_access
 from app.services.google_calendar_service import queue_appointment_sync
 from app.services.patient_appointment_service import appointment_occurs_in_future
 from app.services.schedule_block_service import (
-    ensure_appointment_slot_available,
+    SlotConflictError,
+    ensure_appointment_slots_available,
     lock_professional_agenda,
 )
 from app.services.whatsapp_appointment_outbox import create_appointment_event_logs
@@ -99,21 +100,22 @@ async def update_appointment_series(
             continue
         if datetime.combine(slot.start_date, slot.start_time).replace(tzinfo=now.tzinfo) <= now:
             raise HTTPException(400, "A nova rotina não pode criar atendimentos no passado")
-        try:
-            await ensure_appointment_slot_available(
-                db, professional.id, slot.start_date, slot.start_time, slot.duration,
-                exclude_appointment_ids=mutable_ids,
-                lock_professional=False,
-            )
-        except HTTPException as exc:
-            if exc.status_code != 409:
-                raise
-            raise HTTPException(
-                409,
-                f"{exc.detail} em {slot.start_date:%d/%m/%Y} às {slot.start_time:%H:%M}. "
-                "Nenhum horário foi alterado.",
-            ) from exc
         targets.append(slot)
+    try:
+        await ensure_appointment_slots_available(
+            db,
+            professional.id,
+            [(slot.start_date, slot.start_time, slot.duration) for slot in targets],
+            exclude_appointment_ids=mutable_ids,
+            lock_professional=False,
+        )
+    except SlotConflictError as exc:
+        slot = targets[exc.slot_index]
+        raise HTTPException(
+            409,
+            f"{exc.detail} em {slot.start_date:%d/%m/%Y} às {slot.start_time:%H:%M}. "
+            "Nenhum horário foi alterado.",
+        ) from exc
 
     payload = [
         slot.model_dump(mode="json", by_alias=False) for slot in body.weekday_slots or []

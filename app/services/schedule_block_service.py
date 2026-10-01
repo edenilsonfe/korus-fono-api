@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import date, time
 from uuid import UUID
 
@@ -42,6 +43,89 @@ async def lock_professional_agenda(db: AsyncSession, professional_id: UUID) -> N
     )
 
 
+class SlotConflictError(HTTPException):
+    """409 raised when a slot collides; `slot_index` points into the checked batch."""
+
+    def __init__(self, detail: str, slot_index: int = 0):
+        super().__init__(status_code=status.HTTP_409_CONFLICT, detail=detail)
+        self.slot_index = slot_index
+
+
+async def ensure_appointment_slots_available(
+    db: AsyncSession,
+    professional_id: UUID,
+    slots: Sequence[tuple[date, time, int]],
+    *,
+    exclude_appointment_ids: set[UUID] | None = None,
+    lock_professional: bool = True,
+    check_within_batch: bool = False,
+) -> None:
+    """Validate many (date, time, duration) slots with one appointments query and
+    one blocks query for the whole date range, instead of two per slot.
+
+    With `check_within_batch`, slots also may not overlap each other (used when the
+    caller is about to create all of them).
+    """
+    # Serialize all agenda writers, including two reservations of an empty slot.
+    # Callers validating several batches in one transaction may lock once up front
+    # (see `lock_professional_agenda`) and pass lock_professional=False, since
+    # the row lock is held until commit/rollback anyway.
+    if lock_professional:
+        await lock_professional_agenda(db, professional_id)
+    if not slots:
+        return
+
+    first_date = min(slot[0] for slot in slots)
+    last_date = max(slot[0] for slot in slots)
+
+    appointments_result = await db.execute(
+        select(Appointment).where(
+            Appointment.professional_id == professional_id,
+            Appointment.date >= first_date,
+            Appointment.date <= last_date,
+            Appointment.status.notin_(["cancelado"]),
+        )
+    )
+    # (start, end) minute ranges per day, built from existing appointments.
+    busy_by_date: dict[date, list[tuple[int, int]]] = {}
+    for existing in appointments_result.scalars().all():
+        if exclude_appointment_ids and existing.id in exclude_appointment_ids:
+            continue
+        start = _time_to_minutes(existing.time)
+        busy_by_date.setdefault(existing.date, []).append((start, start + existing.duration))
+
+    blocks_result = await db.execute(
+        select(ScheduleBlock).where(
+            ScheduleBlock.professional_id == professional_id,
+            ScheduleBlock.start_date <= last_date,
+            ScheduleBlock.end_date >= first_date,
+        )
+    )
+    blocks = list(blocks_result.scalars().all())
+
+    for index, (slot_date, slot_time, duration) in enumerate(slots):
+        slot_start = _time_to_minutes(slot_time)
+        slot_end = slot_start + duration
+
+        for busy_start, busy_end in busy_by_date.get(slot_date, ()):
+            if _time_ranges_overlap(slot_start, slot_end, busy_start, busy_end):
+                raise SlotConflictError("Conflito de horário", index)
+
+        for block in blocks:
+            if not (block.start_date <= slot_date <= block.end_date):
+                continue
+            if block.start_time is None or _time_ranges_overlap(
+                slot_start,
+                slot_end,
+                _time_to_minutes(block.start_time),
+                _time_to_minutes(block.end_time),
+            ):
+                raise SlotConflictError("Horário indisponível na agenda", index)
+
+        if check_within_batch:
+            busy_by_date.setdefault(slot_date, []).append((slot_start, slot_end))
+
+
 async def ensure_appointment_slot_available(
     db: AsyncSession,
     professional_id: UUID,
@@ -53,56 +137,16 @@ async def ensure_appointment_slot_available(
     exclude_appointment_ids: set[UUID] | None = None,
     lock_professional: bool = True,
 ) -> None:
-    # Serialize all agenda writers, including two reservations of an empty slot.
-    # Callers validating many slots in one transaction may lock once up front
-    # (see `lock_professional_agenda`) and pass lock_professional=False, since
-    # the row lock is held until commit/rollback anyway.
-    if lock_professional:
-        await lock_professional_agenda(db, professional_id)
-    appointment_start = _time_to_minutes(appointment_time)
-    appointment_end = appointment_start + duration
-
-    appointments_result = await db.execute(
-        select(Appointment).where(
-            Appointment.professional_id == professional_id,
-            Appointment.date == appointment_date,
-            Appointment.status.notin_(["cancelado"]),
-        )
+    excluded = set(exclude_appointment_ids or ())
+    if exclude_appointment_id:
+        excluded.add(exclude_appointment_id)
+    await ensure_appointment_slots_available(
+        db,
+        professional_id,
+        [(appointment_date, appointment_time, duration)],
+        exclude_appointment_ids=excluded or None,
+        lock_professional=lock_professional,
     )
-    for existing in appointments_result.scalars().all():
-        if exclude_appointment_id and existing.id == exclude_appointment_id:
-            continue
-        if exclude_appointment_ids and existing.id in exclude_appointment_ids:
-            continue
-        if _time_ranges_overlap(
-            appointment_start,
-            appointment_end,
-            _time_to_minutes(existing.time),
-            _time_to_minutes(existing.time) + existing.duration,
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Conflito de horário",
-            )
-
-    blocks_result = await db.execute(
-        select(ScheduleBlock).where(
-            ScheduleBlock.professional_id == professional_id,
-            ScheduleBlock.start_date <= appointment_date,
-            ScheduleBlock.end_date >= appointment_date,
-        )
-    )
-    for block in blocks_result.scalars().all():
-        if block.start_time is None or _time_ranges_overlap(
-            appointment_start,
-            appointment_end,
-            _time_to_minutes(block.start_time),
-            _time_to_minutes(block.end_time),
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Horário indisponível na agenda",
-            )
 
 
 async def list_schedule_blocks(

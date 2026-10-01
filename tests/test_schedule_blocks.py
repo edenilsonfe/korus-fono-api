@@ -348,3 +348,78 @@ async def test_schedule_block_validates_dates_and_times(api_client, auth_headers
         },
     )
     assert invalid_time.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_batch_slot_check_matches_per_slot_rules(db_session):
+    from datetime import date, time
+
+    from fastapi import HTTPException
+
+    from app.models.appointment import Appointment
+    from app.models.patient import Patient
+    from app.models.schedule_block import ScheduleBlock
+    from app.services.schedule_block_service import (
+        SlotConflictError,
+        ensure_appointment_slots_available,
+    )
+
+    owner = Professional(
+        email="batch-slots@example.com", name="Batch", password_hash="unused"
+    )
+    db_session.add(owner)
+    await db_session.flush()
+    patient = Patient(
+        professional_id=owner.id,
+        name="Synthetic",
+        birth_date=date(2020, 1, 1),
+        start_date=date(2030, 1, 1),
+        avatar_color="teal",
+        diagnosis_keys=[],
+    )
+    db_session.add(patient)
+    await db_session.flush()
+    db_session.add(
+        Appointment(
+            professional_id=owner.id,
+            patient_id=patient.id,
+            date=date(2030, 1, 8),
+            time=time(10),
+            duration=50,
+            type="Terapia",
+        )
+    )
+    db_session.add(
+        ScheduleBlock(
+            professional_id=owner.id,
+            start_date=date(2030, 1, 15),
+            end_date=date(2030, 1, 15),
+            reason="Teste",
+        )
+    )
+    await db_session.flush()
+
+    free = [(date(2030, 1, 1), time(10), 50), (date(2030, 1, 22), time(10), 50)]
+    await ensure_appointment_slots_available(db_session, owner.id, free)
+
+    with pytest.raises(SlotConflictError) as appointment_conflict:
+        await ensure_appointment_slots_available(
+            db_session, owner.id, free + [(date(2030, 1, 8), time(10, 30), 50)]
+        )
+    assert appointment_conflict.value.slot_index == 2
+    assert appointment_conflict.value.detail == "Conflito de horário"
+
+    with pytest.raises(HTTPException) as block_conflict:
+        await ensure_appointment_slots_available(
+            db_session, owner.id, [(date(2030, 1, 15), time(9), 50)]
+        )
+    assert block_conflict.value.status_code == 409
+    assert block_conflict.value.detail == "Horário indisponível na agenda"
+
+    overlapping = [(date(2030, 1, 29), time(10), 50), (date(2030, 1, 29), time(10, 30), 50)]
+    await ensure_appointment_slots_available(db_session, owner.id, overlapping)
+    with pytest.raises(SlotConflictError) as batch_conflict:
+        await ensure_appointment_slots_available(
+            db_session, owner.id, overlapping, check_within_batch=True
+        )
+    assert batch_conflict.value.slot_index == 1
