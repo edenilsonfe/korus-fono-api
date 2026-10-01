@@ -137,6 +137,8 @@ async def run_llm(prompt: str, system: str = "", output: str = "plain") -> str:
     finally:
         await client.close()
     content = response.choices[0].message.content or ""
+    if output == "json":
+        return content
     from app.services.assistant.format_reply import sanitize_llm_markdown, sanitize_llm_plain_text
 
     if output == "markdown":
