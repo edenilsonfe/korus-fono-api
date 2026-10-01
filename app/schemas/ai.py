@@ -106,3 +106,5 @@ class AIToolRequest(CamelModel):
 class AICapabilitiesResponse(CamelModel):
     llm_enabled: bool
     audio_transcription_enabled: bool
+    evolution_dictation_enabled: bool = False
+    assessment_goals_enabled: bool = False

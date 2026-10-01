@@ -19,6 +19,7 @@ from sqlalchemy.orm import defer, selectinload
 from sqlalchemy.orm.attributes import set_committed_value
 from starlette.concurrency import run_in_threadpool
 
+from app.constants.ai_flags import AI_ASSESSMENT_GOALS_FLAG, AI_EVOLUTION_DICTATION_FLAG
 from app.core.config import get_settings
 from app.core.deps import require_verified_professional
 from app.core.utils import utcnow
@@ -64,6 +65,7 @@ from app.services.assistant.conversation_patient import bind_conversation_patien
 from app.services.assistant.rate_limit import enforce_assistant_rate_limit
 from app.services.audio_transcription_service import transcribe_audio
 from app.services.care_team_service import record_access_event, require_clinical_access
+from app.services.feature_flag_service import FeatureFlagService
 from app.services.professional_branding import build_document_identity
 from app.services.report_export import export_report, sanitize_filename_component
 from app.services.report_service import revise_report
@@ -118,12 +120,19 @@ async def _composition_id_for(db: AsyncSession, report_id: UUID) -> str | None:
 
 @router.get("/capabilities", response_model=AICapabilitiesResponse)
 async def get_ai_capabilities(
-    _professional: Professional = Depends(require_verified_professional),
+    professional: Professional = Depends(require_verified_professional),
+    db: AsyncSession = Depends(get_db),
 ):
     settings = get_settings()
+    llm_enabled = bool(settings.opencode_api_key.strip())
+    flags = FeatureFlagService(db)
     return AICapabilitiesResponse(
-        llm_enabled=bool(settings.opencode_api_key.strip()),
+        llm_enabled=llm_enabled,
         audio_transcription_enabled=bool(settings.audio_transcription_api_key.strip()),
+        evolution_dictation_enabled=llm_enabled
+        and await flags.is_enabled(professional, AI_EVOLUTION_DICTATION_FLAG),
+        assessment_goals_enabled=llm_enabled
+        and await flags.is_enabled(professional, AI_ASSESSMENT_GOALS_FLAG),
     )
 
 
