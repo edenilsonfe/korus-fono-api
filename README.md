@@ -158,6 +158,8 @@ acesso. Enquanto essa primeira cobrança mensal não for paga, a recorrência fi
 Asaas: a confirmação do primeiro pagamento a reativa com o próximo vencimento para um mês depois,
 e a exclusão da primeira cobrança de uma assinatura nunca paga cancela a recorrência. Toda nova
 cobrança sai explicitamente como `PIX` ou `CREDIT_CARD`; o tipo genérico `UNDEFINED` não é usado.
+Se uma cobrança for paga após a exclusão da assinatura no Asaas, o pagamento confirmado
+continua sendo processado e libera o período pago, sem reativar a recorrência excluída.
 
 ### Financeiro interno da clínica
 

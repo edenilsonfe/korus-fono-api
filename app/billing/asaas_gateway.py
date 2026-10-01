@@ -1021,8 +1021,9 @@ class AsaasPaymentGateway:
             f"{self._base_url}/subscriptions/{external_subscription_id}",
             headers=self._headers(),
         )
+        # Removed subscriptions retain INACTIVE in Asaas but cannot be reactivated.
         return {
-            "status": str(data.get("status", "unknown")).lower(),
+            "status": "canceled" if data.get("deleted") else str(data.get("status", "unknown")).lower(),
             "external_subscription_id": external_subscription_id,
             "external_reference": data.get("externalReference"),
         }

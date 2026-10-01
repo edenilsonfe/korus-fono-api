@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.compiler import compiles
 
+from app.billing.errors import PaymentGatewayError
 from app.core.config import get_settings
 from app.core.security import create_access_token
 from app.models.billing import BillingEvent, Plan, Subscription
@@ -103,6 +104,97 @@ async def test_asaas_webhook_ignores_foreign_professional(
         )
     )
     assert event is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("deleted", [False, True])
+async def test_received_payment_only_reactivates_an_existing_subscription(
+    api_client, db_session, professional, monkeypatch, deleted
+):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "asaas_webhook_token", "correct-token")
+    monkeypatch.setattr(settings, "asaas_api_key", "test-key")
+    monkeypatch.setattr(settings, "asaas_api_base_url", "https://api-sandbox.asaas.com/v3")
+    professional.signup_payment_required = True
+    plan = Plan(**COMMERCIAL_PLAN_SEEDS[0])
+    db_session.add(plan)
+    await db_session.flush()
+    subscription = Subscription(
+        professional_id=professional.id,
+        plan_id=plan.id,
+        provider="asaas",
+        status="canceled" if deleted else "incomplete",
+        external_subscription_id="sub_first_paid",
+        external_checkout_id="pay_first_paid",
+        updated_at=datetime(2026, 9, 23, tzinfo=UTC),
+    )
+    newer_checkout = Subscription(
+        professional_id=professional.id,
+        plan_id=plan.id,
+        provider="asaas",
+        status="incomplete",
+        external_subscription_id="sub_new_pending",
+        external_checkout_id="pay_new_pending",
+    )
+    db_session.add_all([subscription, newer_checkout])
+    await db_session.commit()
+    calls = []
+
+    async def fake_request_json(method, url, **kwargs):
+        assert url == "https://api-sandbox.asaas.com/v3/subscriptions/sub_first_paid"
+        calls.append((method, kwargs.get("json_body")))
+        if method == "GET":
+            return {"id": "sub_first_paid", "status": "INACTIVE", "deleted": deleted}
+        if method == "PUT":
+            if deleted:
+                raise PaymentGatewayError("A assinatura não pode ser atualizada", status_code=400)
+            return {"id": "sub_first_paid", "status": "ACTIVE"}
+        raise AssertionError(f"Unexpected Asaas call: {method}")
+
+    monkeypatch.setattr("app.billing.asaas_gateway.request_json", fake_request_json)
+    body = {
+        "event": "PAYMENT_RECEIVED",
+        "payment": {
+            "id": "pay_first_paid",
+            "status": "RECEIVED",
+            "value": 97.9,
+            "paymentDate": "2026-10-01",
+            "subscription": "sub_first_paid",
+            "externalReference": f"{professional.id}:{plan.slug}",
+        },
+    }
+    for _ in range(2):
+        response = await api_client.post(
+            "/api/v1/billing/webhooks/asaas",
+            json=body,
+            headers={"asaas-access-token": "correct-token"},
+        )
+        assert response.status_code == 200
+        assert response.json() == {"received": True, "events": 1}
+
+    expected_calls = [("GET", None)]
+    if not deleted:
+        expected_calls.append(("PUT", {"status": "ACTIVE", "nextDueDate": "2026-11-01"}))
+    assert calls == expected_calls
+    event = await db_session.scalar(select(BillingEvent).where(
+        BillingEvent.external_event_id == "asaas-PAYMENT_RECEIVED-pay_first_paid"
+    ))
+    assert event.status == "processed"
+    assert event.processed_at is not None
+    await db_session.refresh(professional)
+    assert professional.signup_payment_required is False
+    await db_session.refresh(newer_checkout)
+    assert newer_checkout.status == "incomplete"
+    assert newer_checkout.last_payment_at is None
+    response = await api_client.get(
+        "/api/v1/billing/me",
+        headers={"Authorization": f"Bearer {create_access_token(professional.id)}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["subscriptionStatus"] == "active"
+    assert response.json()["subscription"]["status"] == "active"
+    assert response.json()["subscription"]["lastPaymentAt"].startswith("2026-10-01T00:00:00")
+    assert response.json()["subscription"]["currentPeriodEnd"].startswith("2026-11-01T00:00:00")
 
 
 @pytest.mark.asyncio
