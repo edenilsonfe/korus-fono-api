@@ -973,7 +973,10 @@ def _append_evolutions(story, styles, records: DossierRecords) -> None:
         story.append(Spacer(1, 6))
         return
     for evolution in records.evolutions:
-        parts = [evolution.date.strftime("%d/%m/%Y %H:%M")]
+        recorded_at = evolution.date
+        if recorded_at.tzinfo is None:
+            recorded_at = recorded_at.replace(tzinfo=UTC)
+        parts = [recorded_at.astimezone(_clinic_timezone()).strftime("%d/%m/%Y %H:%M")]
         author = records.author_names.get(evolution.professional_id)
         if author:
             parts.append(escape_paragraph_text(author))

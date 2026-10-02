@@ -534,6 +534,8 @@ async def test_dossier_pdf_period_uses_clinic_local_dates_inclusively(
     text = pdf_all_text(response.content)
     assert "DENTRO-DO-PERIODO-1c1" in text
     assert "DENTRO-DO-PERIODO-1c4" in text
+    assert "31/03/2026 22:00" in text
+    assert "01/03/2026 00:30" in text
     assert "AVALIACAO-NO-LIMITE-1c5" in text
     assert "FORA-DO-PERIODO-1c2" not in text
     assert "FORA-DO-PERIODO-1c3" not in text
