@@ -52,7 +52,7 @@ async def list_evolutions(
     professional: Professional = Depends(require_verified_professional),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_clinical_access(db, patient_id, professional)
+    access = await require_clinical_access(db, patient_id, professional)
     result = await db.execute(
         select(Evolution, Professional)
         .join(Professional, Professional.id == Evolution.professional_id)
@@ -68,6 +68,9 @@ async def list_evolutions(
             title=e.title,
             content=e.content,
             professional=author.name,
+            can_edit=(
+                e.professional_id == professional.id and "clinical:write" in access.permissions
+            ),
         )
         for e, author in result.all()
     ]
@@ -110,6 +113,7 @@ async def create_evolution(
         title=evolution.title,
         content=evolution.content,
         professional=professional.name,
+        can_edit=True,
     )
 
 
@@ -155,6 +159,7 @@ async def update_evolution(
         title=evolution.title,
         content=evolution.content,
         professional=professional.name,
+        can_edit=True,
     )
 
 

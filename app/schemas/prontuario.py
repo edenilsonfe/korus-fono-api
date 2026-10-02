@@ -25,6 +25,7 @@ class EvolutionResponse(CamelModel):
     title: str | None = None
     content: str
     professional: str
+    can_edit: bool = False
 
 
 class AnamneseCreate(CamelModel):
